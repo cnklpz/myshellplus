@@ -186,6 +186,7 @@ fn get_conn_depth(ctx: Arc<Ctx>, host_id: String, depth: u8) -> BoxFuture<'stati
             Ok(c) => {
                 ctx.pool.conns.lock().insert(host_id.clone(), c.clone());
                 emit_state(&ctx, &host_id, "connected", None);
+                spawn_os_probe(ctx.clone(), c.clone());
                 spawn_watch(ctx.clone(), c.clone());
                 Ok(c)
             }
@@ -207,6 +208,24 @@ pub struct Latency {
     pub host_id: String,
     /// Round trip of an SSH ping in ms (None = no reply within 5s).
     pub ms: Option<u32>,
+}
+
+/// Remember the remote OS name (shown on the home cards) after each connect.
+fn spawn_os_probe(ctx: Arc<Ctx>, c: Arc<Conn>) {
+    tokio::spawn(async move {
+        let cmd = ". /etc/os-release 2>/dev/null && echo \"$PRETTY_NAME\" || uname -sr";
+        let Ok(r) = exec::run(&c, cmd, Duration::from_secs(10)).await else { return };
+        let os = r.stdout.lines().next().unwrap_or("").trim().to_string();
+        if os.is_empty() || os.len() > 120 {
+            return;
+        }
+        let mut map: std::collections::HashMap<String, String> = ctx.db.setting("host_os").ok().flatten().unwrap_or_default();
+        if map.get(&c.host_id) != Some(&os) {
+            map.insert(c.host_id.clone(), os);
+            let _ = ctx.db.set_setting("host_os", &map);
+            let _ = ctx.app.emit("host-os", &map);
+        }
+    });
 }
 
 /// Notify the UI when a pooled connection drops, and sample network latency (SSH ping RTT).

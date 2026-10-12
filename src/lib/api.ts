@@ -104,6 +104,8 @@ export const api = {
   connDisconnect: (hostId: string) => invoke<void>("conn_disconnect", { hostId }),
   connList: () => invoke<string[]>("conn_list"),
   connLatency: () => invoke<Latency[]>("conn_latency"),
+  /** host id -> remote OS name (learned on connect; live updates via the "host-os" event) */
+  hostOsMap: () => invoke<Record<string, string>>("host_os_map"),
   termOpen: (hostId: string, cols: number, rows: number) => invoke<TermInfo>("term_open", { hostId, cols, rows }),
   /** Output arrives on the channel as ArrayBuffer chunks (buffered output is replayed first). */
   termAttach: (id: string, onData: (data: ArrayBuffer) => void) => {

@@ -206,6 +206,12 @@ fn conn_list(ctx: S) -> Vec<String> {
     ctx.pool.connected_ids()
 }
 
+/// host id -> remote OS name, learned on connect.
+#[tauri::command]
+fn host_os_map(ctx: S) -> HashMap<String, String> {
+    ctx.db.setting("host_os").ok().flatten().unwrap_or_default()
+}
+
 #[tauri::command]
 fn conn_latency(ctx: S) -> Vec<ssh::Latency> {
     ctx.pool.latencies()
@@ -605,7 +611,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             vault_status, vault_setup, vault_unlock, vault_lock, vault_remember, vault_change_password,
             host_list, host_save, host_delete, key_list, key_import, key_generate, key_delete,
-            conn_connect, conn_disconnect, conn_list, conn_latency,
+            conn_connect, conn_disconnect, conn_list, conn_latency, host_os_map,
             term_open, term_attach, term_write, term_resize, term_close, term_list, history_record, history_list, history_delete, exec_run,
             monitor_subscribe, monitor_unsubscribe,
             sftp_list, sftp_read, sftp_write, sftp_mkdir, sftp_rename, sftp_remove, sftp_chmod,

@@ -70,6 +70,7 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "host_list": return hosts;
     case "key_list": return [{ id: "k1", name: "id_ed25519", publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq3xV2o0 ops@laptop", updatedAt: now }];
     case "conn_list": return ["h1", "h4"];
+    case "host_os_map": return { h1: "Ubuntu 24.04.1 LTS", h2: "Ubuntu 24.04.1 LTS", h3: "Debian GNU/Linux 12 (bookworm)", h4: "Alpine Linux v3.24" };
     case "conn_latency": return [{ hostId: "h1", ms: 290 }, { hostId: "h4", ms: 42 }];
     case "term_list": return [];
     case "term_open": {
