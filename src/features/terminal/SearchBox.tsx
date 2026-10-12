@@ -1,7 +1,7 @@
 import type { SearchAddon } from "@xterm/addon-search";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { SEARCH_DECORATIONS } from "./config";
+import { searchDecorations } from "./config";
 
 export function SearchBox(props: { search: SearchAddon; onClose: () => void }) {
   const { search } = props;
@@ -20,7 +20,7 @@ export function SearchBox(props: { search: SearchAddon; onClose: () => void }) {
     };
   }, [search]);
 
-  const opts = (incremental: boolean) => ({ caseSensitive, incremental, decorations: SEARCH_DECORATIONS });
+  const opts = (incremental: boolean) => ({ caseSensitive, incremental, decorations: searchDecorations() });
 
   useEffect(() => {
     if (!q) {

@@ -14,7 +14,8 @@ import { api, errMsg } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
 import { type TermTab, useApp } from "../../store";
 import { AiBar, ExplainCard } from "./AiBar";
-import { refreshAiPredict, TERM_OPTIONS } from "./config";
+import { onThemeChange, termTheme } from "../../lib/themes";
+import { refreshAiPredict, savedFontSize, TERM_OPTIONS } from "./config";
 import { reopenTerminal } from "./open";
 import { PredictPopup } from "./PredictPopup";
 import { type PopupState, Predictor } from "./predictor";
@@ -78,6 +79,15 @@ export function XTermView(props: {
     let disposed = false;
 
     const term = new Terminal(TERM_OPTIONS);
+    // Live theme / font size changes from 设置 → 外观.
+    const unTheme = onThemeChange((t) => {
+      term.options.theme = termTheme(t);
+    });
+    const onFont = () => {
+      term.options.fontSize = savedFontSize();
+      if (hostEl.offsetParent !== null) fitAddon.fit();
+    };
+    window.addEventListener("term-font-change", onFont);
     const fitAddon = new FitAddon();
     const search = new SearchAddon({ highlightLimit: 500 });
     term.loadAddon(fitAddon);
@@ -256,6 +266,8 @@ export function XTermView(props: {
       hostEl.removeEventListener("contextmenu", onContextMenu);
       unregister();
       predictor.dispose();
+      unTheme();
+      window.removeEventListener("term-font-change", onFont);
       subs.forEach((s) => s.dispose());
       inst.current = null;
       term.dispose();

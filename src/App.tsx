@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
-import { Activity, Bot, FolderOpen, Layers, Lock, Network, ScrollText, Settings, SquareTerminal, X } from "lucide-react";
+import { Activity, FolderOpen, ScrollText, X } from "lucide-react";
 import { useEffect } from "react";
+import { Titlebar } from "./components/Titlebar";
 import { Toasts } from "./components/ui";
 import { AgentView } from "./features/agent/AgentView";
 import { PromptCenter } from "./features/agent/PromptCenter";
@@ -16,16 +17,8 @@ import { TerminalArea } from "./features/terminal/TerminalArea";
 import { TunnelsView } from "./features/tunnels/TunnelsView";
 import { VaultGate } from "./features/vault/VaultGate";
 import { api, type ConnState } from "./lib/api";
-import { type SidePanel, type View, useApp } from "./store";
+import { type SidePanel, useApp } from "./store";
 import "./App.css";
-
-const NAV: { view: View; icon: typeof SquareTerminal; label: string }[] = [
-  { view: "terminal", icon: SquareTerminal, label: "终端" },
-  { view: "batch", icon: Layers, label: "批量执行" },
-  { view: "tunnels", icon: Network, label: "隧道" },
-  { view: "agent", icon: Bot, label: "Agent" },
-  { view: "settings", icon: Settings, label: "设置" },
-];
 
 const PANELS: { id: Exclude<SidePanel, null>; icon: typeof Activity; label: string }[] = [
   { id: "monitor", icon: Activity, label: "状态" },
@@ -51,7 +44,6 @@ async function bootstrap() {
 export default function App() {
   const vault = useApp((s) => s.vault);
   const view = useApp((s) => s.view);
-  const setView = useApp((s) => s.setView);
   const sidePanel = useApp((s) => s.sidePanel);
   const setSidePanel = useApp((s) => s.setSidePanel);
   const panelHostId = useApp((s) => s.panelHostId);
@@ -60,8 +52,6 @@ export default function App() {
   const panelHost = useApp((s) => s.hosts.find((h) => h.id === s.panelHostId));
 
   useEffect(() => {
-    const theme = localStorageGet("theme");
-    if (theme) document.documentElement.dataset.theme = theme;
     bootstrap();
     // Watchdog heartbeat: the backend reloads the webview if this stops while the window is visible.
     api.uiHeartbeat();
@@ -81,26 +71,9 @@ export default function App() {
   const showSide = view === "terminal" && sidePanel !== null;
 
   return (
-    <div className={"app" + (showSide ? " with-side" : "")}>
-      <nav className="nav-rail">
-        {NAV.map((n) => (
-          <button key={n.view} className={"icon-btn md" + (view === n.view ? " active" : "")} title={n.label} onClick={() => setView(n.view)}>
-            <n.icon />
-          </button>
-        ))}
-        <span className="spacer" />
-        <button
-          className="icon-btn md"
-          title="锁定"
-          onClick={async () => {
-            await api.vaultLock();
-            await useApp.getState().refreshVault();
-          }}
-        >
-          <Lock />
-        </button>
-      </nav>
-
+    <div className="shell">
+      <Titlebar />
+      <div className={"app" + (showSide ? " with-side" : "")}>
       <aside className="sidebar">
         <HostSidebar />
       </aside>
@@ -159,6 +132,8 @@ export default function App() {
         </aside>
       )}
 
+      </div>
+
       {editingHost !== null && <HostEditor />}
       {importOpen && <ImportDialog />}
       <PromptCenter />
@@ -166,12 +141,4 @@ export default function App() {
       {locked && <VaultGate />}
     </div>
   );
-}
-
-function localStorageGet(k: string): string | null {
-  try {
-    return localStorage.getItem(k);
-  } catch {
-    return null;
-  }
 }

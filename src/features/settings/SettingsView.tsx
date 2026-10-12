@@ -8,6 +8,7 @@ import { Dialog, Field, Toggle, toast } from "../../components/ui";
 import { type AiProvider, type AiSettings, api, errMsg } from "../../lib/api";
 import { useApp } from "../../store";
 import "./settings.css";
+import { applyTheme, currentTheme, THEMES } from "../../lib/themes";
 
 type Section = "ai" | "security" | "appearance" | "backup" | "sync" | "about";
 
@@ -416,37 +417,49 @@ function lsSet(k: string, v: string) {
 }
 
 function AppearanceSection() {
-  const [theme, setTheme] = useState<"dark" | "light">(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+  const [themeId, setThemeId] = useState(currentTheme().id);
   const [fontSize, setFontSize] = useState(lsGet("termFontSize") ?? "14");
 
-  const applyTheme = (t: "dark" | "light") => {
-    setTheme(t);
-    if (t === "light") document.documentElement.dataset.theme = "light";
-    else delete document.documentElement.dataset.theme;
-    lsSet("theme", t);
+  const pick = (id: string) => {
+    setThemeId(id);
+    applyTheme(id);
   };
   const applyFont = (v: string) => {
     setFontSize(v);
     lsSet("termFontSize", v);
+    window.dispatchEvent(new Event("term-font-change"));
   };
 
   return (
     <>
       <Title text="外观" />
-      <div className="card set-card">
-        <Field label="主题">
-          <Seg
-            value={theme}
-            options={[
-              { value: "dark", label: "深色" },
-              { value: "light", label: "浅色" },
-            ]}
-            onChange={applyTheme}
-          />
-        </Field>
-        <Field label="终端字号" hint="新打开的终端生效">
+      <div className="theme-grid">
+        {THEMES.map((t) => (
+          <button key={t.id} className={"theme-tile" + (t.id === themeId ? " on" : "")} onClick={() => pick(t.id)}>
+            <div className="theme-preview" style={{ background: t.ui.chrome }}>
+              <div className="tp-side" />
+              <div className="tp-main" style={{ background: t.ui.bg0 }}>
+                <span style={{ background: t.ansi[2], width: "38%" }} />
+                <span style={{ background: t.ui.fg2, width: "62%" }} />
+                <span style={{ background: t.ansi[4], width: "48%" }} />
+                <span style={{ background: t.ui.accent, width: "22%" }} />
+              </div>
+            </div>
+            <div className="theme-name">
+              <span>{t.name}</span>
+              <span className="theme-dots">
+                {[t.ui.accent, t.ansi[1], t.ansi[2], t.ansi[3]].map((c) => (
+                  <i key={c} style={{ background: c }} />
+                ))}
+              </span>
+            </div>
+          </button>
+        ))}
+      </div>
+      <div className="card set-card" style={{ marginTop: "var(--sp-4)" }}>
+        <Field label="终端字号">
           <select className="select" style={{ width: 120 }} value={fontSize} onChange={(e) => applyFont(e.target.value)}>
-            {["13", "14", "15", "16"].map((n) => (
+            {["12", "13", "14", "15", "16", "18"].map((n) => (
               <option key={n} value={n}>
                 {n} px
               </option>

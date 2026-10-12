@@ -1,25 +1,57 @@
+/* Window frame: dark chrome around a single raised content surface. */
+.shell { display: flex; flex-direction: column; height: 100%; background: var(--chrome); }
+
+.titlebar {
+  display: flex; align-items: center; gap: var(--sp-1);
+  height: 40px; flex: none; padding-left: var(--sp-4);
+}
+.tb-brand { display: flex; align-items: center; gap: var(--sp-2); width: 232px; flex: none; font-weight: 600; letter-spacing: -0.01em; }
+.tb-mark { width: 18px; height: 18px; flex: none; }
+.tb-mark rect { fill: var(--accent); }
+.tb-mark path { fill: none; stroke: var(--accent-fg); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tb-nav { display: flex; align-items: center; gap: 2px; }
+.tb-nav > button {
+  height: 28px; padding: 0 var(--sp-3); border: none; border-radius: var(--radius-md);
+  background: transparent; color: var(--fg-2); font-size: var(--fs-md); font-weight: 500; cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.tb-nav > button:hover { color: var(--fg-0); }
+.tb-nav > button.on { color: var(--fg-0); background: var(--bg-3); }
+.tb-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 40px; border: none; background: transparent; color: var(--fg-1); cursor: pointer; flex: none;
+}
+.tb-btn:hover { background: var(--bg-3); color: var(--fg-0); }
+.tb-btn.close:hover { background: #e5484d; color: #fff; }
+.tb-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.2; }
+.tb-btn > .lucide { width: 15px; height: 15px; stroke-width: 1.75; }
+.tb-sep { width: 1px; height: 16px; background: var(--line-strong); margin: 0 var(--sp-1); }
+
 .app {
   display: grid;
-  grid-template-columns: 48px 248px minmax(0, 1fr);
-  height: 100%;
+  grid-template-columns: 248px minmax(0, 1fr);
+  flex: 1 1 auto; min-height: 0;
+  padding: 0 var(--sp-2) var(--sp-2) 0;
+  gap: var(--sp-2);
 }
-.app.with-side { grid-template-columns: 48px 248px minmax(0, 1fr) 360px; }
+.app.with-side { grid-template-columns: 248px minmax(0, 1fr) 360px; }
 
-.nav-rail {
-  display: flex; flex-direction: column; align-items: center; gap: var(--sp-1);
-  padding: var(--sp-2) 0; background: var(--bg-1); border-right: 1px solid var(--line);
+.sidebar { display: flex; flex-direction: column; min-height: 0; background: var(--chrome); }
+.main, .side {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  background: var(--bg-0); border-radius: var(--radius-lg); overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
-.sidebar { display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); border-right: 1px solid var(--line); }
-.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-0); }
+.side { background: var(--bg-1); }
 .view { position: relative; flex: 1 1 auto; min-height: 0; flex-direction: column; }
-.side { border-left: 1px solid var(--line); min-width: 0; }
 .side-toggles {
-  position: absolute; top: 40px; right: var(--sp-2); z-index: 5;
-  display: flex; flex-direction: column; gap: var(--sp-1);
-  padding: var(--sp-1); background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius-md);
+  position: absolute; top: 46px; right: var(--sp-2); z-index: 5;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 3px; background: var(--bg-2); border-radius: var(--radius-md); box-shadow: var(--shadow);
 }
+
 /* Full-page views (batch, tunnels, agent, settings) */
 .page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-.page-header { display: flex; align-items: center; gap: var(--sp-2); height: 48px; padding: 0 var(--sp-4); border-bottom: 1px solid var(--line); flex: none; background: var(--bg-1); }
-.page-header h1 { font-size: var(--fs-lg); font-weight: 600; margin: 0; }
-.page-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-4); }
+.page-header { display: flex; align-items: center; gap: var(--sp-2); height: 56px; padding: 0 var(--sp-6); flex: none; }
+.page-header h1 { font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.page-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-2) var(--sp-6) var(--sp-6); }
