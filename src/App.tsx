@@ -1,6 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
-import { Activity, FolderOpen, ScrollText, X } from "lucide-react";
+import { Activity, FolderOpen, PanelRightClose, ScrollText } from "lucide-react";
 import { useEffect } from "react";
+import { PageModal } from "./components/PageModal";
+import { Sidebar } from "./components/Sidebar";
 import { Titlebar } from "./components/Titlebar";
 import { Toasts } from "./components/ui";
 import { AgentView } from "./features/agent/AgentView";
@@ -8,7 +10,7 @@ import { PromptCenter } from "./features/agent/PromptCenter";
 import { BatchView } from "./features/batch/BatchView";
 import { FilesPanel } from "./features/files/FilesPanel";
 import { HostEditor } from "./features/hosts/HostEditor";
-import { HostSidebar } from "./features/hosts/HostSidebar";
+import { HomeView } from "./features/home/HomeView";
 import { ImportDialog } from "./features/import/ImportDialog";
 import { MonitorPanel } from "./features/monitor/MonitorPanel";
 import { SettingsView } from "./features/settings/SettingsView";
@@ -17,7 +19,7 @@ import { TerminalArea } from "./features/terminal/TerminalArea";
 import { TunnelsView } from "./features/tunnels/TunnelsView";
 import { VaultGate } from "./features/vault/VaultGate";
 import { api, type ConnState, type Latency } from "./lib/api";
-import { type SidePanel, useApp } from "./store";
+import { type SidePanel, type ToolModal, useApp } from "./store";
 import "./App.css";
 
 const PANELS: { id: Exclude<SidePanel, null>; icon: typeof Activity; label: string }[] = [
@@ -45,12 +47,12 @@ async function bootstrap() {
 export default function App() {
   const vault = useApp((s) => s.vault);
   const view = useApp((s) => s.view);
+  const modal = useApp((s) => s.modal);
   const sidePanel = useApp((s) => s.sidePanel);
   const setSidePanel = useApp((s) => s.setSidePanel);
   const panelHostId = useApp((s) => s.panelHostId);
   const editingHost = useApp((s) => s.editingHost);
   const importOpen = useApp((s) => s.importOpen);
-  const panelHost = useApp((s) => s.hosts.find((h) => h.id === s.panelHostId));
 
   useEffect(() => {
     bootstrap();
@@ -70,77 +72,100 @@ export default function App() {
 
   if (!vault) return null;
   const locked = !vault.unlocked;
-  const showSide = view === "terminal" && sidePanel !== null;
+  const onTerminal = view === "terminal";
+  const showSide = onTerminal && sidePanel !== null;
+  const closeModal = () => useApp.getState().setModal(null);
 
   return (
     <div className="shell">
       <Titlebar />
-      <div className={"app" + (showSide ? " with-side" : "")}>
-      <aside className="sidebar">
-        <HostSidebar />
-      </aside>
+      <div className={"app" + (showSide ? " with-side" : "") + (onTerminal && !showSide ? " with-rail" : "")}>
+        <aside className="sidebar">
+          <Sidebar />
+        </aside>
 
-      <main className="main">
-        {/* Terminals stay mounted while other views are shown so xterm state is kept. */}
-        <div className="view" style={{ display: view === "terminal" ? "flex" : "none" }}>
-          <TerminalArea />
-          {view === "terminal" && sidePanel === null && (
-            <div className="side-toggles">
-              {PANELS.map((p) => (
-                <button key={p.id} className="icon-btn" title={p.label} onClick={() => setSidePanel(p.id)}>
-                  <p.icon />
-                </button>
-              ))}
+        <main className="main">
+          {/* Terminals stay mounted on every page so xterm state is kept. */}
+          <div className="view" style={{ display: onTerminal ? "flex" : "none" }}>
+            <TerminalArea />
+          </div>
+          {view === "home" && (
+            <div className="view" style={{ display: "flex" }}>
+              <HomeView />
             </div>
           )}
-        </div>
-        {/* Batch stays mounted so a running batch and its history survive view switches. */}
-        <div className="view" style={{ display: view === "batch" ? "flex" : "none" }}>
-          <BatchView />
-        </div>
-        {view === "tunnels" && <TunnelsView />}
-        {view === "agent" && <AgentView />}
-        {view === "settings" && <SettingsView />}
-      </main>
+        </main>
 
-      {showSide && (
-        <aside className="side panel">
-          <div className="panel-header">
-            <div className="seg">
+        {showSide && (
+          <aside className="side">
+            <div className="side-tabs">
               {PANELS.map((p) => (
                 <button key={p.id} className={sidePanel === p.id ? "on" : ""} onClick={() => setSidePanel(p.id)}>
-                  {p.label}
+                  <p.icon />
+                  <span>{p.label}</span>
                 </button>
               ))}
+              <button className="side-collapse" title="收起" onClick={() => setSidePanel(null)}>
+                <PanelRightClose />
+              </button>
             </div>
-            <span className="grow ellipsis faint" style={{ fontWeight: 400, fontSize: "var(--fs-sm)" }}>
-              {panelHost?.name}
-            </span>
-            <button className="icon-btn" title="收起" onClick={() => setSidePanel(null)}>
-              <X />
-            </button>
-          </div>
-          {sidePanel === "snippets" ? (
-            <SnippetsPanel hostId={panelHostId} />
-          ) : panelHostId ? (
-            sidePanel === "monitor" ? (
-              <MonitorPanel key={panelHostId} hostId={panelHostId} />
-            ) : (
-              <FilesPanel key={panelHostId} hostId={panelHostId} />
-            )
-          ) : (
-            <div className="empty">打开一个终端后显示该服务器的{sidePanel === "monitor" ? "状态" : "文件"}</div>
-          )}
-        </aside>
-      )}
+            <div className="side-body">
+              {sidePanel === "snippets" ? (
+                <SnippetsPanel hostId={panelHostId} />
+              ) : panelHostId ? (
+                sidePanel === "monitor" ? (
+                  <MonitorPanel key={panelHostId} hostId={panelHostId} />
+                ) : (
+                  <FilesPanel key={panelHostId} hostId={panelHostId} />
+                )
+              ) : (
+                <div className="empty">未选择服务器</div>
+              )}
+            </div>
+          </aside>
+        )}
 
+        {onTerminal && !showSide && (
+          <aside className="side-rail">
+            {PANELS.map((p) => (
+              <button key={p.id} className="side-rail-btn" title={p.label} onClick={() => setSidePanel(p.id)}>
+                <p.icon />
+              </button>
+            ))}
+          </aside>
+        )}
       </div>
+
+      {(["batch", "tunnels", "snippets", "agent", "settings"] as ToolModal[]).map((m) => (
+        <PageModal key={m} open={modal === m} onClose={closeModal} width={m === "snippets" ? 720 : 1120}>
+          {m === "batch" && <BatchView />}
+          {m === "tunnels" && modal === m && <TunnelsView />}
+          {m === "snippets" && modal === m && <SnippetsModal />}
+          {m === "agent" && modal === m && <AgentView />}
+          {m === "settings" && modal === m && <SettingsView />}
+        </PageModal>
+      ))}
 
       {editingHost !== null && <HostEditor />}
       {importOpen && <ImportDialog />}
       <PromptCenter />
       <Toasts />
       {locked && <VaultGate />}
+    </div>
+  );
+}
+
+/** Snippets as a full page inside the modal. */
+function SnippetsModal() {
+  const hostId = useApp((s) => s.panelHostId);
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h1>片段</h1>
+      </div>
+      <div className="snippets-modal-body">
+        <SnippetsPanel hostId={hostId} />
+      </div>
     </div>
   );
 }

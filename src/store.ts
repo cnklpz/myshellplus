@@ -2,7 +2,10 @@
 import { create } from "zustand";
 import { api, type ConnState, type Host, type VaultStatus } from "./lib/api";
 
-export type View = "terminal" | "batch" | "tunnels" | "agent" | "settings";
+/** Main pages switched from the sidebar. */
+export type View = "home" | "terminal";
+/** Tools opened as large modals from the sidebar footer. */
+export type ToolModal = "batch" | "tunnels" | "snippets" | "agent" | "settings";
 export type SidePanel = "monitor" | "files" | "snippets" | null;
 
 export interface TermTab {
@@ -24,6 +27,9 @@ interface AppState {
   tabs: TermTab[];
   activeTab: string | null;
   view: View;
+  modal: ToolModal | null;
+  /** Terminal page group filter ("" = all) */
+  termGroup: string;
   sidePanel: SidePanel;
   /** Host shown in the side panel (defaults to the active tab's host) */
   panelHostId: string | null;
@@ -37,6 +43,8 @@ interface AppState {
   setConn: (s: ConnState) => void;
   setLatency: (hostId: string, ms: number | null) => void;
   setView: (v: View) => void;
+  setModal: (m: ToolModal | null) => void;
+  setTermGroup: (g: string) => void;
   setSidePanel: (p: SidePanel) => void;
   setPanelHost: (id: string | null) => void;
   addTab: (t: TermTab) => void;
@@ -58,7 +66,9 @@ export const useApp = create<AppState>((set, get) => ({
   latency: {},
   tabs: [],
   activeTab: null,
-  view: "terminal",
+  view: "home",
+  modal: null,
+  termGroup: "",
   sidePanel: "monitor",
   panelHostId: null,
   toasts: [],
@@ -70,6 +80,8 @@ export const useApp = create<AppState>((set, get) => ({
   setConn: (s) => set({ conn: { ...get().conn, [s.hostId]: s } }),
   setLatency: (hostId, ms) => set({ latency: { ...get().latency, [hostId]: ms } }),
   setView: (view) => set({ view }),
+  setModal: (modal) => set({ modal }),
+  setTermGroup: (termGroup) => set({ termGroup }),
   setSidePanel: (sidePanel) => set({ sidePanel }),
   setPanelHost: (panelHostId) => set({ panelHostId }),
   addTab: (t) => set({ tabs: [...get().tabs, t], activeTab: t.id, view: "terminal", panelHostId: t.hostId }),

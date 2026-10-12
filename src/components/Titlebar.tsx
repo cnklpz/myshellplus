@@ -3,15 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Lock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { type View, useApp } from "../store";
-
-const VIEWS: { view: View; label: string }[] = [
-  { view: "terminal", label: "终端" },
-  { view: "batch", label: "批量" },
-  { view: "tunnels", label: "隧道" },
-  { view: "agent", label: "Agent" },
-  { view: "settings", label: "设置" },
-];
+import { useApp } from "../store";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 
@@ -24,8 +16,6 @@ function win() {
 }
 
 export function Titlebar() {
-  const view = useApp((s) => s.view);
-  const setView = useApp((s) => s.setView);
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -48,14 +38,6 @@ export function Titlebar() {
         </svg>
         <span data-tauri-drag-region>MyShell+</span>
       </div>
-
-      <nav className="tb-nav">
-        {VIEWS.map((v) => (
-          <button key={v.view} className={view === v.view ? "on" : ""} onClick={() => setView(v.view)}>
-            {v.label}
-          </button>
-        ))}
-      </nav>
 
       <div className="spacer" data-tauri-drag-region />
 

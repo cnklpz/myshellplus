@@ -6,22 +6,18 @@ import { useApp } from "../store";
 // Open dialogs, innermost last: only the topmost one reacts to Esc.
 const dialogStack: symbol[] = [];
 
-export function Dialog(props: {
-  title: ReactNode;
-  width?: number;
-  onClose: () => void;
-  footer?: ReactNode;
-  children: ReactNode;
-}) {
-  const onClose = useRef(props.onClose);
-  onClose.current = props.onClose;
+/** Close on Esc, but only when this is the topmost dialog/modal. */
+export function useEscClose(onClose: () => void, enabled = true) {
+  const ref = useRef(onClose);
+  ref.current = onClose;
   useEffect(() => {
+    if (!enabled) return;
     const me = Symbol();
     dialogStack.push(me);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && dialogStack[dialogStack.length - 1] === me) {
         e.stopPropagation();
-        onClose.current();
+        ref.current();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -29,7 +25,17 @@ export function Dialog(props: {
       window.removeEventListener("keydown", onKey);
       dialogStack.splice(dialogStack.indexOf(me), 1);
     };
-  }, []);
+  }, [enabled]);
+}
+
+export function Dialog(props: {
+  title: ReactNode;
+  width?: number;
+  onClose: () => void;
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  useEscClose(props.onClose);
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
       <div className="dialog" style={{ width: props.width ?? 520 }}>
