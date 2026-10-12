@@ -560,8 +560,8 @@ function AppearanceSection() {
               <div className="theme-name">
                 <span>{t.name}</span>
                 <span className="theme-dots">
-                  {[t.ui.accent, t.ansi[1], t.ansi[2], t.ansi[3]].map((c) => (
-                    <i key={c} style={{ background: c }} />
+                  {[t.ui.accent, t.ansi[1], t.ansi[2], t.ansi[3]].map((c, i) => (
+                    <i key={i} style={{ background: c }} />
                   ))}
                 </span>
               </div>

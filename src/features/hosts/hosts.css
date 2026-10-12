@@ -82,7 +82,7 @@
 .he-tile > svg { width: var(--icon-lg); height: var(--icon-lg); }
 .he-preview-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .he-preview-name { font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; color: var(--fg-0); }
-.he-preview-name.empty { color: var(--fg-2); }
+.he-preview-name.is-empty { color: var(--fg-2); }
 .he-preview-addr { font-size: var(--fs-xs); color: var(--fg-1); }
 .he-preview-group { font-size: var(--fs-xs); color: var(--fg-2); }
 

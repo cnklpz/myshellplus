@@ -23,7 +23,7 @@ export async function shot(page, name) {
   await page.screenshot({ path: `shots/${name}.png` });
 }
 
-export function makeRunner() {
+export function makeRunner(onFail) {
   const results = [];
   async function step(name, fn) {
     const t = Date.now();
@@ -33,6 +33,7 @@ export function makeRunner() {
       console.log(`PASS  ${name.padEnd(34)} ${String(Date.now() - t).padStart(6)}ms  ${detail ?? ""}`);
     } catch (e) {
       results.push({ name, ok: false });
+      if (onFail) await onFail(name).catch(() => {});
       console.log(`FAIL  ${name.padEnd(34)} ${String(Date.now() - t).padStart(6)}ms  ${String(e.message).split("\n")[0]}`);
     }
   }

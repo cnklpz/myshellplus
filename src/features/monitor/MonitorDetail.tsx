@@ -413,7 +413,7 @@ interface NetData {
   listen: Listen[];
 }
 
-const NET_CMD = `ss -s 2>/dev/null; echo ${SEP}; ss -tulnpH 2>/dev/null || netstat -tulnp 2>/dev/null`;
+const NET_CMD = `ss -s 2>/dev/null || cat /proc/net/sockstat 2>/dev/null; echo ${SEP}; ss -tulnpH 2>/dev/null || netstat -tulnp 2>/dev/null`;
 
 function splitAddr(s: string): [string, number] {
   const i = s.lastIndexOf(":");
@@ -438,6 +438,17 @@ function parseNet(out: string): NetData {
       }
     }
     if (/^(Transport|RAW|UDP|TCP|INET|FRAG)\s/.test(l) && !/^TCP:/.test(l)) summary.table.push(fields(l));
+    // /proc/net/sockstat fallback (no iproute2, e.g. busybox):
+    //   sockets: used 120 / TCP: inuse 5 orphan 0 tw 2 alloc 7 mem 1 / UDP: inuse 2 mem 0
+    m = /^sockets:\s*used\s+(\d+)/.exec(l);
+    if (m) summary.total = Number(m[1]);
+    m = /^(TCP6?|UDP6?|RAW6?):\s+inuse\s+(\d+)(.*)$/.exec(l);
+    if (m) {
+      if (m[1] === "TCP") summary.tcp = Number(m[2]);
+      if (m[1] === "TCP") {
+        for (const mm of m[3].matchAll(/(orphan|tw|alloc)\s+(\d+)/g)) summary.pairs.push([mm[1], Number(mm[2])]);
+      } else summary.pairs.push([m[1].toLowerCase(), Number(m[2])]);
+    }
   }
 
   const listen: Listen[] = [];
@@ -445,10 +456,11 @@ function parseNet(out: string): NetData {
     const f = fields(l);
     if (/^(Proto|Active|Netid|State)/.test(f[0])) continue;
     if (/^(tcp|udp)/.test(f[0]) && f.length >= 5 && /^\d+$/.test(f[1]) && /^\d+$/.test(f[2])) {
-      // netstat: Proto Recv-Q Send-Q Local Foreign [State] PID/Program
+      // netstat: Proto Recv-Q Send-Q Local Foreign [State] PID/Program (program may contain spaces; UDP has no State)
       const [addr, port] = splitAddr(f[3]);
-      const [pid, ...nm] = f[f.length - 1].split("/");
-      listen.push({ proto: f[0], addr, port, proc: nm.length ? `${nm.join("/")}(${pid})` : "-" });
+      const rest = f.slice(/^[A-Z_]+$/.test(f[5] ?? "") ? 6 : 5).join(" ");
+      const pm = /^(\d+)\/([^:\s]+)/.exec(rest);
+      listen.push({ proto: f[0], addr, port, proc: pm ? `${pm[2]}(${pm[1]})` : "-" });
     } else if (/^(tcp|udp)$/.test(f[0]) && f.length >= 6) {
       // ss -tulnpH: Netid State Recv-Q Send-Q Local Peer [Process]
       const [addr, port] = splitAddr(f[4]);

@@ -37,7 +37,8 @@ export function Sparkline(props: {
   fill?: boolean;
 }) {
   const h = props.height ?? 32;
-  const slots = Math.max(2, props.slots ?? 60);
+  const dataLen = Math.max(0, ...props.series.map((s) => s.values.length));
+  const slots = Math.max(2, Math.min(props.slots ?? 60, Math.max(10, dataLen)));
   const gid = useId().replace(/:/g, "");
   let max = props.max ?? 0;
   if (props.max === undefined) {

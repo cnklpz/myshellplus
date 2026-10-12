@@ -272,7 +272,7 @@ export function HostEditor() {
                   <Server />
                 </div>
                 <div className="he-preview-text">
-                  <div className={"he-preview-name ellipsis" + (pvName ? "" : " empty")}>{pvName || "新服务器"}</div>
+                  <div className={"he-preview-name ellipsis" + (pvName ? "" : " is-empty")}>{pvName || "新服务器"}</div>
                   <div className="he-preview-addr mono ellipsis">{pvAddr}</div>
                   <div className="he-preview-group ellipsis">{h.groupName.trim() || "未分组"}</div>
                 </div>

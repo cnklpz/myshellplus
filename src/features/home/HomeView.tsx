@@ -292,7 +292,7 @@ function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefine
         </div>
       )}
 
-      <div className={"home-notes ellipsis" + (note ? "" : " empty")} title={note ? h.notes : undefined}>
+      <div className={"home-notes ellipsis" + (note ? "" : " is-empty")} title={note ? h.notes : undefined}>
         {note || "暂无备注"}
       </div>
 

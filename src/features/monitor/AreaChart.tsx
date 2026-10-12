@@ -62,15 +62,17 @@ export function AreaChart(props: {
   }, []);
 
   const h = props.height ?? 200;
-  const slots = Math.max(2, props.slots ?? 60);
-  const n = Math.min(slots, Math.max(0, ...props.series.map((s) => s.values.length)));
+  // Stretch to the data we have (min 10 slots) so a fresh connection doesn't squeeze into the right edge.
+  const dataLen = Math.max(0, ...props.series.map((s) => s.values.length));
+  const slots = Math.max(2, Math.min(props.slots ?? 60, Math.max(10, dataLen)));
+  const n = Math.min(slots, dataLen);
   let max = props.max ?? 0;
   if (props.max === undefined) {
     for (const s of props.series) for (const v of s.values.slice(-slots)) if (v > max) max = v;
     max = niceCeil(Math.max(max * 1.05, props.floor ?? 1), !!props.bytes);
   }
   const axis = props.axisFmt ?? props.fmt;
-  const bottom = h - 1;
+  const bottom = h - 9; // room for the "0" label below the baseline
   const pw = Math.max(1, w - GUTTER);
   const step = pw / (slots - 1);
   const xAt = (i: number) => GUTTER + (slots - n + i) * step;
@@ -158,10 +160,17 @@ export function AreaChart(props: {
       </div>
       {props.span && (
         <div className="mon-area-x">
-          <span>{props.span}</span>
+          <span>{spanLabel(props.ts?.slice(-slots)) ?? props.span}</span>
           <span>现在</span>
         </div>
       )}
     </div>
   );
+}
+
+/** "45 秒" / "3 分钟" from the oldest to the newest visible sample. */
+function spanLabel(ts?: number[]): string | null {
+  if (!ts || ts.length < 2) return null;
+  const sec = Math.round((ts[ts.length - 1] - ts[0]) / 1000);
+  return sec < 90 ? `${sec} 秒` : `${Math.round(sec / 60)} 分钟`;
 }

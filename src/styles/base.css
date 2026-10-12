@@ -315,3 +315,6 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-xs); padding: 1px var(-
 .gs-sub { flex: 1 1 0; margin-left: auto; text-align: right; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--fg-2); }
 .gs-empty { padding: var(--sp-4); text-align: center; color: var(--fg-2); }
 .gs-foot { position: sticky; bottom: 0; display: flex; gap: var(--sp-4); padding: var(--sp-2) var(--sp-3); margin-top: var(--sp-1); background: var(--bg-2); box-shadow: inset 0 1px 0 var(--line); font-size: var(--fs-xs); color: var(--fg-2); }
+
+/* WebView2 adds its own reveal/clear buttons to inputs; we provide our own. */
+input::-ms-reveal, input::-ms-clear { display: none; }

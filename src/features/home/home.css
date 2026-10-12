@@ -79,7 +79,7 @@
 }
 
 .home-notes { margin-top: var(--sp-3); font-size: var(--fs-sm); color: var(--fg-1); line-height: 20px; }
-.home-notes.empty, .home-tags-empty { color: var(--fg-2); }
+.home-notes.is-empty, .home-tags-empty { color: var(--fg-2); }
 
 /* Tags wrap to at most two rows (20px + 4px gap + 20px). */
 .home-tags {
