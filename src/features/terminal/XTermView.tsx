@@ -343,6 +343,14 @@ export function XTermView(props: {
     // One terminal per session id; hostId never changes for a given session.
   }, [tab.id]);
 
+  // Global search "批量执行" targets the visible terminal.
+  useEffect(() => {
+    if (!active) return;
+    const open = () => setBatchOpen("");
+    window.addEventListener("msp:open-batch", open);
+    return () => window.removeEventListener("msp:open-batch", open);
+  }, [active]);
+
   // Becoming visible: fit to the (possibly changed) size and take focus.
   useEffect(() => {
     if (!active) return;

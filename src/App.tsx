@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { Activity, FolderOpen, PanelRightClose, ScrollText } from "lucide-react";
 import { useEffect } from "react";
+import { GlobalContextMenu } from "./components/GlobalContextMenu";
 import { PageModal } from "./components/PageModal";
 import { Sidebar } from "./components/Sidebar";
 import { Titlebar } from "./components/Titlebar";
@@ -149,6 +150,7 @@ export default function App() {
       {editingHost !== null && <HostEditor />}
       {importOpen && <ImportDialog />}
       <PromptCenter />
+      <GlobalContextMenu />
       <Toasts />
       {locked && <VaultGate />}
     </div>

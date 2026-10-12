@@ -28,6 +28,8 @@ interface AppState {
   activeTab: string | null;
   view: View;
   modal: ToolModal | null;
+  /** Settings page to show when the settings modal opens */
+  settingsSection: string | null;
   /** Terminal page group filter ("" = all) */
   termGroup: string;
   sidePanel: SidePanel;
@@ -44,6 +46,7 @@ interface AppState {
   setLatency: (hostId: string, ms: number | null) => void;
   setView: (v: View) => void;
   setModal: (m: ToolModal | null) => void;
+  openSettings: (section: string) => void;
   setTermGroup: (g: string) => void;
   setSidePanel: (p: SidePanel) => void;
   setPanelHost: (id: string | null) => void;
@@ -68,6 +71,7 @@ export const useApp = create<AppState>((set, get) => ({
   activeTab: null,
   view: "home",
   modal: null,
+  settingsSection: null,
   termGroup: "",
   sidePanel: "monitor",
   panelHostId: null,
@@ -81,6 +85,7 @@ export const useApp = create<AppState>((set, get) => ({
   setLatency: (hostId, ms) => set({ latency: { ...get().latency, [hostId]: ms } }),
   setView: (view) => set({ view }),
   setModal: (modal) => set({ modal }),
+  openSettings: (settingsSection) => set({ modal: "settings", settingsSection }),
   setTermGroup: (termGroup) => set({ termGroup }),
   setSidePanel: (sidePanel) => set({ sidePanel }),
   setPanelHost: (panelHostId) => set({ panelHostId }),

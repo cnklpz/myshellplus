@@ -3,7 +3,7 @@ import type { ITerminalOptions } from "@xterm/xterm";
 import { api } from "../../lib/api";
 import { currentTheme, termTheme } from "../../lib/themes";
 
-export const TERM_FONT = '"JetBrains Mono Variable","JetBrains Mono","Cascadia Mono",Consolas,"Microsoft YaHei Mono",monospace';
+export const TERM_FONT = '"JetBrains Mono Variable","Noto Sans SC Variable","Cascadia Mono",Consolas,monospace';
 
 /** Font size chosen in 设置 → 外观 (applies to newly opened terminals). */
 export function savedFontSize(): number {

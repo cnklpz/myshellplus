@@ -2,6 +2,7 @@
    fixed control heights, tabular numbers. Never hard-code spacing — use --sp-*. */
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/noto-sans-sc";
 
 :root {
   --sp-1: 4px;
@@ -22,8 +23,9 @@
   --radius-md: 8px;
   --radius-lg: 12px;
 
-  --font-ui: "Inter Variable", "Inter", "Segoe UI Variable Text", "Microsoft YaHei UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Mono", Consolas, "Microsoft YaHei Mono", monospace;
+  /* Latin/digits: Inter; CJK: Noto Sans SC (Source Han Sans), loaded per unicode range on demand. */
+  --font-ui: "Inter Variable", "Noto Sans SC Variable", "Segoe UI Variable Text", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "Noto Sans SC Variable", "Cascadia Mono", Consolas, monospace;
   --fs-xs: 12px;
   --fs-sm: 13px;
   --fs-md: 14px;
@@ -67,8 +69,12 @@ body {
   color: var(--fg-0);
   font-family: var(--font-ui);
   font-size: var(--fs-md);
-  line-height: 1.45;
-  font-feature-settings: "cv11", "ss01";
+  line-height: 1.5;
+  /* Inter: single-storey a, open digits, tabular-friendly; slightly tighter tracking reads crisper at UI sizes */
+  font-feature-settings: "cv11", "ss01", "ss03", "cv05";
+  letter-spacing: 0.005em;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
   overflow: hidden;
   user-select: none;
   -webkit-font-smoothing: antialiased;
@@ -297,24 +303,59 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-xs); padding: 1px var(-
 .crash-msg { margin: 0; max-height: 160px; overflow: auto; padding: var(--sp-3); background: var(--bg-0); border-radius: var(--radius-md); font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--err); white-space: pre-wrap; }
 
 /* ---------- global search (components/GlobalSearch.tsx) ---------- */
-.gs { position: relative; flex: 1 1 auto; min-width: 0; }
-.gs-icon { position: absolute; left: var(--sp-3); top: 50%; transform: translateY(-50%); width: var(--icon-sm); height: var(--icon-sm); color: var(--fg-2); pointer-events: none; }
-.gs-input { padding-left: calc(var(--sp-3) + var(--icon-sm) + var(--sp-2)); }
-.gs-panel {
-  position: fixed; z-index: 250; width: 440px; max-height: min(520px, calc(100vh - 120px)); overflow: auto;
-  padding: var(--sp-1) var(--sp-1) 0; background: var(--bg-2); border-radius: var(--radius-lg); box-shadow: var(--shadow);
-  animation: select-in 0.12s cubic-bezier(0.2, 0.7, 0.2, 1);
+.gs-trigger {
+  display: flex; align-items: center; gap: var(--sp-2); flex: 1 1 auto; min-width: 0;
+  height: var(--h-md); padding: 0 var(--sp-2) 0 var(--sp-3); border: none; border-radius: var(--radius-md);
+  background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--fg-2);
+  font-size: var(--fs-md); cursor: pointer; text-align: left; transition: background 0.12s, color 0.12s;
 }
-.gs-group { height: 28px; display: flex; align-items: flex-end; padding: 0 var(--sp-3) var(--sp-1); font-size: var(--fs-xs); font-weight: 600; color: var(--fg-2); }
-.gs-item { display: flex; align-items: center; gap: var(--sp-3); height: var(--h-md); padding: 0 var(--sp-3); border-radius: var(--radius-md); cursor: pointer; color: var(--fg-1); }
-.gs-item.hi { background: var(--bg-3); color: var(--fg-0); }
-.gs-item-icon { display: inline-flex; flex: none; color: var(--fg-2); }
-.gs-item-icon svg { width: var(--icon-md); height: var(--icon-md); }
-.gs-item.hi .gs-item-icon { color: var(--accent); }
-.gs-title { flex: 0 1 auto; font-size: var(--fs-md); }
-.gs-sub { flex: 1 1 0; margin-left: auto; text-align: right; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--fg-2); }
-.gs-empty { padding: var(--sp-4); text-align: center; color: var(--fg-2); }
-.gs-foot { position: sticky; bottom: 0; display: flex; gap: var(--sp-4); padding: var(--sp-2) var(--sp-3); margin-top: var(--sp-1); background: var(--bg-2); box-shadow: inset 0 1px 0 var(--line); font-size: var(--fs-xs); color: var(--fg-2); }
+.gs-trigger:hover { background: var(--bg-2); color: var(--fg-1); }
+.gs-trigger > svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; }
+.pal-overlay {
+  position: fixed; inset: 0; z-index: 260; display: flex; justify-content: center; align-items: flex-start;
+  padding-top: 12vh; background: color-mix(in srgb, var(--chrome) 55%, transparent); backdrop-filter: blur(3px);
+  animation: pal-fade 0.12s ease-out;
+}
+.pal {
+  width: 680px; max-width: calc(100vw - 48px); max-height: 68vh; display: flex; flex-direction: column;
+  background: var(--bg-1); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden;
+  animation: pal-in 0.16s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes pal-fade { from { opacity: 0; } }
+@keyframes pal-in { from { opacity: 0; transform: translateY(-8px) scale(0.985); } }
+.pal-input-row { display: flex; align-items: center; gap: var(--sp-3); height: 60px; padding: 0 var(--sp-5); box-shadow: inset 0 -1px 0 var(--line); flex: none; }
+.pal-input-row > svg { width: 20px; height: 20px; color: var(--fg-2); flex: none; }
+.pal-input { flex: 1 1 auto; min-width: 0; height: 100%; border: none; outline: none; background: transparent; font-size: var(--fs-lg); color: var(--fg-0); user-select: text; }
+.pal-input::placeholder { color: var(--fg-2); }
+.pal-list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-2); }
+.pal-group { height: 30px; display: flex; align-items: flex-end; padding: 0 var(--sp-3) var(--sp-1); font-size: var(--fs-xs); font-weight: 600; color: var(--fg-2); }
+.pal-item { display: flex; align-items: center; gap: var(--sp-3); height: 40px; padding: 0 var(--sp-3); border-radius: var(--radius-md); cursor: pointer; color: var(--fg-1); }
+.pal-item.hi { background: var(--bg-3); color: var(--fg-0); }
+.pal-icon { display: inline-flex; flex: none; color: var(--fg-2); }
+.pal-icon svg { width: var(--icon-md); height: var(--icon-md); }
+.pal-item.hi .pal-icon { color: var(--accent); }
+.pal-title { flex: 0 1 auto; font-size: var(--fs-md); }
+.pal-sub { flex: 1 1 0; text-align: right; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--fg-2); }
+.pal-empty { padding: var(--sp-8); text-align: center; color: var(--fg-2); }
+.pal-foot { display: flex; align-items: center; gap: var(--sp-5); height: 40px; padding: 0 var(--sp-5); flex: none; background: var(--bg-0); box-shadow: inset 0 1px 0 var(--line); font-size: var(--fs-xs); color: var(--fg-2); }
+.pal-foot kbd, .pal-input-row kbd { margin-right: var(--sp-1); }
 
 /* WebView2 adds its own reveal/clear buttons to inputs; we provide our own. */
 input::-ms-reveal, input::-ms-clear { display: none; }
+
+/* Headings and labels: medium weights look cleaner than bold with CJK glyphs. */
+h1, h2, h3, .page-header h1, .dialog-header, .panel-header { font-weight: 600; letter-spacing: -0.01em; }
+.btn, .tab, .sb-item, .seg > button { letter-spacing: 0.01em; }
+.mono, code, kbd, pre { font-feature-settings: "calt" 1, "zero" 1; letter-spacing: 0; }
+
+/* ---------- shared context menu (terminal, global) ---------- */
+.ctx-menu.gctx { position: fixed; z-index: 400; min-width: 200px; padding: var(--sp-1); background: var(--bg-2); border-radius: var(--radius-md); box-shadow: var(--shadow); animation: select-in 0.1s ease-out; }
+.gctx .ctx-item { display: flex; align-items: center; gap: var(--sp-3); height: var(--h-sm); padding: 0 var(--sp-3) 0 var(--sp-2); border-radius: var(--radius-sm); cursor: pointer; color: var(--fg-0); font-size: var(--fs-md); white-space: nowrap; }
+.gctx .ctx-item:hover { background: var(--bg-3); }
+.gctx .ctx-item.disabled { opacity: 0.4; cursor: default; }
+.gctx .ctx-item.disabled:hover { background: transparent; }
+.gctx .ctx-icon { display: inline-flex; width: var(--icon-md); flex: none; color: var(--fg-2); }
+.gctx .ctx-icon svg { width: var(--icon-md); height: var(--icon-md); }
+.gctx .ctx-label { flex: 1 1 auto; }
+.gctx .ctx-hint { margin-left: var(--sp-6); color: var(--fg-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.gctx .ctx-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--line); }

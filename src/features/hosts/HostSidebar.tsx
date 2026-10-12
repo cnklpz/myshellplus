@@ -62,7 +62,8 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
   const setImportOpen = useApp((s) => s.setImportOpen);
   const setPanelHost = useApp((s) => s.setPanelHost);
 
-  const [query, setQuery] = useState("");
+  // Search lives in the global palette (Ctrl+P); the list itself is unfiltered.
+  const query = "";
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
   const [selected, setSelected] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -151,7 +152,7 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
   return (
     <div className="hs">
       <div className="hs-bar">
-        <GlobalSearch value={query} onChange={setQuery} />
+        <GlobalSearch />
         <button className="icon-btn md" title="新建服务器" onClick={() => openEditor("")}>
           <Plus />
         </button>

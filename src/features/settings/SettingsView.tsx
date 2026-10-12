@@ -24,7 +24,14 @@ const SECTIONS: { id: Section; label: string }[] = [
 ];
 
 export function SettingsView() {
-  const [section, setSection] = useState<Section>("ai");
+  const wanted = useApp((s) => s.settingsSection) as Section | null;
+  const [section, setSection] = useState<Section>(wanted ?? "ai");
+  useEffect(() => {
+    if (wanted) {
+      setSection(wanted);
+      useApp.setState({ settingsSection: null });
+    }
+  }, [wanted]);
   return (
     <div className="page">
       <div className="set-layout">

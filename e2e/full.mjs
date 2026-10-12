@@ -109,17 +109,38 @@ const backToTerm = async () => {
 };
 const invoke = (cmd, args) => page.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
 
-await run("global search: host + action", async () => {
-  await page.getByPlaceholder("搜索  Ctrl+P").click();
+await run("global search palette", async () => {
+  await page.locator(".gs-trigger").click();
+  await page.locator(".pal-input").waitFor();
+  await shot(page, "10a-palette-empty");
   await page.keyboard.type("e2e");
-  await page.locator(".gs-panel .gs-item", { hasText: "e2e-box" }).first().waitFor();
+  await page.locator(".pal-item", { hasText: "e2e-box" }).first().waitFor();
   await shot(page, "10-global-search");
   await page.keyboard.press("Control+a");
-  await page.keyboard.type("设置");
-  await page.locator(".gs-panel .gs-item", { hasText: "设置" }).first().waitFor();
+  await page.keyboard.type("主题");
+  await page.locator(".pal-item", { hasText: "外观 · 主题" }).first().waitFor();
   await page.keyboard.press("Enter");
-  await modal().getByText("AI 服务").first().waitFor();
+  await modal().locator(".theme-tile").first().waitFor();
   await closeModal();
+  await page.keyboard.press("Control+p");
+  await page.locator(".pal-input").waitFor();
+  await page.keyboard.press("Escape");
+  await page.locator(".pal-input").waitFor({ state: "detached" });
+});
+
+await run("global context menu", async () => {
+  await page.locator(".sb-item", { hasText: "首页" }).click();
+  await page.locator(".page").first().click({ button: "right", position: { x: 600, y: 600 } });
+  const m = page.locator(".gctx");
+  await m.waitFor();
+  const t = await m.innerText();
+  if (!t.includes("搜索") || !t.includes("新建服务器")) throw new Error(t);
+  await shot(page, "10b-global-ctx");
+  await page.keyboard.press("Escape");
+  await page.locator(".home-head input, .page-header input").first().click({ button: "right" });
+  const t2 = await page.locator(".gctx").innerText();
+  if (!t2.includes("粘贴") || !t2.includes("全选")) throw new Error(t2);
+  await page.keyboard.press("Escape");
 });
 
 await run("context menu + history", async () => {
@@ -286,7 +307,7 @@ await run("agent: enable MCP + call", async () => {
 await run("import CSV", async () => {
   const fs = await import("node:fs");
   fs.writeFileSync("D:/xm/msp-e2e/hosts.csv", "name,group,host,port,username\nimported-1,导入组,10.9.9.1,22,root\n");
-  await page.locator(".gs-input").click();
+  await page.locator(".gs-trigger").click();
   await page.keyboard.type("导入服务器");
   await page.keyboard.press("Enter");
   const d = page.locator(".dialog", { hasText: "导入" });
