@@ -186,7 +186,6 @@
 
 /* Disks */
 .mon-d-usage { display: grid; grid-template-columns: minmax(0, 1fr) 40px; align-items: center; gap: var(--sp-2); }
-.mon-d-select { width: 240px; }
 .mon-d-hint { font-size: var(--fs-xs); }
 .mon-du { display: flex; flex-direction: column; }
 .mon-du-row { display: grid; grid-template-columns: 64px 160px minmax(0, 1fr); align-items: center; gap: var(--sp-3); height: var(--h-sm); font-size: var(--fs-sm); box-shadow: inset 0 -1px 0 var(--line); }

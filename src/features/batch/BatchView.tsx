@@ -2,6 +2,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { ChevronDown, ChevronRight, Copy, History, Layers, Play, RotateCcw, ScrollText, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Select } from "../../components/Select";
 import { Confirm, Empty, toast } from "../../components/ui";
 import { api, errMsg, type BatchHostResult, type Host, type Snippet } from "../../lib/api";
 import { useApp } from "../../store";
@@ -177,11 +178,14 @@ export function BatchView() {
             />
             <div className="row">
               <label className="faint bt-lbl">超时</label>
-              <select className="select sm bt-timeout" value={timeout} onChange={(e) => setTimeoutSecs(+e.target.value)}>
-                {TIMEOUTS.map((t) => (
-                  <option key={t.v} value={t.v}>{t.label}</option>
-                ))}
-              </select>
+              <Select
+                size="sm"
+                width={112}
+                style={{ flex: "none" }}
+                value={timeout}
+                options={TIMEOUTS.map((t) => ({ value: t.v, label: t.label }))}
+                onChange={setTimeoutSecs}
+              />
               <SnippetMenu onPick={(s) => setCommand((c) => (c.trim() ? c.replace(/\s*$/, "\n") + s.command : s.command))} />
               <span className="spacer" />
               <button className="btn primary sm" disabled={!canRun} onClick={execute} title="Ctrl+Enter">

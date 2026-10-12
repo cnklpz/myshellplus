@@ -4,6 +4,7 @@ import { appDataDir } from "@tauri-apps/api/path";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Lock, Plus, Trash2, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Select } from "../../components/Select";
 import { Dialog, Field, Toggle, toast } from "../../components/ui";
 import { type AiProvider, type AiSettings, api, errMsg } from "../../lib/api";
 import { useApp } from "../../store";
@@ -189,11 +190,7 @@ function AiSection() {
     }
   };
 
-  const providerOptions = s.providers.map((p) => (
-    <option key={p.id} value={p.id}>
-      {p.name || p.id}
-    </option>
-  ));
+  const providerOptions = s.providers.map((p) => ({ value: p.id, label: p.name || p.id }));
 
   return (
     <>
@@ -208,13 +205,7 @@ function AiSection() {
         title="服务"
         actions={
           <>
-            <select className="select sm" style={{ width: 128 }} value={preset} onChange={(e) => setPreset(Number(e.target.value))}>
-              {PRESETS.map((p, i) => (
-                <option key={p.label} value={i}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+            <Select size="sm" width={128} value={preset} options={PRESETS.map((p, i) => ({ value: i, label: p.label }))} onChange={setPreset} />
             <button className="btn sm" onClick={add}>
               <Plus />
               添加
@@ -286,16 +277,20 @@ function AiSection() {
       <Block title="用途">
         <div className="set-group">
           <Field label="默认服务">
-            <select className="select" value={s.active ?? ""} onChange={(e) => update({ active: e.target.value || null })}>
-              <option value="">未选择</option>
-              {providerOptions}
-            </select>
+            <Select
+              width="100%"
+              value={s.active ?? ""}
+              options={[{ value: "", label: "未选择" }, ...providerOptions]}
+              onChange={(v) => update({ active: v || null })}
+            />
           </Field>
           <Field label="预测服务">
-            <select className="select" value={s.predictProvider ?? ""} onChange={(e) => update({ predictProvider: e.target.value || null })}>
-              <option value="">同默认服务</option>
-              {providerOptions}
-            </select>
+            <Select
+              width="100%"
+              value={s.predictProvider ?? ""}
+              options={[{ value: "", label: "同默认服务" }, ...providerOptions]}
+              onChange={(v) => update({ predictProvider: v || null })}
+            />
           </Field>
           <Field label="本地预测">
             <Toggle on={s.predictEnabled} onChange={(v) => update({ predictEnabled: v })} />
@@ -577,13 +572,12 @@ function AppearanceSection() {
       <Block title="终端">
         <div className="set-group">
           <Field label="字号">
-            <select className="select" style={{ width: 120 }} value={fontSize} onChange={(e) => applyFont(e.target.value)}>
-              {["12", "13", "14", "15", "16", "18"].map((n) => (
-                <option key={n} value={n}>
-                  {n} px
-                </option>
-              ))}
-            </select>
+            <Select
+              width={120}
+              value={fontSize}
+              options={["12", "13", "14", "15", "16", "18"].map((n) => ({ value: n, label: `${n} px` }))}
+              onChange={applyFont}
+            />
           </Field>
           <Field label="本地回显">
             <Seg
@@ -598,18 +592,12 @@ function AppearanceSection() {
           </Field>
           {echo.mode === "auto" && (
             <Field label="延迟阈值">
-              <select
-                className="select"
-                style={{ width: 120 }}
+              <Select
+                width={120}
                 value={echo.threshold}
-                onChange={(e) => setEcho({ ...echo, threshold: Number(e.target.value) })}
-              >
-                {[50, 80, 120, 200].map((n) => (
-                  <option key={n} value={n}>
-                    {n} ms
-                  </option>
-                ))}
-              </select>
+                options={[50, 80, 120, 200].map((n) => ({ value: n, label: `${n} ms` }))}
+                onChange={(v) => setEcho({ ...echo, threshold: v })}
+              />
             </Field>
           )}
         </div>

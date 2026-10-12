@@ -22,7 +22,6 @@
 .bt-cmd { min-height: 120px; max-height: 40vh; font-size: var(--fs-md); box-shadow: none; }
 .bt-cmd:focus { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .bt-lbl { font-size: var(--fs-sm); }
-.bt-timeout { width: 112px; flex: none; }
 
 /* status text (no badges) */
 .bt-ok { color: var(--ok); }

@@ -220,7 +220,6 @@
 .cmdbar-input:focus { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
 .cmdbar-input::placeholder { color: var(--fg-2); }
 .cmdbar-tools { flex: none; }
-.cmdbar-select { width: auto; }
 .cmdbar-progress { min-width: 48px; font-size: var(--fs-sm); color: var(--fg-1); font-variant-numeric: tabular-nums; text-align: right; }
 .cmdbar-tools > .icon-btn { color: var(--fg-2); }
 .cmdbar-tools > .icon-btn:hover { color: var(--fg-0); }

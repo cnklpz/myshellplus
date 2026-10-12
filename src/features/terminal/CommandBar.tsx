@@ -1,6 +1,7 @@
 // "批量执行": a dialog with a multi-line editor whose lines are sent to one terminal session. Drafts, recall
 // history and in-progress runs are kept at module level by tab id so they survive closing the dialog.
 import { Play, Square, TriangleAlert } from "lucide-react";
+import { Select } from "../../components/Select";
 import { Dialog } from "../../components/ui";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "../../components/ui";
@@ -230,36 +231,32 @@ export function BatchDialog(props: { tab: TermTab; initialText?: string; onClose
       onClose={props.onClose}
       footer={
         <>
-          <select
-            className="select cmdbar-select"
+          <Select<Mode>
             title="发送方式"
             value={mode}
-            onChange={(e) => {
-              const m = e.target.value as Mode;
+            options={[
+              { value: "line", label: "逐行发送" },
+              { value: "paste", label: "整段粘贴" },
+            ]}
+            onChange={(m) => {
               setMode(m);
               savePref("cmdbar.mode", m);
             }}
-          >
-            <option value="line">逐行发送</option>
-            <option value="paste">整段粘贴</option>
-          </select>
+          />
           {mode === "line" && (
-            <select
-              className="select cmdbar-select num"
+            <Select
+              className="num"
               title="行间隔"
               value={interval}
-              onChange={(e) => {
-                const v = Number(e.target.value);
+              options={INTERVALS.map((ms) => ({
+                value: ms,
+                label: ms === 0 ? "无间隔" : ms < 1000 ? `间隔 ${ms}ms` : `间隔 ${ms / 1000}s`,
+              }))}
+              onChange={(v) => {
                 setIntervalMs(v);
                 savePref("cmdbar.interval", v);
               }}
-            >
-              {INTERVALS.map((ms) => (
-                <option key={ms} value={ms}>
-                  {ms === 0 ? "无间隔" : ms < 1000 ? `间隔 ${ms}ms` : `间隔 ${ms / 1000}s`}
-                </option>
-              ))}
-            </select>
+            />
           )}
           <span className="spacer" />
           <button className="btn ghost" onClick={props.onClose}>

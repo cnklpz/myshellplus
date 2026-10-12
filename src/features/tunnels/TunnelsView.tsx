@@ -2,6 +2,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { Network, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { Select } from "../../components/Select";
 import { Confirm, Dialog, Empty, Field, Toggle, toast } from "../../components/ui";
 import { api, errMsg, type TunnelDef, type TunnelStatus } from "../../lib/api";
 import { fmtBytes } from "../../lib/format";
@@ -255,15 +256,13 @@ function TunnelEditor(props: { initial: Partial<TunnelDef>; onClose: () => void;
           <input className="input" value={name} placeholder="数据库" onChange={(e) => setName(e.target.value)} autoFocus />
         </Field>
         <Field label="服务器">
-          <select className="select" value={hostId} onChange={(e) => setHostId(e.target.value)}>
-            {!hostId && <option value="">选择服务器</option>}
-            {hosts.map((h) => (
-              <option key={h.id} value={h.id}>
-                {h.groupName ? `${h.groupName} / ` : ""}
-                {h.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            width="100%"
+            value={hostId}
+            placeholder="选择服务器"
+            options={hosts.map((h) => ({ value: h.id, label: `${h.groupName ? `${h.groupName} / ` : ""}${h.name}` }))}
+            onChange={setHostId}
+          />
         </Field>
         <Field label="类型" hint={kind === "remote" ? "外部访问需服务器开启 GatewayPorts" : undefined}>
           <div className="seg">

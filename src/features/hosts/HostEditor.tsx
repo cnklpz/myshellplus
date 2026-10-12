@@ -4,6 +4,7 @@ import {
   Ban, Bot, CircleCheck, CircleX, Eye, EyeOff, KeyRound, LoaderCircle, Lock, Network, Palette, Server, X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Select } from "../../components/Select";
 import { toast, useEscClose } from "../../components/ui";
 import { api, errMsg, type AgentPolicy, type Host, type KeyEntry } from "../../lib/api";
 import { useApp } from "../../store";
@@ -419,19 +420,16 @@ export function HostEditor() {
                   <div className="he-field">
                     <Label text="密钥" />
                     <div className="row">
-                      <select
-                        className={"select" + (errors.key ? " invalid" : "")}
+                      <Select
+                        width="100%"
+                        className={errors.key ? "invalid" : undefined}
                         value={h.keyId ?? ""}
-                        onChange={(e) => {
-                          set("keyId", e.target.value || null);
+                        options={[{ value: "", label: keys.length ? "选择密钥" : "无密钥" }, ...keys.map((k) => ({ value: k.id, label: k.name }))]}
+                        onChange={(v) => {
+                          set("keyId", v || null);
                           clearErr("key");
                         }}
-                      >
-                        <option value="">{keys.length ? "选择密钥" : "无密钥"}</option>
-                        {keys.map((k) => (
-                          <option key={k.id} value={k.id}>{k.name}</option>
-                        ))}
-                      </select>
+                      />
                       <button type="button" className="btn" style={{ flex: "none" }} onClick={() => setKeyMgr(true)}>
                         <KeyRound /> 管理
                       </button>
@@ -445,14 +443,12 @@ export function HostEditor() {
                 <h3 className="he-sec-title">网络</h3>
                 <div className="he-field">
                   <Label text="跳板机" />
-                  <select className="select" value={h.jumpHostId ?? ""} onChange={(e) => set("jumpHostId", e.target.value || null)}>
-                    <option value="">无</option>
-                    {jumpCandidates.map((x) => (
-                      <option key={x.id} value={x.id}>
-                        {x.name} ({x.host})
-                      </option>
-                    ))}
-                  </select>
+                  <Select
+                    width="100%"
+                    value={h.jumpHostId ?? ""}
+                    options={[{ value: "", label: "无" }, ...jumpCandidates.map((x) => ({ value: x.id, label: `${x.name} (${x.host})` }))]}
+                    onChange={(v) => set("jumpHostId", v || null)}
+                  />
                 </div>
               </section>
 

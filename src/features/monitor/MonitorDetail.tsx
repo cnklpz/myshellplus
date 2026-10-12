@@ -3,6 +3,7 @@
 // refreshed every 5s while the dialog is open.
 import { ChevronDown, ChevronUp, FolderSearch, LoaderCircle, RefreshCw, Skull, X } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Select } from "../../components/Select";
 import { Bar, Confirm, Dialog, toast } from "../../components/ui";
 import { api, errMsg, type Sample, type SysInfo } from "../../lib/api";
 import { fmtBytes, fmtPct, fmtRate } from "../../lib/format";
@@ -840,11 +841,14 @@ function DiskView() {
       </Sec>
       <Sec title="大文件">
         <div className="row">
-          <select className="select sm mon-d-select" value={target} onChange={(e) => setSel(e.target.value)} disabled={duBusy}>
-            {mounts.map((m) => (
-              <option key={m.mount} value={m.mount}>{m.mount}</option>
-            ))}
-          </select>
+          <Select
+            size="sm"
+            width={240}
+            value={target}
+            options={mounts.map((m) => ({ value: m.mount, label: m.mount }))}
+            onChange={setSel}
+            disabled={duBusy}
+          />
           <button className="btn sm" disabled={duBusy || !mounts.length} onClick={scan}>
             {duBusy ? <LoaderCircle className="mon-spin" /> : <FolderSearch />}
             查找大文件

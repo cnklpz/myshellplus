@@ -566,7 +566,19 @@ async fn export_backup(ctx: S<'_>, path: String, password: Option<String>) -> Cm
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let selftest = std::env::var("MYSHELL_SELFTEST").is_ok();
+    let mut builder = tauri::Builder::default();
+    if !selftest {
+        // One window only: launching again brings the existing window to the front.
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }));
+    }
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -595,6 +607,10 @@ pub fn run() {
             app.manage(ctx.clone());
             app.manage(server.clone());
             if let Ok(spec) = std::env::var("MYSHELL_SELFTEST") {
+                // Headless: never put a window on the user's screen.
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
                 let (c, srv, handle) = (ctx.clone(), server.clone(), app.handle().clone());
                 tauri::async_runtime::spawn(async move {
                     let ok = selftest::run(c, srv, spec).await;
