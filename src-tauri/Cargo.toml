@@ -1,0 +1,23 @@
+[package]
+name = "myshellplus"
+version = "0.1.0"
+description = "MyShell+ SSH client"
+authors = ["myshellplus"]
+edition = "2024"
+
+[lib]
+name = "myshellplus_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+russh = "0.64"
+russh-sftp = "3"
