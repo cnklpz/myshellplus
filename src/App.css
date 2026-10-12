@@ -30,9 +30,9 @@
 .sidebar { display: flex; flex-direction: column; min-height: 0; background: var(--chrome); }
 .sb { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 .sb-pages, .sb-tools { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) var(--sp-3); flex: none; }
-.sb-pages { padding-top: var(--sp-1); }
+.sb-pages { padding-bottom: var(--sp-3); margin-bottom: var(--sp-2); box-shadow: inset 0 -1px 0 var(--line); }
 .sb-tools { box-shadow: inset 0 1px 0 var(--line); padding-top: var(--sp-3); padding-bottom: var(--sp-3); }
-.sb-hosts { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; box-shadow: inset 0 1px 0 var(--line); margin-top: var(--sp-1); padding-top: var(--sp-2); }
+.sb-hosts { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding-top: var(--sp-1); }
 .sb-item {
   display: flex; align-items: center; gap: var(--sp-3);
   height: var(--h-md); padding: 0 var(--sp-3); border: none; border-radius: var(--radius-md);

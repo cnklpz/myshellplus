@@ -1,4 +1,4 @@
-// Left sidebar: page switch (首页 / 终端) on top, host list in the middle, Agent and 设置 at the bottom.
+// Left sidebar: search on top, then page links (首页 / 终端), the host list, and Agent / 设置 at the bottom.
 import { Bot, House, Settings, SquareTerminal } from "lucide-react";
 import { HostSidebar } from "../features/hosts/HostSidebar";
 import { type ToolModal, type View, useApp } from "../store";
@@ -19,18 +19,21 @@ export function Sidebar() {
 
   return (
     <div className="sb">
-      <nav className="sb-pages">
-        {PAGES.map((p) => (
-          <button key={p.view} className={"sb-item" + (view === p.view ? " on" : "")} onClick={() => setView(p.view)}>
-            <p.icon />
-            <span>{p.label}</span>
-            {p.view === "terminal" && sessions > 0 && <span className="sb-count">{sessions}</span>}
-          </button>
-        ))}
-      </nav>
 
       <div className="sb-hosts">
-        <HostSidebar />
+        <HostSidebar
+          header={
+            <nav className="sb-pages">
+              {PAGES.map((p) => (
+                <button key={p.view} className={"sb-item" + (view === p.view ? " on" : "")} onClick={() => setView(p.view)}>
+                  <p.icon />
+                  <span>{p.label}</span>
+                  {p.view === "terminal" && sessions > 0 && <span className="sb-count">{sessions}</span>}
+                </button>
+              ))}
+            </nav>
+          }
+        />
       </div>
 
       <nav className="sb-tools">

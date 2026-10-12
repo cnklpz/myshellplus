@@ -1,6 +1,6 @@
 // Left sidebar: grouped host list, search, context menu, drag to regroup.
 import { ChevronDown, ChevronRight, Copy, Download, Link, Pencil, Plug, Plus, Search, SquareTerminal, Trash2, Unplug } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Confirm, Empty, toast } from "../../components/ui";
 import { api, errMsg, type Host } from "../../lib/api";
 import { useApp } from "../../store";
@@ -53,7 +53,8 @@ async function openTerm(id: string) {
 
 interface Menu { x: number; y: number; host: Host }
 
-export function HostSidebar() {
+/** `header` renders between the search bar and the host list (the sidebar puts page links there). */
+export function HostSidebar(props: { header?: ReactNode } = {}) {
   const hosts = useApp((s) => s.hosts);
   const conn = useApp((s) => s.conn);
   const openEditor = useApp((s) => s.openEditor);
@@ -197,6 +198,8 @@ export function HostSidebar() {
           <Download />
         </button>
       </div>
+
+      {props.header}
 
       {hosts.length === 0 ? (
         <Empty
