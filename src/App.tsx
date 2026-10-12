@@ -1,51 +1,70 @@
-import { listen } from "@tauri-apps/api/event";
-import { Activity, FolderOpen, PanelRightClose, ScrollText } from "lucide-react";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { GlobalContextMenu } from "./components/GlobalContextMenu";
 import { PageModal } from "./components/PageModal";
 import { Sidebar } from "./components/Sidebar";
 import { Titlebar } from "./components/Titlebar";
-import { Toasts } from "./components/ui";
+import { HideDialogs, toast, Toasts } from "./components/ui";
 import { AgentView } from "./features/agent/AgentView";
 import { PromptCenter } from "./features/agent/PromptCenter";
 import { BatchView } from "./features/batch/BatchView";
-import { FilesPanel } from "./features/files/FilesPanel";
 import { HostEditor } from "./features/hosts/HostEditor";
 import { HomeView } from "./features/home/HomeView";
 import { OverviewView } from "./features/overview/OverviewView";
 import { ImportDialog } from "./features/import/ImportDialog";
-import { MonitorPanel } from "./features/monitor/MonitorPanel";
+import { SideBody, SideRail, SideTabs } from "./features/side/SidePanels";
 import { SettingsView } from "./features/settings/SettingsView";
+import { UpdateDialog } from "./features/settings/UpdateDialog";
 import { SnippetsPanel } from "./features/snippets/SnippetsPanel";
 import { startSwitcherSync } from "./features/switcher/sync";
 import { TerminalArea } from "./features/terminal/TerminalArea";
 import { TunnelsView } from "./features/tunnels/TunnelsView";
 import { VaultGate } from "./features/vault/VaultGate";
-import { api, type ConnFailure, type ConnState, type ConnStep, type Latency } from "./lib/api";
-import { type SidePanel, type ToolModal, useApp } from "./store";
+import { startupCheck } from "./lib/updater";
+import { api, type ConnFailure, type ConnState, type ConnStep, errMsg, type Latency } from "./lib/api";
+import { onTauriEvent } from "./lib/events";
+import { type ToolModal, useApp } from "./store";
 import "./App.css";
 
-const PANELS: { id: Exclude<SidePanel, null>; icon: typeof Activity; label: string }[] = [
-  { id: "monitor", icon: Activity, label: "状态" },
-  { id: "files", icon: FolderOpen, label: "文件" },
-  { id: "snippets", icon: ScrollText, label: "命令" },
-];
-
-/** Restore state from the backend: sessions survive a webview reload. */
-async function bootstrap() {
-  const s = useApp.getState();
-  await s.refreshVault();
-  await s.refreshHosts();
-  for (const id of await api.connList()) s.setConn({ hostId: id, state: "connected" });
-  for (const l of await api.connLatency()) s.setLatency(l.hostId, l.ms, l.since);
-  s.setFailures((await api.connFailures()) ?? {});
-  const hosts = useApp.getState().hosts;
-  const sessions = await api.termList();
-  for (const t of sessions) {
-    if (useApp.getState().tabs.some((x) => x.id === t.id)) continue;
-    const h = hosts.find((x) => x.id === t.hostId);
-    useApp.getState().addTab({ id: t.id, hostId: t.hostId, title: h?.name ?? "终端", alive: t.alive });
+/** One restore step: a failure is reported but does not stop the others. */
+async function step(fn: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await fn();
+    return true;
+  } catch (e) {
+    toast(errMsg(e), "error");
+    return false;
   }
+}
+
+/**
+ * Restore state from the backend: sessions survive a webview reload.
+ * Resolves to the vault status error, if any (the app cannot render without it).
+ */
+async function bootstrap(): Promise<string | null> {
+  const s = useApp.getState();
+  try {
+    await s.refreshVault();
+  } catch (e) {
+    // The backend is unreachable: the vault error screen says so; skip the rest instead of a toast each.
+    return errMsg(e);
+  }
+  await step(() => s.refreshHosts());
+  await step(async () => {
+    for (const id of await api.connList()) s.setConn({ hostId: id, state: "connected" });
+  });
+  await step(async () => {
+    for (const l of await api.connLatency()) s.setLatency(l.hostId, l.ms, l.since);
+  });
+  await step(async () => s.setFailures((await api.connFailures()) ?? {}));
+  await step(async () => {
+    const hosts = useApp.getState().hosts;
+    for (const t of await api.termList()) {
+      if (useApp.getState().tabs.some((x) => x.id === t.id)) continue;
+      const h = hosts.find((x) => x.id === t.hostId);
+      useApp.getState().addTab({ id: t.id, hostId: t.hostId, title: h?.name ?? "终端", alive: t.alive });
+    }
+  });
+  return null;
 }
 
 export default function App() {
@@ -53,32 +72,53 @@ export default function App() {
   const view = useApp((s) => s.view);
   const modal = useApp((s) => s.modal);
   const sidePanel = useApp((s) => s.sidePanel);
-  const setSidePanel = useApp((s) => s.setSidePanel);
-  const panelHostId = useApp((s) => s.panelHostId);
   const editingHost = useApp((s) => s.editingHost);
   const importOpen = useApp((s) => s.importOpen);
+  const [bootErr, setBootErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    bootstrap();
-    // Watchdog heartbeat: the backend reloads the webview if this stops while the window is visible.
-    api.uiHeartbeat();
-    const beat = setInterval(() => api.uiHeartbeat().catch(() => {}), 5000);
-    const stopSwitcher = startSwitcherSync();
-    const un = [
-      listen<ConnState>("conn-state", (e) => useApp.getState().setConn(e.payload)),
-      listen<ConnStep>("conn-step", (e) => useApp.getState().pushConnStep(e.payload)),
-      listen<Record<string, ConnFailure>>("conn-failures", (e) => useApp.getState().setFailures(e.payload)),
-      listen<Latency>("latency", (e) => useApp.getState().setLatency(e.payload.hostId, e.payload.ms, e.payload.since)),
-      listen<string>("term-exit", (e) => useApp.getState().updateTab(e.payload, { alive: false })),
-    ];
-    return () => {
-      clearInterval(beat);
-      stopSwitcher();
-      un.forEach((p) => p.then((f) => f()));
-    };
+  const boot = useCallback(() => {
+    setBootErr(null);
+    void bootstrap().then(setBootErr);
   }, []);
 
-  if (!vault) return null;
+  useEffect(() => {
+    boot();
+    try {
+      startupCheck();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    // Watchdog heartbeat: the backend reloads the webview if this stops while the window is visible.
+    const beat = () => void api.uiHeartbeat().catch(() => {});
+    beat();
+    const timer = setInterval(beat, 5000);
+    const stopSwitcher = startSwitcherSync();
+    const un = [
+      onTauriEvent<ConnState>("conn-state", (e) => useApp.getState().setConn(e.payload)),
+      onTauriEvent<ConnStep>("conn-step", (e) => useApp.getState().pushConnStep(e.payload)),
+      onTauriEvent<Record<string, ConnFailure>>("conn-failures", (e) => useApp.getState().setFailures(e.payload)),
+      onTauriEvent<Latency>("latency", (e) => useApp.getState().setLatency(e.payload.hostId, e.payload.ms, e.payload.since)),
+      onTauriEvent<string>("term-exit", (e) => useApp.getState().updateTab(e.payload, { alive: false })),
+    ];
+    return () => {
+      clearInterval(timer);
+      stopSwitcher();
+      un.forEach((f) => f());
+    };
+  }, [boot]);
+
+  if (!vault)
+    return bootErr ? (
+      <div className="crash">
+        <div className="crash-card">
+          <div className="crash-title">无法读取密钥库</div>
+          <pre className="crash-msg selectable">{bootErr}</pre>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button className="btn primary" onClick={boot}>重试</button>
+          </div>
+        </div>
+      </div>
+    ) : null;
   const locked = !vault.unlocked;
   const onTerminal = view === "terminal";
   const showSide = onTerminal && sidePanel !== null;
@@ -95,7 +135,9 @@ export default function App() {
         <main className="main">
           {/* Terminals stay mounted on every page so xterm state is kept. */}
           <div className="view" style={{ display: onTerminal ? "flex" : "none" }}>
-            <TerminalArea />
+            <HideDialogs when={!onTerminal}>
+              <TerminalArea />
+            </HideDialogs>
           </div>
           {view === "home" && (
             <div className="view" style={{ display: "flex" }}>
@@ -111,40 +153,16 @@ export default function App() {
 
         {showSide && (
           <aside className="side">
-            <div className="side-tabs">
-              {PANELS.map((p) => (
-                <button key={p.id} className={sidePanel === p.id ? "on" : ""} onClick={() => setSidePanel(p.id)}>
-                  <p.icon />
-                  <span>{p.label}</span>
-                </button>
-              ))}
-              <button className="side-collapse" title="收起" onClick={() => setSidePanel(null)}>
-                <PanelRightClose />
-              </button>
-            </div>
+            <SideTabs />
             <div className="side-body">
-              {sidePanel === "snippets" ? (
-                <SnippetsPanel hostId={panelHostId} />
-              ) : panelHostId ? (
-                sidePanel === "monitor" ? (
-                  <MonitorPanel key={panelHostId} hostId={panelHostId} />
-                ) : (
-                  <FilesPanel key={panelHostId} hostId={panelHostId} />
-                )
-              ) : (
-                <div className="empty">未选择服务器</div>
-              )}
+              <SideBody />
             </div>
           </aside>
         )}
 
         {onTerminal && !showSide && (
           <aside className="side-rail">
-            {PANELS.map((p) => (
-              <button key={p.id} className="side-rail-btn" title={p.label} onClick={() => setSidePanel(p.id)}>
-                <p.icon />
-              </button>
-            ))}
+            <SideRail />
           </aside>
         )}
       </div>
@@ -163,6 +181,7 @@ export default function App() {
       {importOpen && <ImportDialog />}
       <PromptCenter />
       <GlobalContextMenu />
+      <UpdateDialog />
       <Toasts />
       {locked && <VaultGate />}
     </div>

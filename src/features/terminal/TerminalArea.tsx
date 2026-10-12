@@ -1,9 +1,10 @@
 // Terminal tabs + xterm sessions, command prediction, AI command bar.
 import {
-  Activity, ArrowRightToLine, Copy, CopyPlus, FolderOpen, ListX, Pencil, Plus, RotateCw, Search, Settings2, X, XCircle,
+  Activity, ArrowRightToLine, ChevronDown, FolderOpen, ListX, Pencil, Plus, RotateCw, X, XCircle,
 } from "lucide-react";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "../../components/ui";
+import { Confirm, Empty, SearchBox } from "../../components/ui";
+import { hostMenuItems, useHostDialogs } from "../hosts/hostMenu";
 import { nameIsAddr, usePrivacy } from "../../lib/privacy";
 import { type TermTab, useApp } from "../../store";
 import { installAiPredictWatcher } from "./config";
@@ -42,7 +43,19 @@ export function TerminalArea() {
   };
 
   const menu = useContextMenu();
+  const hostDialogs = useHostDialogs();
   const [renaming, setRenaming] = useState<string | null>(null);
+  /** Bulk close waiting for confirmation (it would end several live sessions). */
+  const [closing, setClosing] = useState<{ label: string; ids: string[] } | null>(null);
+
+  /** Close several tabs; ask first when more than one of them is a live session. */
+  const closeMany = (label: string, ids: string[]) => {
+    if (liveCount(ids) > 1) setClosing({ label, ids });
+    else ids.forEach(closeTab);
+  };
+  const liveCount = (ids: string[]) => useApp.getState().tabs.filter((x) => ids.includes(x.id) && x.alive).length;
+  /** Dialog-opening items end with "…". */
+  const closeLabel = (label: string, ids: string[]) => (liveCount(ids) > 1 ? label + "…" : label);
 
   const tabMenu = (t: TermTab): MenuItem[] => {
     const { tabs: all, hosts } = useApp.getState();
@@ -54,34 +67,26 @@ export function TerminalArea() {
       useApp.getState().setPanelHost(t.hostId);
       useApp.getState().setSidePanel(p);
     };
-    return [
-      { label: "复制会话", icon: <CopyPlus />, onSelect: () => void openTerminal(t.hostId) },
-      { label: "重新连接", icon: <RotateCw />, disabled: connecting || isPending(t.id), onSelect: () => void reopenTerminal(t.id) },
-      { label: "重命名", icon: <Pencil />, onSelect: () => setRenaming(t.id) },
-      "sep",
-      { label: "服务器状态", icon: <Activity />, onSelect: () => side("monitor") },
-      { label: "文件", icon: <FolderOpen />, onSelect: () => side("files") },
-      h && { label: "编辑服务器", icon: <Settings2 />, onSelect: () => useApp.getState().openEditor(h.id) },
-      h && {
-        label: "复制地址",
-        icon: <Copy />,
-        onSelect: () =>
-          navigator.clipboard.writeText(`${h.username}@${h.host}${h.port !== 22 ? `:${h.port}` : ""}`).then(
-            () => toast("已复制地址", "success"),
-            () => toast("复制失败", "error"),
-          ),
-      },
-      "sep",
-      { label: "关闭", icon: <X />, hint: "Ctrl+W", onSelect: () => closeTab(t.id) },
-      { label: "关闭其他", icon: <XCircle />, disabled: all.length < 2, onSelect: () => all.filter((x) => x.id !== t.id).forEach((x) => closeTab(x.id)) },
-      {
-        label: "关闭右侧",
-        icon: <ArrowRightToLine />,
-        disabled: idx === all.length - 1,
-        onSelect: () => all.slice(idx + 1).forEach((x) => closeTab(x.id)),
-      },
-      { label: "关闭所有", icon: <ListX />, onSelect: () => all.forEach((x) => closeTab(x.id)) },
-    ];
+    const others = all.filter((x) => x.id !== t.id).map((x) => x.id);
+    const right = all.slice(idx + 1).map((x) => x.id);
+    const every = all.map((x) => x.id);
+    const own = {
+      open: [{ label: "重新连接", icon: <RotateCw />, disabled: connecting || isPending(t.id), onSelect: () => void reopenTerminal(t.id) }],
+      edit: [{ label: "重命名", icon: <Pencil />, onSelect: () => setRenaming(t.id) }],
+      own: [
+        { label: "服务器状态", icon: <Activity />, onSelect: () => side("monitor") },
+        { label: "文件", icon: <FolderOpen />, onSelect: () => side("files") },
+      ],
+      tail: [
+        { label: "关闭", icon: <X />, hint: "Ctrl+W", onSelect: () => closeTab(t.id) },
+        { label: closeLabel("关闭其他", others), icon: <XCircle />, disabled: !others.length, onSelect: () => closeMany("关闭其他", others) },
+        { label: closeLabel("关闭右侧", right), icon: <ArrowRightToLine />, disabled: !right.length, onSelect: () => closeMany("关闭右侧", right) },
+        { label: closeLabel("关闭所有", every), icon: <ListX />, onSelect: () => closeMany("关闭所有", every) },
+      ] as MenuItem[],
+    };
+    // The host was deleted: only the session's own items are left.
+    if (!h) return [...own.open, "sep", ...own.edit, "sep", ...own.own, "sep", ...own.tail];
+    return hostMenuItems(h, { ...hostDialogs.optsFor(h), extra: own });
   };
 
   const addBtn = (
@@ -93,10 +98,33 @@ export function TerminalArea() {
     </div>
   );
 
+  // Tabs shrink to their min width first; only then does the strip overflow and get a list button.
+  const listRef = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const check = () => setOverflow(el.scrollWidth > el.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tabs.length]);
+  useEffect(() => {
+    if (!overflow) setListOpen(false);
+  }, [overflow]);
+
   return (
     <div className="term-area">
       <div className="tabs term-tabs">
-        <div className="term-tablist">
+        <div
+          className="term-tablist"
+          ref={listRef}
+          onWheel={(e) => {
+            if (e.deltaY && !e.deltaX) e.currentTarget.scrollLeft += e.deltaY;
+          }}
+        >
           {tabs.map((t) => (
             <TabItem
               key={t.id}
@@ -110,9 +138,47 @@ export function TerminalArea() {
             />
           ))}
         </div>
+        {overflow && (
+          <div className="term-add">
+            <button
+              className={"icon-btn" + (listOpen ? " active" : "")}
+              title={`全部会话（${tabs.length}）`}
+              onClick={() => setListOpen(!listOpen)}
+            >
+              <ChevronDown />
+            </button>
+            {listOpen && (
+              <TabList
+                tabs={tabs}
+                activeTab={activeTab}
+                onSelect={(id) => {
+                  setActiveTab(id);
+                  setListOpen(false);
+                }}
+                onCloseTab={closeTab}
+                onClose={() => setListOpen(false)}
+              />
+            )}
+          </div>
+        )}
         {addBtn}
       </div>
       {menu.node}
+      {hostDialogs.node}
+      {closing && (
+        <Confirm
+          title={closing.label}
+          message={`将断开 ${liveCount(closing.ids)} 个会话。`}
+          confirmText="关闭"
+          danger
+          onCancel={() => setClosing(null)}
+          onConfirm={() => {
+            const ids = closing.ids;
+            setClosing(null);
+            ids.forEach(closeTab);
+          }}
+        />
+      )}
 
       <div className="term-stack">
         {tabs.map((t) =>
@@ -211,6 +277,71 @@ function TabItem(props: {
   );
 }
 
+/** Dropdown of every open session, shown when the tab strip overflows. */
+function TabList(props: {
+  tabs: TermTab[];
+  activeTab: string | null;
+  onSelect: (id: string) => void;
+  onCloseTab: (id: string) => void;
+  onClose: () => void;
+}) {
+  const hosts = useApp((s) => s.hosts);
+  const priv = usePrivacy();
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      const el = boxRef.current;
+      if (el && !el.parentElement!.contains(e.target as Node)) props.onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") props.onClose();
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [props.onClose]);
+
+  useEffect(() => {
+    boxRef.current?.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
+  }, []);
+
+  return (
+    <div ref={boxRef} className="term-overflow">
+      {props.tabs.map((t) => {
+        const h = hosts.find((x) => x.id === t.hostId);
+        const addr = h?.host ?? "";
+        const showAddr = !!addr && !nameIsAddr(t.title, addr);
+        return (
+          <div
+            key={t.id}
+            className={"list-row" + (t.id === props.activeTab ? " selected" : "")}
+            style={h?.color ? ({ "--host-color": h.color } as CSSProperties) : undefined}
+            onClick={() => props.onSelect(t.id)}
+          >
+            <span className={"dot " + (t.connect && !t.connect.error ? "warn" : t.alive ? "ok" : "err")} />
+            <span className="ellipsis grow">{priv.text(t.title, addr)}</span>
+            {showAddr && <span className="meta ellipsis mono term-overflow-addr">{priv.addr(addr)}</span>}
+            <button
+              className="icon-btn term-tab-close"
+              title="关闭"
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onCloseTab(t.id);
+              }}
+            >
+              <X />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Connection state → [dot/text class, label]; idle hosts have no entry. */
 const CONN_LABEL: Record<string, [string, string]> = {
   connected: ["ok", "已连接"],
@@ -267,15 +398,13 @@ function HostPicker(props: { onClose: () => void }) {
 
   return (
     <div ref={boxRef} className="host-picker">
-      <div className="host-picker-search row">
-        <Search className="host-picker-icon" />
-        <input
-          autoFocus
-          className="grow"
-          placeholder="搜索服务器"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => {
+      <SearchBox
+        flat
+        autoFocus
+        placeholder="搜索服务器"
+        value={q}
+        onChange={setQ}
+        onKeyDown={(e) => {
             if (e.key === "ArrowDown") {
               e.preventDefault();
               setSel((s) => Math.min(s + 1, list.length - 1));
@@ -290,8 +419,7 @@ function HostPicker(props: { onClose: () => void }) {
               props.onClose();
             }
           }}
-        />
-      </div>
+      />
       <div className="host-picker-list" ref={listRef}>
         {list.map((h, i) => {
           const st = CONN_LABEL[conn[h.id]?.state ?? ""];
@@ -315,7 +443,7 @@ function HostPicker(props: { onClose: () => void }) {
           </div>
           );
         })}
-        {list.length === 0 && <div className="host-picker-empty faint">{hosts.length ? "无匹配服务器" : "还没有服务器"}</div>}
+        {list.length === 0 && <Empty sm text={hosts.length ? "无匹配服务器" : "还没有服务器"} />}
       </div>
     </div>
   );
@@ -323,12 +451,15 @@ function HostPicker(props: { onClose: () => void }) {
 
 function EmptyState(props: { onNew: () => void }) {
   return (
-    <div className="term-empty">
-      <span>双击左侧服务器开始</span>
-      <button className="btn sm" onClick={props.onNew}>
-        <Plus />
-        新建终端
-      </button>
-    </div>
+    <Empty
+      className="term-empty"
+      text="双击左侧服务器开始"
+      action={
+        <button className="btn sm" onClick={props.onNew}>
+          <Plus />
+          新建终端
+        </button>
+      }
+    />
   );
 }

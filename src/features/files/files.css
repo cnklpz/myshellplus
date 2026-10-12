@@ -6,8 +6,6 @@
 /* Toolbar: a quiet path row (nav + breadcrumb-like path) and a filter/actions row */
 .fp-bar { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) var(--sp-2); flex: none; }
 .fp-bar .row { gap: var(--sp-1); }
-.fp-bar .icon-btn.spin svg { animation: fp-spin 0.8s linear infinite; }
-@keyframes fp-spin { to { transform: rotate(360deg); } }
 .fp-path {
   flex: 1 1 auto; min-width: 0; height: var(--h-sm); padding: 0 var(--sp-2);
   border: none; border-radius: var(--radius-sm); background: transparent; outline: none;
@@ -23,10 +21,10 @@
 .fp-cols { display: grid; grid-template-columns: var(--icon-md) minmax(0, 1fr) 72px 88px; align-items: center; column-gap: var(--sp-2); }
 /* right margin includes the list scrollbar gutter so value columns line up with the rows */
 .fp-head {
-  height: var(--sp-8); padding: 0 var(--sp-2); margin: 0 calc(var(--sp-2) + var(--scrollbar-w)) 0 var(--sp-2);
+  height: var(--h-sm); padding: 0 var(--sp-2); margin: 0 calc(var(--sp-2) + var(--scrollbar-w)) 0 var(--sp-2);
   font-size: var(--fs-xs); color: var(--fg-2); flex: none; box-shadow: inset 0 -1px 0 var(--line);
 }
-.fp-head > button { border: none; background: none; padding: 0; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 2px; font-size: inherit; min-width: 0; height: 100%; }
+.fp-head > button { border: none; background: none; padding: 0; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: var(--sp-half); font-size: inherit; min-width: 0; height: 100%; }
 .fp-head > button:hover { color: var(--fg-1); }
 .fp-head > button.num { justify-content: flex-end; }
 .fp-head > button.on { color: var(--fg-0); }
@@ -37,7 +35,7 @@
 .fp-list .list-row { font-size: var(--fs-md); }
 .fp-list .list-row.fp-cols { display: grid; }
 .fp-list .list-row > svg { width: var(--icon-md); height: var(--icon-md); color: var(--fg-2); }
-.fp-list .list-row > svg.dir { color: var(--accent); }
+.fp-list .list-row > svg.dir { color: var(--fg-1); }
 .fp-list .list-row .size { color: var(--fg-1); font-size: var(--fs-xs); white-space: nowrap; }
 .fp-list .list-row .time { color: var(--fg-2); font-size: var(--fs-xs); white-space: nowrap; }
 .fp-list .list-row .link { font-style: italic; }
@@ -53,30 +51,18 @@
   color: var(--accent); font-weight: 600;
 }
 
-/* Context menu: floating bg-2 surface */
-.fp-menu { position: fixed; z-index: 150; min-width: 168px; padding: var(--sp-1); background: var(--bg-2); border-radius: var(--radius-md); box-shadow: var(--shadow); }
-.fp-menu > button { display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: var(--h-sm); padding: 0 var(--sp-2); border: none; background: none; border-radius: var(--radius-sm); cursor: pointer; font-size: var(--fs-sm); text-align: left; color: var(--fg-0); }
-.fp-menu > button svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; color: var(--fg-2); }
-.fp-menu > button:hover:not(:disabled) { background: var(--bg-3); }
-.fp-menu > button:hover:not(:disabled) svg { color: var(--fg-1); }
-.fp-menu > button:disabled { opacity: 0.4; cursor: default; }
-.fp-menu > button.danger, .fp-menu > button.danger svg { color: var(--err); }
-.fp-menu > button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 12%, transparent); }
-.fp-menu > hr { border: none; height: 1px; background: var(--line); margin: var(--sp-1) calc(-1 * var(--sp-1)); }
-
 /* Transfers strip */
 .fp-tx { flex: none; background: var(--bg-0); padding: var(--sp-1) var(--sp-4) var(--sp-2); max-height: 216px; overflow: auto; }
-.fp-tx .section-title .count { font-weight: 400; color: var(--fg-2); font-variant-numeric: tabular-nums; }
-.fp-tx-item { display: grid; grid-template-columns: var(--icon-sm) minmax(0, 1fr) auto calc(var(--h-sm) - var(--sp-1)); align-items: center; column-gap: var(--sp-2); row-gap: 2px; min-height: var(--h-sm); font-size: var(--fs-sm); }
+.fp-tx-item { display: grid; grid-template-columns: var(--icon-sm) minmax(0, 1fr) auto var(--h-xs); align-items: center; column-gap: var(--sp-2); row-gap: var(--sp-half); min-height: var(--h-sm); font-size: var(--fs-sm); }
 .fp-tx-item > svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--fg-2); justify-self: center; }
 .fp-tx-item > svg.ok { color: var(--ok); }
 .fp-tx-item > svg.err { color: var(--err); }
 .fp-tx-item .meta { font-size: var(--fs-xs); color: var(--fg-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.fp-tx-item .icon-btn { width: calc(var(--h-sm) - var(--sp-1)); height: calc(var(--h-sm) - var(--sp-1)); }
-.fp-tx-item .icon-btn svg { width: var(--icon-sm); height: var(--icon-sm); }
 .fp-tx-item .prog { grid-column: 2 / 4; display: grid; grid-template-columns: minmax(0, 1fr) 40px 88px; align-items: center; column-gap: var(--sp-2); padding-bottom: var(--sp-1); font-size: var(--fs-xs); color: var(--fg-2); font-variant-numeric: tabular-nums; }
-.fp-tx-item .prog .bar { width: 100%; height: 3px; border-radius: 2px; }
-.fp-tx-item .prog .bar > i { border-radius: 2px; background: var(--accent); }
+.fp-tx-item .prog.msg { grid-template-columns: minmax(0, 1fr); }
+.fp-tx-item .prog .bar { width: 100%; }
+/* Progress, not usage: keep the accent fill instead of <Bar>'s warn/err level colors. */
+.fp-tx-item .prog .bar > i { background: var(--accent); }
 .fp-tx-item .prog .err { color: var(--err); }
 
 /* Dialogs */

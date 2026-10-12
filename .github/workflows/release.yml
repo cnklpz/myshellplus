@@ -1,0 +1,54 @@
+# Push a tag like v0.2.0 to build, sign and publish a GitHub release.
+# The annotated tag message becomes the release notes shown in the in-app update dialog:
+#   git tag -a v0.2.0 -m "- ÐÂÔö xxx" && git push origin v0.2.0
+# The release carries latest.json, which the in-app updater reads.
+# Secrets: TAURI_SIGNING_PRIVATE_KEY (contents of the .key file), TAURI_SIGNING_PRIVATE_KEY_PASSWORD (may be empty).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Release notes from tag message
+        shell: bash
+        run: |
+          git fetch --force --tags
+          {
+            echo 'NOTES<<__EOF__'
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME"
+            echo '__EOF__'
+          } >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: MyShell+ ${{ github.ref_name }}
+          releaseBody: ${{ env.NOTES }}
+          releaseDraft: false
+          includeUpdaterJson: true

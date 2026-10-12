@@ -29,8 +29,10 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "../../components/ui";
+import { HideDialogs, toast } from "../../components/ui";
 import { api, errMsg } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
+import { copyHostAddr } from "../hosts/hostMenu";
 import { termBus } from "../../lib/termBus";
 import { hostById, type TermTab, useApp } from "../../store";
 import { AiBar, ExplainCard } from "./AiBar";
@@ -176,7 +178,7 @@ export function XTermView(props: {
 
     const copy = () => {
       const s = term.getSelection();
-      if (s) navigator.clipboard.writeText(s).catch(() => toast("复制失败", "error"));
+      if (s) void copyText(s, "", { silent: true });
     };
     const paste = () => {
       navigator.clipboard
@@ -256,6 +258,17 @@ export function XTermView(props: {
           L.explainSel();
           return false;
         }
+        // Local screen only (Ctrl+L / Ctrl+K stay with the shell / AI bar).
+        if (k === "l") {
+          ev.preventDefault();
+          clear(false);
+          return false;
+        }
+        if (k === "k") {
+          ev.preventDefault();
+          clear(true);
+          return false;
+        }
       }
       if (ev.ctrlKey && !ev.altKey && ev.key === "Tab") {
         ev.preventDefault();
@@ -297,6 +310,14 @@ export function XTermView(props: {
       setMenu({ x: e.clientX, y: e.clientY, sel: term.getSelection() });
     };
     hostEl.addEventListener("contextmenu", onContextMenu);
+    // Middle click pastes the selection (X11 style), unless the app asked for mouse events (vim, htop…).
+    const onMiddle = (e: MouseEvent) => {
+      if (e.button !== 1 || !term.hasSelection() || term.modes.mouseTrackingMode !== "none") return;
+      e.preventDefault();
+      if (live.current.alive) term.paste(term.getSelection());
+      term.focus();
+    };
+    hostEl.addEventListener("mousedown", onMiddle);
 
     let rt: number | undefined;
     const ro = new ResizeObserver(() => {
@@ -332,6 +353,7 @@ export function XTermView(props: {
       clearTimeout(rt);
       ro.disconnect();
       hostEl.removeEventListener("contextmenu", onContextMenu);
+      hostEl.removeEventListener("mousedown", onMiddle);
       unregister();
       predictor.dispose();
       echo.dispose();
@@ -378,20 +400,15 @@ export function XTermView(props: {
     const t = inst.current?.term;
     const host = hostById(tab.hostId);
     const alive = tab.alive;
-    const copyText = (text: string, ok?: string) =>
-      navigator.clipboard
-        .writeText(text)
-        .then(() => ok && toast(ok, "success"))
-        .catch(() => toast("复制失败", "error"));
     return [
-      { label: "复制", icon: <Copy />, hint: "Ctrl+Shift+C", disabled: !has, onSelect: () => copyText(sel) },
+      { label: "复制", icon: <Copy />, hint: "Ctrl+Shift+C", disabled: !has, onSelect: () => void copyText(sel, "", { silent: true }) },
       { label: "粘贴", icon: <ClipboardPaste />, hint: "Ctrl+Shift+V", disabled: !alive, onSelect: () => inst.current?.paste() },
-      has && { label: "粘贴选中内容", icon: <TextCursorInput />, disabled: !alive, onSelect: () => t?.paste(sel) },
+      has && { label: "粘贴选中内容", icon: <TextCursorInput />, hint: "中键", disabled: !alive, onSelect: () => t?.paste(sel) },
       { label: "全选", icon: <TextSelect />, onSelect: () => t?.selectAll() },
       "sep",
       { label: "搜索", icon: <Search />, hint: "Ctrl+F", onSelect: () => setSearchOpen(true) },
-      { label: "清屏", icon: <Eraser />, onSelect: () => inst.current?.clear(false) },
-      { label: "清除缓冲区并重置", icon: <RotateCcw />, onSelect: () => inst.current?.clear(true) },
+      { label: "清屏", icon: <Eraser />, hint: "Ctrl+Shift+L", onSelect: () => inst.current?.clear(false) },
+      { label: "清除缓冲区并重置", icon: <RotateCcw />, hint: "Ctrl+Shift+K", onSelect: () => inst.current?.clear(true) },
       "sep",
       has && {
         label: "AI 解释",
@@ -406,11 +423,7 @@ export function XTermView(props: {
       has && { label: "加入命令", icon: <BookmarkPlus />, onSelect: () => setSaveText(sel) },
       "sep",
       { label: "命令历史", icon: <History />, hint: "Ctrl+Shift+H", onSelect: () => setHistoryOpen(true) },
-      host && {
-        label: "复制主机地址",
-        icon: <AtSign />,
-        onSelect: () => copyText(`${host.username}@${host.host}`, "已复制"),
-      },
+      host && { label: "复制主机地址", icon: <AtSign />, onSelect: () => void copyHostAddr(host) },
       "sep",
       { label: "新建同主机终端", icon: <SquarePlus />, onSelect: () => void openTerminal(tab.hostId) },
       { label: "重新连接", icon: <RotateCw />, disabled: reconnecting, onSelect: () => void reconnect() },
@@ -420,162 +433,164 @@ export function XTermView(props: {
 
   return (
     <div className="term-view" style={{ display: active ? "flex" : "none" }}>
-      {!tab.alive && (
-        <div className="term-exit row">
-          <Unplug />
-          <span>连接已断开</span>
-          <span className="spacer" />
-          <button className="btn sm primary" title="Enter" disabled={reconnecting} onClick={reconnect}>
-            <RotateCw className={reconnecting ? "spin" : undefined} />
-            重新连接
+      <HideDialogs when={!active}>
+        {!tab.alive && (
+          <div className="term-exit row">
+            <Unplug />
+            <span>连接已断开</span>
+            <span className="spacer" />
+            <button className="btn sm primary" title="Enter" disabled={reconnecting} onClick={reconnect}>
+              <RotateCw className={reconnecting ? "spin" : undefined} />
+              重新连接
+            </button>
+          </div>
+        )}
+        <div className="term-wrap" ref={wrapRef}>
+          <div className="term-host" ref={hostRef} />
+
+          {popup && i && tab.alive && (
+            <PredictPopup state={popup} onPick={(n) => i.predictor.accept(n)} onHover={(n) => i.predictor.select(n)} />
+          )}
+
+          {searchOpen && i && (
+            <SearchBox
+              search={i.search}
+              onClose={() => {
+                setSearchOpen(false);
+                focusTerm();
+              }}
+            />
+          )}
+
+          {explain !== null && (
+            <ExplainCard
+              hostId={tab.hostId}
+              text={explain}
+              onClose={() => {
+                setExplain(null);
+                focusTerm();
+              }}
+            />
+          )}
+
+          {hasSel && !aiOpen && explain === null && (
+            <button className="btn sm explain-fab" onMouseDown={(e) => e.preventDefault()} onClick={explainSelection} title="Ctrl+Shift+E">
+              <Sparkles />
+              AI 解释
+            </button>
+          )}
+
+          {aiOpen && (
+            <AiBar
+              hostId={tab.hostId}
+              onClose={() => {
+                setAiOpen(false);
+                focusTerm();
+              }}
+              onInsert={(cmd) => {
+                setAiOpen(false);
+                i?.term.paste(cmd);
+                focusTerm();
+              }}
+              onRun={(cmd) => {
+                setAiOpen(false);
+                termBus.get(tab.id)?.run(cmd);
+                focusTerm();
+              }}
+              extra={
+                hasSel && (
+                  <button className="btn sm ghost" onMouseDown={(e) => e.preventDefault()} onClick={explainSelection} title="Ctrl+Shift+E">
+                    <Sparkles />
+                    AI 解释
+                  </button>
+                )
+              }
+            />
+          )}
+        </div>
+        <div className="term-toolbar">
+          <button className="term-tool" onClick={() => setBatchOpen("")} title="多行命令发送到此终端">
+            <ListChecks />
+            <span>批量执行</span>
+            {batchRun && (
+              <span className="badge num">
+                {batchRun.done}/{batchRun.total}
+              </span>
+            )}
+          </button>
+          <button className="term-tool" onClick={() => useApp.getState().setModal("batch")}>
+            <Layers />
+            <span>多机执行</span>
+          </button>
+          <button className="term-tool" onClick={() => useApp.getState().setModal("snippets")}>
+            <ScrollText />
+            <span>命令</span>
+          </button>
+          <button className="term-tool" title="Ctrl+Shift+H" onClick={() => setHistoryOpen(true)}>
+            <History />
+            <span>历史</span>
+          </button>
+          <button className="term-tool" onClick={() => useApp.getState().setModal("tunnels")}>
+            <Network />
+            <span>隧道</span>
+          </button>
+          <span className="term-tool-sep" />
+          <button
+            className="term-tool"
+            title="Ctrl+K"
+            onClick={() => {
+              inst.current?.predictor.reset();
+              setAiOpen(true);
+            }}
+          >
+            <Sparkles />
+            <span>AI 命令</span>
+          </button>
+          <button className="term-tool" title="Ctrl+F" onClick={() => setSearchOpen(true)}>
+            <Search />
+            <span>搜索</span>
           </button>
         </div>
-      )}
-      <div className="term-wrap" ref={wrapRef}>
-        <div className="term-host" ref={hostRef} />
-
-        {popup && i && tab.alive && (
-          <PredictPopup state={popup} onPick={(n) => i.predictor.accept(n)} onHover={(n) => i.predictor.select(n)} />
-        )}
-
-        {searchOpen && i && (
-          <SearchBox
-            search={i.search}
+        {batchOpen !== undefined && (
+          <BatchDialog
+            tab={tab}
+            initialText={batchOpen || undefined}
             onClose={() => {
-              setSearchOpen(false);
+              setBatchOpen(undefined);
+              inst.current?.term.focus();
+            }}
+          />
+        )}
+        {historyOpen && (
+          <HistoryDialog
+            tab={tab}
+            onClose={() => {
+              setHistoryOpen(false);
               focusTerm();
             }}
           />
         )}
-
-        {explain !== null && (
-          <ExplainCard
-            hostId={tab.hostId}
-            text={explain}
+        {saveText !== null && (
+          <SaveSnippetDialog
+            text={saveText}
             onClose={() => {
-              setExplain(null);
+              setSaveText(null);
               focusTerm();
             }}
           />
         )}
-
-        {hasSel && !aiOpen && explain === null && (
-          <button className="btn sm explain-fab" onMouseDown={(e) => e.preventDefault()} onClick={explainSelection} title="Ctrl+Shift+E">
-            <Sparkles />
-            AI 解释
-          </button>
-        )}
-
-        {aiOpen && (
-          <AiBar
-            hostId={tab.hostId}
-            onClose={() => {
-              setAiOpen(false);
-              focusTerm();
+        {menu && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            items={menuItems(menu.sel)}
+            onClose={(refocus) => {
+              setMenu(null);
+              if (refocus) focusTerm();
             }}
-            onInsert={(cmd) => {
-              setAiOpen(false);
-              i?.term.paste(cmd);
-              focusTerm();
-            }}
-            onRun={(cmd) => {
-              setAiOpen(false);
-              termBus.get(tab.id)?.run(cmd);
-              focusTerm();
-            }}
-            extra={
-              hasSel && (
-                <button className="btn sm ghost" onMouseDown={(e) => e.preventDefault()} onClick={explainSelection} title="Ctrl+Shift+E">
-                  <Sparkles />
-                  AI 解释
-                </button>
-              )
-            }
           />
         )}
-      </div>
-      <div className="term-toolbar">
-        <button className="term-tool" onClick={() => setBatchOpen("")} title="多行命令发送到此终端">
-          <ListChecks />
-          <span>批量执行</span>
-          {batchRun && (
-            <span className="term-tool-badge num">
-              {batchRun.done}/{batchRun.total}
-            </span>
-          )}
-        </button>
-        <button className="term-tool" onClick={() => useApp.getState().setModal("batch")}>
-          <Layers />
-          <span>多机执行</span>
-        </button>
-        <button className="term-tool" onClick={() => useApp.getState().setModal("snippets")}>
-          <ScrollText />
-          <span>命令</span>
-        </button>
-        <button className="term-tool" title="Ctrl+Shift+H" onClick={() => setHistoryOpen(true)}>
-          <History />
-          <span>历史</span>
-        </button>
-        <button className="term-tool" onClick={() => useApp.getState().setModal("tunnels")}>
-          <Network />
-          <span>隧道</span>
-        </button>
-        <span className="term-tool-sep" />
-        <button
-          className="term-tool"
-          title="Ctrl+K"
-          onClick={() => {
-            inst.current?.predictor.reset();
-            setAiOpen(true);
-          }}
-        >
-          <Sparkles />
-          <span>AI 命令</span>
-        </button>
-        <button className="term-tool" title="Ctrl+F" onClick={() => setSearchOpen(true)}>
-          <Search />
-          <span>搜索</span>
-        </button>
-      </div>
-      {batchOpen !== undefined && (
-        <BatchDialog
-          tab={tab}
-          initialText={batchOpen || undefined}
-          onClose={() => {
-            setBatchOpen(undefined);
-            inst.current?.term.focus();
-          }}
-        />
-      )}
-      {historyOpen && (
-        <HistoryDialog
-          tab={tab}
-          onClose={() => {
-            setHistoryOpen(false);
-            focusTerm();
-          }}
-        />
-      )}
-      {saveText !== null && (
-        <SaveSnippetDialog
-          text={saveText}
-          onClose={() => {
-            setSaveText(null);
-            focusTerm();
-          }}
-        />
-      )}
-      {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          items={menuItems(menu.sel)}
-          onClose={(refocus) => {
-            setMenu(null);
-            if (refocus) focusTerm();
-          }}
-        />
-      )}
+      </HideDialogs>
     </div>
   );
 }

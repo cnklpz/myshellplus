@@ -1,5 +1,4 @@
 // SFTP file browser + transfers for one host (side panel).
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -30,10 +29,16 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { usePanelItems } from "../side/panelMenu";
+import { useContextMenu } from "../terminal/ContextMenu";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Confirm, Empty, toast } from "../../components/ui";
+import { Confirm, Empty, SearchBox, toast } from "../../components/ui";
 import { api, errMsg, type FileEntry, type TransferInfo } from "../../lib/api";
-import { fmtBytes, fmtPerms, fmtTime } from "../../lib/format";
+import { copyText } from "../../lib/clipboard";
+import { onTauriEvent } from "../../lib/events";
+import { baseName, fmtBytes, fmtPerms, fmtTime } from "../../lib/format";
+import { shq } from "../../lib/remote";
+import { lsGet, lsSet } from "../../lib/storage";
 import { termBus } from "../../lib/termBus";
 import { useApp } from "../../store";
 import { ChmodDialog, EditorDialog, NamePrompt } from "./FileDialogs";
@@ -49,8 +54,11 @@ const parentOf = (p: string) => {
   const i = t.lastIndexOf("/");
   return i <= 0 ? "/" : t.slice(0, i);
 };
-const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
-const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+/** A remote file name made safe as a local file name: no path separators, no drive colon, no "." / "..". */
+const localName = (name: string) => {
+  const n = name.replace(/[\\/:]/g, "_");
+  return /^\.*$/.test(n) ? "_" : n;
+};
 
 const BINARY_EXT = new Set(
   "png jpg jpeg gif bmp ico webp zip gz tgz bz2 xz 7z rar tar jar war iso img bin exe dll so o a class pdf mp3 mp4 mkv avi mov wav flac woff woff2 ttf otf db sqlite pyc deb rpm".split(" "),
@@ -71,11 +79,6 @@ function EntryIcon({ e }: { e: FileEntry }) {
   return <File />;
 }
 
-interface Menu {
-  x: number;
-  y: number;
-}
-
 type Modal =
   | { kind: "edit"; entry: FileEntry }
   | { kind: "chmod"; entries: FileEntry[] }
@@ -87,13 +90,7 @@ type Modal =
 let consumedJump = 0;
 
 const FOLLOW_KEY = "files.followTerm";
-const readFollow = () => {
-  try {
-    return localStorage.getItem(FOLLOW_KEY) === "1";
-  } catch {
-    return false;
-  }
-};
+const readFollow = () => lsGet(FOLLOW_KEY) === "1";
 
 export function FilesPanel({ hostId }: { hostId: string }) {
   const [cwd, setCwd] = useState("");
@@ -109,7 +106,8 @@ export function FilesPanel({ hostId }: { hostId: string }) {
   const [filter, setFilter] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
-  const [menu, setMenu] = useState<Menu | null>(null);
+  const menu = useContextMenu();
+  const panelExtra = usePanelItems();
   const [modal, setModal] = useState<Modal>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -203,9 +201,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
     const next = !follow;
     setFollow(next);
     followWarned.current = false;
-    try {
-      localStorage.setItem(FOLLOW_KEY, next ? "1" : "0");
-    } catch {}
+    lsSet(FOLLOW_KEY, next ? "1" : "0");
   };
 
   const pullTermCwd = useCallback(async () => {
@@ -224,12 +220,12 @@ export function FilesPanel({ hostId }: { hostId: string }) {
     if (!follow || !termTab) return;
     pullTermCwd();
     const timers: number[] = [];
-    const un = listen<string>("term-enter", (e) => {
+    const un = onTauriEvent<string>("term-enter", (e) => {
       if (e.payload !== termTab) return;
       timers.push(window.setTimeout(pullTermCwd, 300), window.setTimeout(pullTermCwd, 1500));
     });
     return () => {
-      un.then((f) => f());
+      un();
       timers.forEach(clearTimeout);
     };
   }, [follow, termTab, pullTermCwd]);
@@ -284,35 +280,40 @@ export function FilesPanel({ hostId }: { hostId: string }) {
   };
 
   // ---------- context menu ----------
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("mousedown", close);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("blur", close);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("mousedown", close);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("blur", close);
-      window.removeEventListener("resize", close);
-    };
-  }, [menu]);
-
+  // Right-click on an unselected row selects just that row; on a selected row it acts on the whole selection.
   const onRowMenu = (e: React.MouseEvent, entry: FileEntry) => {
-    e.preventDefault();
-    e.stopPropagation();
+    let list = selected;
     if (!sel.has(entry.path)) {
       setSel(new Set([entry.path]));
       setAnchor(entry.path);
+      list = [entry];
     }
-    setMenu({ x: e.clientX, y: e.clientY });
+    const one = list.length === 1 ? list[0] : undefined;
+    menu.open(e, [
+      { label: one?.isDir ? "打开" : "编辑…", icon: one?.isDir ? <FolderOpen /> : <FileCode />, hint: "Enter", disabled: !one, onSelect: () => one && openEntry(one) },
+      { label: "重命名", icon: <Pencil />, hint: "F2", disabled: !one, onSelect: () => one && setRenaming(one.path) },
+      "sep",
+      { label: "复制路径", icon: <Copy />, onSelect: () => copyPath(list) },
+      "sep",
+      { label: "下载…", icon: <Download />, onSelect: () => download(list) },
+      { label: "修改权限…", icon: <KeyRound />, onSelect: () => setModal({ kind: "chmod", entries: list }) },
+      { label: "终端 cd", icon: <SquareTerminal />, disabled: !termTab || !one, onSelect: () => cdInTerminal(one) },
+      "sep",
+      { label: "删除…", icon: <Trash2 />, hint: "Del", danger: true, onSelect: () => setModal({ kind: "delete", entries: list }) },
+    ]);
   };
   const onBlankMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
     setSel(new Set());
-    setMenu({ x: e.clientX, y: e.clientY });
+    menu.open(e, [
+      { label: "新建文件夹…", icon: <FolderPlus />, onSelect: () => setModal({ kind: "mkdir" }) },
+      { label: "新建文件…", icon: <FilePlus />, onSelect: () => setModal({ kind: "touch" }) },
+      { label: "上传文件…", icon: <ArrowUpFromLine />, onSelect: pickUpload },
+      "sep",
+      { label: "复制路径", icon: <Copy />, onSelect: () => copyPath([]) },
+      { label: "终端 cd", icon: <SquareTerminal />, disabled: !termTab || !cwd, onSelect: () => cdInTerminal(undefined) },
+      { label: "刷新", icon: <RefreshCw />, hint: "F5", onSelect: refresh },
+      ...panelExtra(),
+    ]);
   };
 
   // ---------- actions ----------
@@ -322,14 +323,15 @@ export function FilesPanel({ hostId }: { hostId: string }) {
     if (!files.length) return;
     try {
       if (files.length === 1) {
-        const local = await saveDialog({ defaultPath: files[0].name });
+        const local = await saveDialog({ defaultPath: localName(files[0].name) });
         if (!local) return;
         await api.transferStart(hostId, "download", local, files[0].path);
       } else {
         const dir = await openDialog({ directory: true, title: "保存到" });
         if (!dir || Array.isArray(dir)) return;
         const sep = dir.includes("\\") ? "\\" : "/";
-        for (const f of files) await api.transferStart(hostId, "download", dir.replace(/[\\/]+$/, "") + sep + f.name, f.path);
+        // Remote names may hold "\", ":" or be ".." on a hostile server: never let them leave the chosen folder.
+        for (const f of files) await api.transferStart(hostId, "download", dir.replace(/[\\/]+$/, "") + sep + localName(f.name), f.path);
       }
     } catch (e) {
       toast(errMsg(e), "error");
@@ -360,20 +362,14 @@ export function FilesPanel({ hostId }: { hostId: string }) {
   };
 
   const copyPath = async (list: FileEntry[]) => {
-    const text = list.length ? list.map((e) => e.path).join("\n") : cwd;
-    try {
-      await navigator.clipboard.writeText(text);
-      toast("已复制路径", "success");
-    } catch (e) {
-      toast(errMsg(e), "error");
-    }
+    await copyText(list.length ? list.map((e) => e.path).join("\n") : cwd, "路径");
   };
 
   const cdInTerminal = (target: FileEntry | undefined) => {
     const t = termTab ? termBus.get(termTab) : undefined;
     if (!t) return toast("没有活动的终端", "error");
     const dir = target ? (target.isDir ? target.path : parentOf(target.path)) : cwd;
-    t.run(`cd ${shQuote(dir)}`);
+    t.run(`cd ${shq(dir)}`);
     t.focus();
   };
 
@@ -457,7 +453,6 @@ export function FilesPanel({ hostId }: { hostId: string }) {
     } else return;
   };
 
-  const one = selected.length === 1 ? selected[0] : undefined;
   const SortIcon = sort.desc ? ArrowDown : ArrowUp;
   const hiddenCount = showHidden ? 0 : entries.filter((e) => e.name.startsWith(".")).length;
 
@@ -491,8 +486,8 @@ export function FilesPanel({ hostId }: { hostId: string }) {
             }}
             onFocus={(e) => e.currentTarget.select()}
           />
-          <button className={"icon-btn" + (loading ? " spin" : "")} title="刷新 (F5)" onClick={refresh}>
-            <RefreshCw />
+          <button className="icon-btn" title="刷新 (F5)" onClick={refresh}>
+            <RefreshCw className={loading ? "spin" : undefined} />
           </button>
           <button
             className={"icon-btn" + (follow ? " active" : "")}
@@ -507,7 +502,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           </button>
         </div>
         <div className="row">
-          <input className="input sm grow" placeholder="筛选" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <SearchBox size="sm" className="grow" placeholder="筛选" value={filter} onChange={setFilter} />
           <button
             className={"icon-btn" + (showHidden ? " active" : "")}
             title={showHidden ? "不显示隐藏文件" : `显示隐藏文件${hiddenCount ? ` (${hiddenCount})` : ""}`}
@@ -587,34 +582,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
 
       {dragOver && <div className="fp-drop">上传到 {baseName(cwd) || "/"}</div>}
 
-      {menu && (
-        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
-          {selected.length > 0 && (
-            <>
-              <MenuItem icon={one?.isDir ? FolderOpen : FileCode} disabled={!one} onClick={() => one && openEntry(one)}>
-                {one?.isDir ? "打开" : "编辑"}
-              </MenuItem>
-              <MenuItem icon={Download} onClick={() => download(selected)}>下载</MenuItem>
-              <MenuItem icon={Pencil} disabled={!one} onClick={() => one && setRenaming(one.path)}>重命名</MenuItem>
-              <MenuItem icon={KeyRound} onClick={() => setModal({ kind: "chmod", entries: selected })}>修改权限</MenuItem>
-              <MenuItem icon={Copy} onClick={() => copyPath(selected)}>复制路径</MenuItem>
-              <MenuItem icon={SquareTerminal} disabled={selected.length > 1} onClick={() => cdInTerminal(one)}>终端 cd</MenuItem>
-              <MenuItem icon={Trash2} danger onClick={() => setModal({ kind: "delete", entries: selected })}>删除</MenuItem>
-              <hr />
-            </>
-          )}
-          <MenuItem icon={FolderPlus} onClick={() => setModal({ kind: "mkdir" })}>新建文件夹</MenuItem>
-          <MenuItem icon={FilePlus} onClick={() => setModal({ kind: "touch" })}>新建文件</MenuItem>
-          <MenuItem icon={ArrowUpFromLine} onClick={pickUpload}>上传文件</MenuItem>
-          {selected.length === 0 && (
-            <>
-              <MenuItem icon={Copy} onClick={() => copyPath([])}>复制路径</MenuItem>
-              <MenuItem icon={SquareTerminal} onClick={() => cdInTerminal(undefined)}>终端 cd</MenuItem>
-              <MenuItem icon={RefreshCw} onClick={refresh}>刷新</MenuItem>
-            </>
-          )}
-        </ContextMenu>
-      )}
+      {menu.node}
 
       {modal?.kind === "edit" && (
         <EditorDialog hostId={hostId} path={modal.entry.path} name={modal.entry.name} onClose={() => setModal(null)} onSaved={refresh} />
@@ -689,41 +657,5 @@ function RenameInput(props: { initial: string; onDone: (name: string | null) => 
       }}
       onBlur={(e) => finish(e.currentTarget.value)}
     />
-  );
-}
-
-function ContextMenu(props: { x: number; y: number; onClose: () => void; children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: props.x, top: props.y });
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const pad = 8;
-    setPos({
-      left: Math.max(pad, Math.min(props.x, window.innerWidth - r.width - pad)),
-      top: Math.max(pad, Math.min(props.y, window.innerHeight - r.height - pad)),
-    });
-  }, [props.x, props.y]);
-  return (
-    <div
-      ref={ref}
-      className="fp-menu"
-      style={pos}
-      onMouseDown={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
-      onClick={props.onClose}
-    >
-      {props.children}
-    </div>
-  );
-}
-
-function MenuItem(props: { icon: typeof File; danger?: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button className={props.danger ? "danger" : ""} disabled={props.disabled} onClick={props.onClick}>
-      <props.icon />
-      {props.children}
-    </button>
   );
 }

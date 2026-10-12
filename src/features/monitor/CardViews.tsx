@@ -1,11 +1,13 @@
 // Configurable monitor cards: metric (trend / gauge / number), mount point, NIC, command output,
-// systemd service status and a note. Built-in sections live in MonitorPanel.
+// systemd service status, app / container usage and a note. Built-in sections live in MonitorPanel.
 import { ArrowDown, ArrowUp, ChevronRight, LoaderCircle, RefreshCw } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, TweenNum } from "../../components/ui";
 import { api, errMsg, type Sample, type SysInfo } from "../../lib/api";
 import { fmtBytes, fmtRate } from "../../lib/format";
-import { type CardInst, cardTitle, METRICS, type MetricKey, upsertCard } from "./cards";
+import { levelColor, pctColor, PCT_ERR, PCT_WARN } from "../../lib/level";
+import { shq } from "../../lib/remote";
+import { type CardInst, cardTitle, DEFAULT_APPS, METRICS, type MetricKey, upsertCard } from "./cards";
 import type { DetailKind } from "./MonitorDetail";
 import { Sparkline } from "./Sparkline";
 
@@ -38,16 +40,9 @@ export const Go = () => <ChevronRight className="mon-go" />;
 export const isTile = (c: CardInst) =>
   (c.type === "metric" && (c.cfg.view ?? "trend") === "trend") || (c.type === "command" && c.cfg.output === "number");
 
-/** Threshold colour: explicit thresholds win, percent metrics default to 75 / 90. */
-export function levelColor(v: number, warn?: number, err?: number) {
-  if (err !== undefined && v >= err) return "var(--err)";
-  if (warn !== undefined && v >= warn) return "var(--warn)";
-  return undefined;
-}
-
 export function metricThresholds(c: CardInst) {
   const pct = METRICS[c.cfg.metric ?? "cpu"].pct;
-  return { warn: c.cfg.warn ?? (pct ? 75 : undefined), err: c.cfg.err ?? (pct ? 90 : undefined) };
+  return { warn: c.cfg.warn ?? (pct ? PCT_WARN : undefined), err: c.cfg.err ?? (pct ? PCT_ERR : undefined) };
 }
 
 /** Gauge only makes sense with a fixed maximum. */
@@ -132,7 +127,7 @@ export function Gauge(props: { value: number; max: number; color: string; childr
 export function DiskCard({ card, ctx }: { card: CardInst; ctx: CardCtx }) {
   const d = ctx.cur.disks.find((x) => x.mount === card.cfg.mount);
   const pct = d && d.total ? (d.used / d.total) * 100 : 0;
-  const tone = levelColor(pct, card.cfg.warn ?? 75, card.cfg.err ?? 90);
+  const tone = levelColor(pct, card.cfg.warn ?? PCT_WARN, card.cfg.err ?? PCT_ERR);
   return (
     <div className="mon-tile link v-gauge" {...linkProps(() => ctx.open("disk"))}>
       <span className="lbl">
@@ -439,15 +434,15 @@ export function GpuCard({ card, ctx }: { card: CardInst; ctx: CardCtx }) {
                       {Number.isNaN(g.util) ? "-" : `${g.util.toFixed(0)}%`}
                     </span>
                   </div>
-                  <Bar value={Number.isNaN(g.util) ? 0 : g.util} />
+                  <Bar value={Number.isNaN(g.util) ? 0 : g.util} thin />
                   <div className="mon-disk-head mon-gpu-mem">
                     <span>显存</span>
                     <span className="size">
                       {fmtBytes(g.memUsed)} / {fmtBytes(g.memTotal)}
                     </span>
-                    <span className="pct" style={{ color: levelColor(memPct, 75, 90) }}>{memPct.toFixed(0)}%</span>
+                    <span className="pct" style={{ color: pctColor(memPct) }}>{memPct.toFixed(0)}%</span>
                   </div>
-                  <Bar value={memPct} />
+                  <Bar value={memPct} thin />
                 </div>
               );
             })}
@@ -511,6 +506,150 @@ export function ServiceCard({ card, ctx }: { card: CardInst; ctx: CardCtx }) {
   );
 }
 
+// ---------- app / container usage ----------
+
+/** One usage row. CPU follows top / docker stats: 100% = one core. */
+interface Usage {
+  name: string;
+  count?: number;
+  cpu: number;
+  mem: string;
+  memTitle?: string;
+}
+
+const fmtCpu = (v: number) => (v >= 100 ? v.toFixed(0) : v.toFixed(1));
+
+function UsageRows({ rows, cores }: { rows: Usage[]; cores: number }) {
+  return (
+    <div>
+      {rows.map((u) => (
+        <div className="mon-disk" key={u.name}>
+          <div className="mon-disk-head">
+            <span className="ellipsis mono" title={u.name}>
+              {u.name}
+              {(u.count ?? 0) > 1 && <span className="faint">{` ×${u.count}`}</span>}
+            </span>
+            <span className="size" title={u.memTitle ?? "内存"}>{u.mem}</span>
+            <span className="pct" title="CPU，100% 为一个核心" style={{ color: pctColor(u.cpu / cores) }}>
+              {fmtCpu(u.cpu)}%
+            </span>
+          </div>
+          <Bar value={u.cpu} max={100 * cores} thin />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const cpuCount = (ctx: CardCtx) => ctx.cur.cores.length || ctx.info?.cores || 1;
+
+// Two /proc snapshots one second apart; per app: process count, CPU (jiffies delta over total
+// jiffies, scaled to cores) and RSS. An app matches a comm equal to its name or followed by a
+// version / suffix (php-fpm8.1, containerd-shim) but not by a letter or "_" (node_exporter).
+const APPS_AWK = String.raw`BEGIN { ph = 0; n = split(names, N, " ") }
+/^@@$/ { ph = 1; next }
+/^cpu / { t = 0; for (i = 2; i <= NF; i++) t += $i; T[ph] = t; next }
+/^cpu[0-9]/ { if (!ph) nc++; next }
+{
+  i = index($0, "("); if (!i || !match($0, /\) [A-Za-z] /)) next
+  c = substr($0, i + 1, RSTART - i - 1); k = ""
+  for (j = 1; j <= n; j++) if (index(c, N[j]) == 1 && substr(c, length(N[j]) + 1, 1) !~ /[A-Za-z_]/) { k = N[j]; break }
+  if (k == "") next
+  split(substr($0, RSTART + 2), f, " "); u = f[12] + f[13]
+  if (!ph) { U[$1] = u; next }
+  cnt[k]++; rss[k] += f[22] * pg; if ($1 in U) d[k] += u - U[$1]
+}
+END {
+  dt = T[1] - T[0]; if (dt <= 0) dt = 1; if (nc < 1) nc = 1
+  for (j = 1; j <= n; j++) { k = N[j]; if (cnt[k]) printf "%s\t%d\t%.1f\t%.0f\n", k, cnt[k], d[k] * 100 * nc / dt, rss[k] }
+}`;
+
+function appsCommand(names: string[]) {
+  if (!names.length) return "";
+  const script =
+    "s() { grep '^cpu' /proc/stat; cat /proc/[0-9]*/stat 2>/dev/null; }\n" +
+    "a=$(s); sleep 1; b=$(s)\n" +
+    `printf '%s\\n@@\\n%s\\n' "$a" "$b" | awk -v pg="$(getconf PAGESIZE 2>/dev/null || echo 4096)" -v names=${shq(names.join(" "))} ${shq(APPS_AWK)}`;
+  return `sh -c ${shq(script)}`;
+}
+
+export function AppsCard({ card, ctx }: { card: CardInst; ctx: CardCtx }) {
+  // Names are validated against SERVICE_RE.
+  const names = parseServices(card.cfg.apps ?? DEFAULT_APPS);
+  const p = usePoll(ctx.hostId, appsCommand(names), card.cfg.interval ?? 10);
+  if (!names.length)
+    return (
+      <div className="mon-sec">
+        <div className="section-title">{cardTitle(card)}</div>
+        <div className="mon-muted">右键编辑以添加进程</div>
+      </div>
+    );
+  const rows: Usage[] = p.out
+    .split("\n")
+    .map((l) => l.split("\t"))
+    .filter((f) => f.length >= 4)
+    .map((f) => ({ name: f[0], count: Number(f[1]) || 0, cpu: Number(f[2]) || 0, mem: fmtBytes(Number(f[3]) || 0) }))
+    .sort((a, b) => b.cpu - a.cpu);
+  return (
+    <div className="mon-sec">
+      <PollHead title={cardTitle(card)} at={p.at} busy={p.busy} refresh={p.refresh} />
+      {p.error ? (
+        <div className="mon-muted err selectable">{p.error}</div>
+      ) : !p.at ? (
+        <div className="mon-muted">…</div>
+      ) : rows.length ? (
+        <UsageRows rows={rows} cores={cpuCount(ctx)} />
+      ) : (
+        <div className="mon-muted">未发现匹配的进程</div>
+      )}
+    </div>
+  );
+}
+
+const DOCKER_FMT = "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}";
+// Falls back to passwordless sudo when the user is not in the docker group.
+const DOCKER_CMD = `sh -c ${shq(
+  "command -v docker >/dev/null 2>&1 || { echo NO_DOCKER; exit 0; }\n" +
+    `F=${shq(DOCKER_FMT)}\n` +
+    'e=$(docker stats --no-stream --format "$F" 2>&1) && { printf \'%s\\n\' "$e"; exit 0; }\n' +
+    'sudo -n docker stats --no-stream --format "$F" 2>/dev/null && exit 0\n' +
+    'printf \'%s\\n\' "$e" >&2; exit 1',
+)}`;
+
+export function DockerCard({ card, ctx }: { card: CardInst; ctx: CardCtx }) {
+  const p = usePoll(ctx.hostId, DOCKER_CMD, card.cfg.interval ?? 10);
+  const none = p.out.trim() === "NO_DOCKER";
+  const all: Usage[] = none
+    ? []
+    : p.out
+        .split("\n")
+        .map((l) => l.split("\t"))
+        .filter((f) => f.length >= 3 && f[0])
+        .map((f) => ({ name: f[0], cpu: parseFloat(f[1]) || 0, mem: f[2].split("/")[0].trim(), memTitle: f[2].trim() }))
+        .sort((a, b) => b.cpu - a.cpu);
+  const limit = card.cfg.limit ?? 10;
+  const rows = all.slice(0, limit);
+  return (
+    <div className="mon-sec">
+      <PollHead title={cardTitle(card)} at={p.at} busy={p.busy} refresh={p.refresh} />
+      {p.error ? (
+        <div className="mon-muted err selectable">{p.error}</div>
+      ) : none ? (
+        <div className="mon-muted">未安装 Docker</div>
+      ) : !p.at ? (
+        <div className="mon-muted">…</div>
+      ) : rows.length ? (
+        <>
+          <UsageRows rows={rows} cores={cpuCount(ctx)} />
+          {all.length > limit && <div className="mon-svc-sum">另有 {all.length - limit} 个容器</div>}
+        </>
+      ) : (
+        <div className="mon-muted">没有运行中的容器</div>
+      )}
+    </div>
+  );
+}
+
 const STATE_LABEL: Record<string, string> = {
   active: "运行中",
   inactive: "已停止",
@@ -548,7 +687,7 @@ export function NoteCard({ card }: { card: CardInst }) {
         />
       ) : (
         <div
-          className={"mon-note selectable" + (card.cfg.text ? "" : " empty")}
+          className={"mon-note selectable" + (card.cfg.text ? "" : " blank")}
           title="双击编辑"
           onDoubleClick={() => {
             setDraft(card.cfg.text ?? "");

@@ -1,5 +1,5 @@
-/* Vault setup / unlock screen. Starts below the 44px titlebar so the window stays draggable and closable. */
-.vg { position: fixed; inset: 44px 0 0 0; z-index: 150; background: var(--chrome); display: flex; align-items: center; justify-content: center; padding-bottom: 44px; }
+/* Vault setup / unlock screen. Starts below the titlebar so the window stays draggable and closable. */
+.vg { position: fixed; inset: var(--h-titlebar) 0 0 0; z-index: 150; background: var(--chrome); display: flex; align-items: center; justify-content: center; padding-bottom: var(--h-titlebar); }
 .vg-card {
   width: 360px; max-width: calc(100vw - var(--sp-8));
   display: flex; flex-direction: column; gap: var(--sp-4);
@@ -17,9 +17,9 @@
 .vg-warn { color: var(--warn); font-size: var(--fs-sm); text-align: center; margin-top: calc(-1 * var(--sp-2)); }
 .vg-pw { position: relative; }
 .vg-pw > .input { padding-right: calc(var(--h-sm) + var(--sp-1)); }
-.vg-pw > .icon-btn { position: absolute; right: 2px; top: calc((var(--h-md) - var(--h-sm)) / 2); }
+.vg-pw > .icon-btn { position: absolute; right: var(--sp-half); top: calc((var(--h-md) - var(--h-sm)) / 2); }
 .vg-strength { display: flex; align-items: center; gap: var(--sp-1); height: var(--sp-4); font-size: var(--fs-xs); }
-.vg-strength > i { width: 24px; height: 4px; border-radius: 2px; background: var(--bg-4); flex: none; }
+.vg-strength > i { width: var(--h-xs); height: var(--sp-1); border-radius: var(--sp-half); background: var(--bg-4); flex: none; }
 .vg-strength > i.err { background: var(--err); }
 .vg-strength > i.warn { background: var(--warn); }
 .vg-strength > i.ok { background: var(--ok); }
@@ -28,5 +28,3 @@
 
 .vg-err { color: var(--err); font-size: var(--fs-sm); margin-top: calc(-1 * var(--sp-2)); }
 .vg-submit { width: 100%; }
-.vg-spin { animation: vg-spin 0.8s linear infinite; }
-@keyframes vg-spin { to { transform: rotate(360deg); } }

@@ -151,7 +151,10 @@ function inline(src: string): ReactNode[] {
   );
 }
 
-function render(blocks: Block[]): ReactNode[] {
+/** Extra controls rendered under each fenced code block. */
+type CodeActions = (code: string, lang: string) => ReactNode;
+
+function render(blocks: Block[], actions?: CodeActions): ReactNode[] {
   return blocks.map((b, i) => {
     switch (b.t) {
       case "h": {
@@ -161,7 +164,14 @@ function render(blocks: Block[]): ReactNode[] {
       case "p":
         return <p key={i}>{inline(b.text)}</p>;
       case "code":
-        return (
+        return actions ? (
+          <div key={i} className="md-code">
+            <pre className="mono">
+              <code>{b.text}</code>
+            </pre>
+            {actions(b.text, b.lang)}
+          </div>
+        ) : (
           <pre key={i} className="mono">
             <code>{b.text}</code>
           </pre>
@@ -169,12 +179,12 @@ function render(blocks: Block[]): ReactNode[] {
       case "hr":
         return <hr key={i} />;
       case "quote":
-        return <blockquote key={i}>{render(b.children)}</blockquote>;
+        return <blockquote key={i}>{render(b.children, actions)}</blockquote>;
       case "list": {
         const items = b.items.map((it, j) => (
           <li key={j}>
             {inline(it.text)}
-            {render(it.children)}
+            {render(it.children, actions)}
           </li>
         ));
         return b.ordered ? (
@@ -216,6 +226,7 @@ function render(blocks: Block[]): ReactNode[] {
   });
 }
 
-export function Markdown(props: { text: string; className?: string }) {
-  return <div className={props.className ? `md ${props.className}` : "md"}>{render(parse(props.text.replace(/\r\n?/g, "\n").split("\n")))}</div>;
+export function Markdown(props: { text: string; className?: string; codeActions?: CodeActions }) {
+  const blocks = parse(props.text.replace(/\r\n?/g, "\n").split("\n"));
+  return <div className={props.className ? `md ${props.className}` : "md"}>{render(blocks, props.codeActions)}</div>;
 }

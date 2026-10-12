@@ -4,6 +4,8 @@ import { Copy, FileUp, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Confirm, Dialog, Empty, Field, toast } from "../../components/ui";
 import { api, errMsg, type KeyEntry } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
+import { useContextMenu } from "../terminal/ContextMenu";
 import "./hosts.css";
 
 type Mode = "list" | "generate" | "import";
@@ -14,14 +16,7 @@ function shortPub(pub: string) {
   return `${parts[0] ?? ""} …${body.slice(-16)}`;
 }
 
-async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast("公钥已复制", "success");
-  } catch (e) {
-    toast(errMsg(e), "error");
-  }
-}
+const copy = (publicKey: string) => copyText(publicKey, "公钥");
 
 export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyEntry[], created?: KeyEntry) => void }) {
   const [keys, setKeys] = useState<KeyEntry[]>([]);
@@ -33,6 +28,7 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
   const [error, setError] = useState("");
   const [created, setCreated] = useState<KeyEntry | null>(null);
   const [deleting, setDeleting] = useState<KeyEntry | null>(null);
+  const menu = useContextMenu();
 
   const reload = async (newKey?: KeyEntry) => {
     try {
@@ -125,9 +121,27 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
           (keys.length === 0 ? (
             <Empty icon={<KeyRound />} text="还没有密钥" />
           ) : (
-            <div className="km-list">
+            <div
+              className="km-list"
+              onContextMenu={(e) =>
+                menu.open(e, [
+                  { label: "生成密钥…", icon: <Plus />, onSelect: () => reset("generate") },
+                  { label: "导入密钥…", icon: <FileUp />, onSelect: () => reset("import") },
+                ])
+              }
+            >
               {keys.map((k) => (
-                <div className="km-row" key={k.id}>
+                <div
+                  className="km-row"
+                  key={k.id}
+                  onContextMenu={(e) =>
+                    menu.open(e, [
+                      { label: "复制公钥", icon: <Copy />, onSelect: () => copy(k.publicKey) },
+                      "sep",
+                      { label: "删除…", icon: <Trash2 />, danger: true, onSelect: () => setDeleting(k) },
+                    ])
+                  }
+                >
                   <span className="name ellipsis" title={k.name}>{k.name}</span>
                   <span className="grow ellipsis mono faint pub" title={k.publicKey}>
                     {shortPub(k.publicKey)}
@@ -140,6 +154,7 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
                   </button>
                 </div>
               ))}
+              {menu.node}
             </div>
           ))}
 
@@ -159,7 +174,7 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
 
         {mode !== "list" && !created && (
           <form
-            className="he-form"
+            className="stack gap-3"
             onSubmit={(e) => {
               e.preventDefault();
               submit();
@@ -178,13 +193,12 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
                 <Field label="私钥" top>
                   <div className="stack grow">
                     <textarea
-                      className="textarea mono"
+                      className="textarea mono km-priv"
                       rows={7}
                       value={priv}
                       onChange={(e) => setPriv(e.target.value)}
                       placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
                       spellCheck={false}
-                      style={{ fontSize: "var(--fs-xs)" }}
                     />
                     <div className="row">
                       <button type="button" className="btn sm" onClick={pickFile}>

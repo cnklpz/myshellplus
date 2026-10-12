@@ -48,13 +48,14 @@ function Seg<T extends string | number>(props: { value: T; options: [T, string, 
   );
 }
 
-function NumInput(props: { value?: number; placeholder?: string; onChange: (v: number | undefined) => void }) {
+function NumInput(props: { value?: number; placeholder?: string; title?: string; onChange: (v: number | undefined) => void }) {
   return (
     <input
       className="input sm mon-num-input"
       inputMode="decimal"
       value={props.value ?? ""}
       placeholder={props.placeholder}
+      title={props.title}
       onChange={(e) => {
         const t = e.target.value.trim();
         const n = Number(t);
@@ -84,7 +85,7 @@ export function CardDialog(props: {
   // A width the user picked survives switching type.
   const sizeTouched = useRef(false);
   // Commands only run when asked (typing a command must not execute every prefix).
-  const execs = card.type === "command" || card.type === "service";
+  const execs = card.type === "command" || card.type === "service" || card.type === "apps";
   const [probe, setProbe] = useState<CardCfg>(card.cfg);
   useEffect(() => setProbe(card.cfg), [card.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -102,8 +103,8 @@ export function CardDialog(props: {
     setCard(c);
   };
 
-  const preview: CardInst = execs ? { ...card, cfg: { ...cfg, command: probe.command, services: probe.services } } : card;
-  const dirty = execs && (probe.command !== cfg.command || probe.services !== cfg.services);
+  const preview: CardInst = execs ? { ...card, cfg: { ...cfg, command: probe.command, services: probe.services, apps: probe.apps } } : card;
+  const dirty = execs && (probe.command !== cfg.command || probe.services !== cfg.services || probe.apps !== cfg.apps);
   const ctx = props.ctx;
   const metric = cfg.metric ?? "cpu";
   const canGauge = ctx ? gaugeMax(metric, ctx.cur, ctx.info) > 0 : !!METRICS[metric].pct;
@@ -302,7 +303,28 @@ export function CardDialog(props: {
         </Field>
       )}
 
-      {(execs || card.type === "gpu") && (
+      {card.type === "apps" && (
+        <Field label="进程" top hint="进程名，空格分隔">
+          <input
+            className="input sm mono"
+            value={cfg.apps ?? ""}
+            placeholder="nginx php-fpm mysqld"
+            spellCheck={false}
+            onChange={(e) => setCfg({ apps: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") setProbe(cfg);
+            }}
+          />
+        </Field>
+      )}
+
+      {card.type === "docker" && (
+        <Field label="数量">
+          <Seg value={cfg.limit ?? 10} options={[[5, "5"], [10, "10"], [20, "20"]]} onChange={(limit) => setCfg({ limit })} />
+        </Field>
+      )}
+
+      {(execs || card.type === "gpu" || card.type === "docker") && (
         <Field label="刷新">
           <Seg value={cfg.interval ?? 30} options={[[5, "5 秒"], [10, "10 秒"], [30, "30 秒"], [60, "1 分"], [300, "5 分"]]} onChange={(interval) => setCfg({ interval })} />
         </Field>
@@ -310,8 +332,8 @@ export function CardDialog(props: {
 
       {(card.type === "metric" || card.type === "disk" || (card.type === "command" && cfg.output === "number")) && (
         <Field label="告警">
-          <NumInput value={cfg.warn} placeholder={card.type === "command" || !METRICS[metric].pct ? "警告" : "75"} onChange={(warn) => setCfg({ warn })} />
-          <NumInput value={cfg.err} placeholder={card.type === "command" || !METRICS[metric].pct ? "危险" : "90"} onChange={(err) => setCfg({ err })} />
+          <NumInput value={cfg.warn} title="警告阈值" placeholder={card.type === "command" || !METRICS[metric].pct ? "警告" : "75"} onChange={(warn) => setCfg({ warn })} />
+          <NumInput value={cfg.err} title="危险阈值" placeholder={card.type === "command" || !METRICS[metric].pct ? "危险" : "90"} onChange={(err) => setCfg({ err })} />
         </Field>
       )}
 

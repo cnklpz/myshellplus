@@ -1,10 +1,13 @@
 // The hold-to-pick terminal switcher (its own small always-on-top window, label "switcher").
 // Rust shows it on the hotkey and sends "switcher-commit" when the hotkey's modifiers are released.
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, type SwitcherShow, type SwitcherTarget } from "../../lib/api";
-import { maskAddr } from "../../lib/privacy";
+import { maskAddr, maskText } from "../../lib/privacy";
+import { Empty } from "../../components/ui";
+import { useApp } from "../../store";
+import { onTauriEvent } from "../../lib/events";
+import { lsGet } from "../../lib/storage";
 import { applyTheme } from "../../lib/themes";
 import { readSnapshot } from "./sync";
 import "./switcher.css";
@@ -18,35 +21,30 @@ interface Item {
   kind: "ok" | "off" | "host";
 }
 
-function lsGet(k: string): string | null {
-  try {
-    return localStorage.getItem(k);
-  } catch {
-    return null;
-  }
-}
-
 async function loadItems(openOnly: boolean): Promise<Item[]> {
   const tabs = readSnapshot()?.tabs ?? [];
   const hosts = await api.hostList().catch(() => []);
-  const mask = lsGet("privacyMode") === "1";
+  const mask = useApp.getState().privacy;
   const addr = (id: string) => {
     const h = hosts.find((x) => x.id === id);
     if (!h) return "";
-    const a = `${h.username}@${h.host}`;
-    return mask ? maskAddr(a) : a;
+    return `${h.username}@${mask ? maskAddr(h.host) : h.host}`;
+  };
+  const name = (title: string, hostId: string) => {
+    const h = hosts.find((x) => x.id === hostId);
+    return mask ? maskText(title, h?.host) : title;
   };
   const items: Item[] = tabs.map((t) => ({
     key: "t:" + t.id,
     target: { tabId: t.id },
-    title: t.title,
+    title: name(t.title, t.hostId),
     meta: addr(t.hostId),
     kind: t.alive ? "ok" : "off",
   }));
   if (!openOnly) {
     const open = new Set(tabs.map((t) => t.hostId));
     for (const h of hosts) {
-      if (!open.has(h.id)) items.push({ key: "h:" + h.id, target: { hostId: h.id }, title: h.name, meta: addr(h.id), kind: "host" });
+      if (!open.has(h.id)) items.push({ key: "h:" + h.id, target: { hostId: h.id }, title: name(h.name, h.id), meta: addr(h.id), kind: "host" });
     }
   }
   return items;
@@ -105,13 +103,17 @@ export function Switcher() {
 
   useEffect(() => {
     const un = [
-      listen<SwitcherShow>("switcher-show", (e) => void open(e.payload)),
-      listen("switcher-next", () => move(1)),
-      listen("switcher-commit", () => commit()),
-      getCurrentWindow().onFocusChanged((e) => {
-        if (!e.payload && st.current.visible) hide();
-      }),
+      onTauriEvent<SwitcherShow>("switcher-show", (e) => void open(e.payload)),
+      onTauriEvent("switcher-next", () => move(1)),
+      onTauriEvent("switcher-commit", () => commit()),
     ];
+    let unFocus: (() => void) | null = null;
+    let gone = false;
+    getCurrentWindow()
+      .onFocusChanged((e) => {
+        if (!e.payload && st.current.visible) hide();
+      })
+      .then((f) => (gone ? f() : (unFocus = f)), () => {});
     // Summoned while this window was still loading.
     api.switcherPending().then((p) => p && open(p));
     const onKey = (e: KeyboardEvent) => {
@@ -128,7 +130,9 @@ export function Switcher() {
     window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("keydown", onKey, true);
-      un.forEach((p) => p.then((f) => f()));
+      gone = true;
+      un.forEach((f) => f());
+      unFocus?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -137,7 +141,7 @@ export function Switcher() {
   return (
     <div className="sw" ref={root}>
       {items.length === 0 ? (
-        <div className="sw-empty">没有打开的终端</div>
+        <Empty sm text="没有打开的终端" />
       ) : (
         <div className="sw-list" ref={list}>
           {items.map((it, i) => (

@@ -1,12 +1,14 @@
 // Global UI state. Backend state (sessions, connections) lives in Rust; this store mirrors it.
 import { create } from "zustand";
+import { lsGet, lsGetJson, lsSet, lsSetJson } from "./lib/storage";
 import { api, type ConnFailure, type ConnState, type ConnStep, type Host, type VaultStatus } from "./lib/api";
 
 /** Main pages switched from the sidebar. */
 export type View = "home" | "overview" | "terminal";
 /** Tools opened as large modals from the sidebar footer. */
 export type ToolModal = "batch" | "tunnels" | "snippets" | "agent" | "settings";
-export type SidePanel = "monitor" | "files" | "snippets" | null;
+export type SidePanelId = "monitor" | "files" | "toolbox" | "docker" | "ai" | "snippets";
+export type SidePanel = SidePanelId | null;
 
 export interface TermTab {
   /** Rust terminal session id ("pending-N" while the first connect is in flight) */
@@ -56,6 +58,8 @@ interface AppState {
   settingsSection: string | null;
   /** Terminal page group filter ("" = all) */
   sidePanel: SidePanel;
+  /** Side panels shown as tabs; the rest sit in the "+" menu. */
+  sidePins: SidePanelId[];
   /** Host shown in the side panel (defaults to the active tab's host) */
   panelHostId: string | null;
   /** Request for the files panel to show a directory (n changes on every request). */
@@ -78,6 +82,7 @@ interface AppState {
   setModal: (m: ToolModal | null) => void;
   openSettings: (section: string) => void;
   setSidePanel: (p: SidePanel) => void;
+  setSidePins: (pins: SidePanelId[]) => void;
   setPanelHost: (id: string | null) => void;
   openFilesAt: (hostId: string, path: string) => void;
   addTab: (t: TermTab) => void;
@@ -93,14 +98,16 @@ interface AppState {
 
 let toastSeq = 1;
 
-const PRIVACY_KEY = "privacyMode";
-function loadPrivacy(): boolean {
-  try {
-    return localStorage.getItem(PRIVACY_KEY) === "1";
-  } catch {
-    return false;
-  }
+const PINS_KEY = "sidePins";
+const ALL_PANELS: SidePanelId[] = ["monitor", "files", "toolbox", "docker", "ai", "snippets"];
+const DEFAULT_PINS: SidePanelId[] = ["monitor", "files", "toolbox", "docker"];
+function loadPins(): SidePanelId[] {
+  const v = lsGetJson<unknown>(PINS_KEY, null);
+  return Array.isArray(v) ? v.filter((x): x is SidePanelId => ALL_PANELS.includes(x)) : DEFAULT_PINS;
 }
+
+const PRIVACY_KEY = "privacyMode";
+const loadPrivacy = () => lsGet(PRIVACY_KEY) === "1";
 
 export const useApp = create<AppState>((set, get) => ({
   vault: null,
@@ -115,6 +122,7 @@ export const useApp = create<AppState>((set, get) => ({
   modal: null,
   settingsSection: null,
   sidePanel: "monitor",
+  sidePins: loadPins(),
   panelHostId: null,
   filesJump: null,
   toasts: [],
@@ -155,6 +163,10 @@ export const useApp = create<AppState>((set, get) => ({
   setModal: (modal) => set({ modal }),
   openSettings: (settingsSection) => set({ modal: "settings", settingsSection }),
   setSidePanel: (sidePanel) => set({ sidePanel }),
+  setSidePins: (sidePins) => {
+    lsSetJson(PINS_KEY, sidePins);
+    set({ sidePins });
+  },
   setPanelHost: (panelHostId) => set({ panelHostId }),
   openFilesAt: (hostId, path) =>
     set({ sidePanel: "files", panelHostId: hostId, filesJump: { hostId, path, n: (get().filesJump?.n ?? 0) + 1 } }),
@@ -176,11 +188,7 @@ export const useApp = create<AppState>((set, get) => ({
   openEditor: (editingHost) => set({ editingHost }),
   setImportOpen: (importOpen) => set({ importOpen }),
   setPrivacy: (privacy) => {
-    try {
-      localStorage.setItem(PRIVACY_KEY, privacy ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
+    lsSet(PRIVACY_KEY, privacy ? "1" : "0");
     set({ privacy });
   },
   toast: (text, kind = "info", action) => {
@@ -190,5 +198,11 @@ export const useApp = create<AppState>((set, get) => ({
   },
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
 }));
+
+// Other windows (the switcher) share localStorage: follow privacy mode changes made in the main window.
+if (typeof window !== "undefined")
+  window.addEventListener("storage", (e) => {
+    if (e.key === PRIVACY_KEY) useApp.setState({ privacy: e.newValue === "1" });
+  });
 
 export const hostById = (id: string | null | undefined) => useApp.getState().hosts.find((h) => h.id === id);

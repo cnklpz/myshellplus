@@ -31,6 +31,8 @@ export function ContextMenu(props: {
   x: number;
   y: number;
   items: MenuItem[];
+  /** Drop-down from a button: right-align to it, below, or above when there is no room. */
+  anchor?: DOMRect;
   /** `refocus` is true when the menu was dismissed from the keyboard (Esc). */
   onClose: (refocus: boolean) => void;
 }) {
@@ -49,12 +51,18 @@ export function ContextMenu(props: {
     const { width: w, height: h } = el.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
+    const a = props.anchor;
     let left = props.x;
     let top = props.y;
-    if (left + w > vw - EDGE) left = Math.max(EDGE, left - w);
-    if (top + h > vh - EDGE) top = Math.max(EDGE, Math.min(top - h, vh - EDGE - h));
+    if (a) {
+      left = Math.max(EDGE, Math.min(a.right - w, vw - EDGE - w));
+      top = a.bottom + EDGE + h > vh - EDGE ? Math.max(EDGE, a.top - EDGE - h) : a.bottom + EDGE;
+    } else {
+      if (left + w > vw - EDGE) left = Math.max(EDGE, left - w);
+      if (top + h > vh - EDGE) top = Math.max(EDGE, Math.min(top - h, vh - EDGE - h));
+    }
     setPos({ left, top, ready: true });
-  }, [props.x, props.y]);
+  }, [props.x, props.y, props.anchor]);
 
   useEffect(() => {
     const close = () => live.current.onClose(false);
@@ -117,11 +125,16 @@ export function ContextMenu(props: {
       className="ctx-menu"
       role="menu"
       style={{ left: pos.left, top: pos.top, visibility: pos.ready ? "visible" : "hidden" }}
-      onContextMenu={(e) => e.preventDefault()}
+      // No menu on the menu: neither the browser's, the global one, nor an owner row's (events bubble through the portal).
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       // Portaled, but React events still bubble to the owner: keep them from reaching row / drag handlers.
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
       onMouseLeave={() => setActive(-1)}
     >
       {items.map((it, i) =>
@@ -156,6 +169,13 @@ export function ContextMenu(props: {
 export function useContextMenu() {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const open = useCallback((e: ReactMouseEvent, items: MenuItem[]) => {
+    // An inner row (or the menu itself) already handled this right-click: an outer container must not reopen.
+    if (e.isDefaultPrevented()) return;
+    // Portaled dialogs / dropdowns bubble through React to their owner row: not the row's menu.
+    if (!(e.currentTarget as Node).contains(e.target as Node)) return;
+    // A text field inside the row keeps the global edit menu (cut / copy / paste).
+    const field = (e.target as Element).closest?.("input:not([type=checkbox]):not([type=radio]), textarea, [contenteditable='true']");
+    if (field && field !== e.currentTarget) return;
     e.preventDefault();
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, items });

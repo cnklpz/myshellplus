@@ -22,6 +22,9 @@ use crate::util::{new_id, now_ms};
 const RING_CAP: usize = 512 * 1024;
 const PENDING_CAP: usize = 8 * 1024 * 1024;
 
+/// Lock order: `ring` -> `pending` -> `sink`. `push` holds ring+pending together and the flusher
+/// holds pending+sink together, so `attach` (ring+pending+sink) sees every byte exactly once:
+/// either in the replayed ring or in a later flush to the new sink.
 pub struct TermSession {
     pub id: String,
     pub host_id: String,
@@ -54,12 +57,11 @@ impl TermSession {
             if over > 0 {
                 r.drain(..over);
             }
+            let mut p = self.pending.lock();
+            if p.len() + data.len() <= PENDING_CAP {
+                p.extend_from_slice(data);
+            }
         }
-        let mut p = self.pending.lock();
-        if p.len() + data.len() <= PENDING_CAP {
-            p.extend_from_slice(data);
-        }
-        drop(p);
         self.notify.notify_one();
     }
 
@@ -179,9 +181,13 @@ pub async fn open(ctx: Arc<Ctx>, host_id: String, cols: u32, rows: u32) -> Resul
         loop {
             fs.notify.notified().await;
             tokio::time::sleep(Duration::from_millis(12)).await;
-            let chunk = std::mem::take(&mut *fs.pending.lock());
-            if !chunk.is_empty() {
-                if let Some(sink) = fs.sink.lock().as_ref() {
+            {
+                // Take and send under the pending lock (see TermSession lock order).
+                let mut p = fs.pending.lock();
+                let chunk = std::mem::take(&mut *p);
+                if !chunk.is_empty()
+                    && let Some(sink) = fs.sink.lock().as_ref()
+                {
                     let _ = sink.send(Response::new(chunk));
                 }
             }
@@ -197,12 +203,17 @@ pub async fn open(ctx: Arc<Ctx>, host_id: String, cols: u32, rows: u32) -> Resul
 /// Attach the UI to a session; replays buffered output first.
 pub fn attach(ctx: &Ctx, id: &str, sink: Channel<Response>) -> Result<TermInfo> {
     let s = ctx.terms.get(id)?;
-    let replay: Vec<u8> = s.ring.lock().iter().copied().collect();
-    s.pending.lock().clear();
+    // Snapshot + clear + swap atomically w.r.t. push and the flusher (lock order ring -> pending -> sink).
+    let ring = s.ring.lock();
+    let mut pending = s.pending.lock();
+    let mut cur = s.sink.lock();
+    let replay: Vec<u8> = ring.iter().copied().collect();
+    pending.clear();
     if !replay.is_empty() {
         let _ = sink.send(Response::new(replay));
     }
-    *s.sink.lock() = Some(sink);
+    *cur = Some(sink);
+    drop((cur, pending, ring));
     Ok(s.info())
 }
 

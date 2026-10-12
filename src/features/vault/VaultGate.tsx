@@ -143,7 +143,7 @@ export function VaultGate() {
         {error && <div className="vg-err selectable">{error}</div>}
 
         <button type="submit" className="btn primary vg-submit" disabled={busy}>
-          {busy && <Loader2 className="vg-spin" />}
+          {busy && <Loader2 className="spin" />}
           {setup ? "创建" : "解锁"}
         </button>
       </form>

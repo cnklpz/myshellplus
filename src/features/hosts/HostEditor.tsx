@@ -1,19 +1,20 @@
 // Add/edit host dialog (driven by store.editingHost: "" = new, id = edit).
 // Two panes: live preview + section nav on the left, scrolling form on the right.
 import {
-  Ban, Bot, CircleCheck, CircleX, Eye, EyeOff, Fingerprint, KeyRound, LoaderCircle, Lock, Network, Palette, Server, X,
+  Ban, Bot, CircleCheck, CircleX, Eye, EyeOff, Fingerprint, Import, KeyRound, LoaderCircle, Lock, Network, Palette, Server, X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Combobox } from "../../components/Combobox";
 import { Select } from "../../components/Select";
-import { toast, useEscClose } from "../../components/ui";
+import { DialogHeader, EscLayer, Toggle, toast, useEscClose } from "../../components/ui";
 import { api, errMsg, type AgentKey, type AgentPolicy, type Host, type KeyEntry, type OpHost, type OpStatus } from "../../lib/api";
+import { LABEL_COLORS } from "../../lib/themes";
 import { useApp } from "../../store";
 import { KeyManager } from "./KeyManager";
 import { OnePasswordImport } from "./OnePasswordImport";
 import "./hosts.css";
 
-// Host label colors are stored per host (user data), so they are literal values, not theme tokens.
-const COLORS = ["#ef6b6b", "#e5a54b", "#4cc38a", "#3fb6a8", "#5fa8f5", "#c58af0"];
+const COLORS = LABEL_COLORS;
 
 const POLICIES: { id: AgentPolicy; label: string; desc: string }[] = [
   { id: "deny", label: "禁止", desc: "Agent 不可见" },
@@ -34,14 +35,17 @@ const SECTIONS: { id: SecId; label: string; icon: ReactNode }[] = [
 function blankHost(): Host {
   return {
     id: "", name: "", groupName: "", host: "", port: 22, username: "root", authType: "password",
-    passwordSecret: null, keyId: null, jumpHostId: null, tags: [], color: "", notes: "",
+    passwordSecret: null, keyId: null, jumpHostId: null, proxyEnabled: false, proxyHost: "", proxyPort: 1080, proxyUser: "", proxySecret: null,
+    tags: [], color: "", notes: "",
     agentPolicy: "ask", sort: 0, updatedAt: 0,
   };
 }
 
-type ErrKey = "host" | "port" | "username" | "key";
+type ErrKey = "host" | "port" | "username" | "key" | "proxyHost" | "proxyPort";
 type Errors = Partial<Record<ErrKey, string>>;
-const ERR_SECTION: Record<ErrKey, SecId> = { host: "basic", port: "basic", username: "auth", key: "auth" };
+const ERR_SECTION: Record<ErrKey, SecId> = {
+  host: "basic", port: "basic", username: "auth", key: "auth", proxyHost: "net", proxyPort: "net",
+};
 
 type TestState = { state: "idle" | "run" | "ok" | "err"; msg?: string };
 
@@ -75,6 +79,10 @@ export function HostEditor() {
   /** undefined = untouched (keep), "" = clear, other = new password */
   const [password, setPassword] = useState<string | undefined>(undefined);
   const [showPw, setShowPw] = useState(false);
+  const [proxyPort, setProxyPort] = useState(() => String(existing?.proxyPort || 1080));
+  /** same semantics as `password` */
+  const [proxyPw, setProxyPw] = useState<string | undefined>(undefined);
+  const [showProxyPw, setShowProxyPw] = useState(false);
   const [keys, setKeys] = useState<KeyEntry[]>([]);
   const [keyMgr, setKeyMgr] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
@@ -82,6 +90,7 @@ export function HostEditor() {
   const [test, setTest] = useState<TestState>({ state: "idle" });
   const [active, setActive] = useState<SecId>("basic");
   const [op, setOp] = useState<OpStatus | null>(null);
+  const [opOpen, setOpOpen] = useState(false);
   /** null = not loaded; error text when the agent is unreachable */
   const [agentKeys, setAgentKeys] = useState<AgentKey[] | null>(null);
   const [agentErr, setAgentErr] = useState("");
@@ -90,17 +99,26 @@ export function HostEditor() {
   const secRefs = useRef<Partial<Record<SecId, HTMLElement | null>>>({});
   const navLock = useRef(0);
 
+  // A key list from the key manager is newer than the initial fetch: a late initial reply must not replace it.
+  const keysFromMgr = useRef(false);
   useEffect(() => {
-    api.keyList().then(setKeys).catch((e) => toast(errMsg(e), "error"));
+    api
+      .keyList()
+      .then((list) => !keysFromMgr.current && setKeys(list))
+      .catch((e) => toast(errMsg(e), "error"));
     api.opStatus().then(setOp).catch(() => setOp(null));
   }, []);
 
+  // Only the latest agent-key request may land (auto load + 刷新 can overlap).
+  const agentSeq = useRef(0);
   const loadAgentKeys = () => {
+    const my = ++agentSeq.current;
     setAgentErr("");
     api
       .agentKeys()
-      .then(setAgentKeys)
+      .then((list) => my === agentSeq.current && setAgentKeys(list))
       .catch((e) => {
+        if (my !== agentSeq.current) return;
         setAgentKeys([]);
         setAgentErr(errMsg(e));
       });
@@ -115,10 +133,16 @@ export function HostEditor() {
   const clearErr = (k: ErrKey) => setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e));
   const close = () => openEditor(null);
   const hasSavedPw = !!existing?.passwordSecret;
+  const hasSavedProxyPw = !!existing?.proxySecret;
   const showAgent = !!op?.agent || !!op?.detected || h.authType === "agent";
   const agentLabel = op?.detected ? "1Password" : "SSH Agent";
 
   // key_id means a key-list id for "key" and a fingerprint for "agent", so it never carries over.
+  const setProxyEnabled = (v: boolean) => {
+    set("proxyEnabled", v);
+    if (!v) setErrors((e) => ({ ...e, proxyHost: undefined, proxyPort: undefined }));
+  };
+
   const setAuth = (t: Host["authType"]) => setH((p) => (p.authType === t ? p : { ...p, authType: t, keyId: null }));
 
   const fromOnePassword = (o: OpHost) => {
@@ -139,7 +163,7 @@ export function HostEditor() {
   // A finished test result goes stale as soon as connection-relevant fields change.
   useEffect(() => {
     setTest((t) => (t.state === "run" || t.state === "idle" ? t : { state: "idle" }));
-  }, [h.host, port, h.username, h.authType, h.keyId, h.jumpHostId, password]);
+  }, [h.host, port, h.username, h.authType, h.keyId, h.jumpHostId, password, h.proxyEnabled, h.proxyHost, proxyPort, h.proxyUser, proxyPw]);
 
   // Highlight the nav item of the section at the top of the scroll pane.
   useEffect(() => {
@@ -200,6 +224,13 @@ export function HostEditor() {
     if (!Number.isInteger(p) || p < 1 || p > 65535) e.port = "端口 1–65535";
     if (!h.username.trim()) e.username = "请填写用户名";
     if (h.authType === "key" && !h.keyId) e.key = "请选择密钥";
+    const proxyHost = h.proxyHost.trim();
+    const pp = Number(proxyPort);
+    if (h.proxyEnabled) {
+      if (!proxyHost) e.proxyHost = "请填写代理地址";
+      else if (/\s/.test(proxyHost)) e.proxyHost = "地址不能包含空格";
+      if (!Number.isInteger(pp) || pp < 1 || pp > 65535) e.proxyPort = "端口 1–65535";
+    }
     setErrors(e);
     const bad = Object.keys(e) as ErrKey[];
     if (bad.length) {
@@ -216,6 +247,9 @@ export function HostEditor() {
       host: h.host.trim(),
       username: h.username.trim(),
       port: p,
+      proxyHost,
+      proxyPort: Number.isInteger(pp) && pp >= 1 && pp <= 65535 ? pp : h.proxyPort || 1080,
+      proxyUser: h.proxyUser.trim(),
       tags: allTags,
       keyId: h.keyId ?? null,
     };
@@ -225,10 +259,11 @@ export function HostEditor() {
   const save = async (): Promise<Host | null> => {
     const data = validate();
     if (!data) return null;
-    const saved = await api.hostSave(data, password);
+    const saved = await api.hostSave(data, password, proxyPw);
     await useApp.getState().refreshHosts();
     setH(saved);
     setPassword(undefined);
+    setProxyPw(undefined);
     if (isNew) openEditor(saved.id);
     return saved;
   };
@@ -264,11 +299,11 @@ export function HostEditor() {
     }
   };
 
-  // Ctrl+S / Ctrl+Enter saves — only while no nested dialog (key manager) is on top.
+  // Ctrl+S / Ctrl+Enter saves — only while no nested dialog (key manager, 1Password) is on top.
   const saveRef = useRef(onSave);
   saveRef.current = onSave;
   useEffect(() => {
-    if (keyMgr) return;
+    if (keyMgr || opOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.key === "s" || e.key === "S" || e.key === "Enter") {
@@ -278,9 +313,10 @@ export function HostEditor() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [keyMgr]);
+  }, [keyMgr, opOpen]);
 
   const pwPlaceholder = hasSavedPw && password === undefined ? "已保存" : password === "" && hasSavedPw ? "将清除" : "";
+  const proxyPwPlaceholder = hasSavedProxyPw && proxyPw === undefined ? "已保存" : proxyPw === "" && hasSavedProxyPw ? "将清除" : "";
   const secErr = (id: SecId) => (Object.keys(errors) as ErrKey[]).some((k) => errors[k] && ERR_SECTION[k] === id);
   const secRef = (id: SecId) => (el: HTMLElement | null) => {
     secRefs.current[id] = el;
@@ -292,15 +328,10 @@ export function HostEditor() {
   const tint = h.color ? { background: `color-mix(in srgb, ${h.color} 16%, transparent)`, color: h.color } : undefined;
 
   return (
-    <>
+    <EscLayer>
       <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
         <div className="he-dialog" role="dialog" aria-label={isNew ? "新建服务器" : "编辑服务器"}>
-          <header className="he-head">
-            <span className="grow ellipsis">{isNew ? "新建服务器" : `编辑 · ${existing?.name}`}</span>
-            <button className="icon-btn" onClick={close} title="关闭">
-              <X />
-            </button>
-          </header>
+          <DialogHeader title={isNew ? "新建服务器" : `编辑 · ${existing?.name}`} onClose={close} />
 
           <div className="he-body">
             <aside className="he-side">
@@ -330,6 +361,13 @@ export function HostEditor() {
                   </button>
                 ))}
               </nav>
+
+              {isNew && op?.detected && (
+                <button type="button" className="btn he-side-foot" onClick={() => setOpOpen(true)}>
+                  <Import />
+                  从 1Password 导入…
+                </button>
+              )}
             </aside>
 
             <form
@@ -340,10 +378,8 @@ export function HostEditor() {
                 onSave();
               }}
             >
-              {isNew && op?.detected && <OnePasswordImport status={op} onPick={fromOnePassword} />}
-
               <section className="he-sec" data-sec="basic" ref={secRef("basic")}>
-                <h3 className="he-sec-title">基本信息</h3>
+                <h3 className="section-title">基本信息</h3>
                 <div className="he-grid">
                   <div className="he-field">
                     <Label text="名称" />
@@ -351,12 +387,7 @@ export function HostEditor() {
                   </div>
                   <div className="he-field">
                     <Label text="分组" />
-                    <input className="input" list="he-groups" value={h.groupName} onChange={(e) => set("groupName", e.target.value)} placeholder="生产" />
-                    <datalist id="he-groups">
-                      {groups.map((g) => (
-                        <option key={g} value={g} />
-                      ))}
-                    </datalist>
+                    <Combobox value={h.groupName} options={groups} placeholder="生产" onChange={(v) => set("groupName", v)} />
                   </div>
                 </div>
                 <div className="he-grid addr">
@@ -391,7 +422,7 @@ export function HostEditor() {
               </section>
 
               <section className="he-sec" data-sec="auth" ref={secRef("auth")}>
-                <h3 className="he-sec-title">认证</h3>
+                <h3 className="section-title">认证</h3>
                 <div className="he-field">
                   <Label text="用户名" />
                   <input
@@ -489,7 +520,7 @@ export function HostEditor() {
                 ) : (
                   <div className="he-field">
                     <Label text="密钥" />
-                    <div className="row">
+                    <div className="row he-key-row">
                       <Select
                         width="100%"
                         className={errors.key ? "invalid" : undefined}
@@ -500,8 +531,8 @@ export function HostEditor() {
                           clearErr("key");
                         }}
                       />
-                      <button type="button" className="btn" style={{ flex: "none" }} onClick={() => setKeyMgr(true)}>
-                        <KeyRound /> 管理
+                      <button type="button" className="btn" onClick={() => setKeyMgr(true)}>
+                        <KeyRound /> 管理…
                       </button>
                     </div>
                     <Err text={errors.key} />
@@ -510,7 +541,7 @@ export function HostEditor() {
               </section>
 
               <section className="he-sec" data-sec="net" ref={secRef("net")}>
-                <h3 className="he-sec-title">网络</h3>
+                <h3 className="section-title">网络</h3>
                 <div className="he-field">
                   <Label text="跳板机" />
                   <Select
@@ -520,10 +551,90 @@ export function HostEditor() {
                     onChange={(v) => set("jumpHostId", v || null)}
                   />
                 </div>
+                <div className="he-field">
+                  <Label text="SOCKS5 代理" action={<Toggle on={h.proxyEnabled} onChange={setProxyEnabled} />} />
+                </div>
+                {h.proxyEnabled && (
+                  <>
+                    <div className="he-grid addr">
+                      <div className="he-field">
+                        <Label text="代理地址" />
+                        <input
+                          className={"input mono" + (errors.proxyHost ? " invalid" : "")}
+                          value={h.proxyHost}
+                          onChange={(e) => {
+                            set("proxyHost", e.target.value);
+                            clearErr("proxyHost");
+                          }}
+                          placeholder="127.0.0.1"
+                          spellCheck={false}
+                        />
+                        <Err text={errors.proxyHost} />
+                        {!errors.proxyHost && h.jumpHostId && <div className="field-hint">使用跳板机时代理不生效</div>}
+                      </div>
+                      <div className="he-field">
+                        <Label text="端口" />
+                        <input
+                          className={"input num mono" + (errors.proxyPort ? " invalid" : "")}
+                          value={proxyPort}
+                          inputMode="numeric"
+                          onChange={(e) => {
+                            setProxyPort(e.target.value.replace(/\D/g, ""));
+                            clearErr("proxyPort");
+                          }}
+                        />
+                        <Err text={errors.proxyPort} />
+                      </div>
+                    </div>
+                    <div className="he-grid">
+                      <div className="he-field">
+                        <Label text="代理用户名" />
+                        <input
+                          className="input"
+                          value={h.proxyUser}
+                          onChange={(e) => set("proxyUser", e.target.value)}
+                          spellCheck={false}
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="he-field">
+                        <Label
+                          text="代理密码"
+                          action={
+                            hasSavedProxyPw &&
+                            (proxyPw === undefined ? (
+                              <button type="button" className="link-btn" onClick={() => setProxyPw("")}>清除</button>
+                            ) : (
+                              <button type="button" className="link-btn" onClick={() => setProxyPw(undefined)}>撤销</button>
+                            ))
+                          }
+                        />
+                        <div className="pw-wrap">
+                          <input
+                            className="input"
+                            type={showProxyPw ? "text" : "password"}
+                            value={proxyPw ?? ""}
+                            placeholder={proxyPwPlaceholder}
+                            onChange={(e) => setProxyPw(e.target.value === "" ? undefined : e.target.value)}
+                            autoComplete="new-password"
+                          />
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title={showProxyPw ? "隐藏" : "显示"}
+                            onClick={() => setShowProxyPw(!showProxyPw)}
+                          >
+                            {showProxyPw ? <EyeOff /> : <Eye />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </section>
 
               <section className="he-sec" data-sec="look" ref={secRef("look")}>
-                <h3 className="he-sec-title">外观与备注</h3>
+                <h3 className="section-title">外观与备注</h3>
                 <div className="he-field">
                   <Label text="颜色" />
                   <div className="he-swatches">
@@ -595,10 +706,7 @@ export function HostEditor() {
               </section>
 
               <section className="he-sec" data-sec="agent" ref={secRef("agent")}>
-                <div className="he-sec-head">
-                  <h3 className="he-sec-title">Agent 权限</h3>
-                  <div className="he-sec-caption">AI 助手在此服务器上可执行的操作</div>
-                </div>
+                <h3 className="section-title">Agent 权限</h3>
                 <div className="he-options" role="radiogroup">
                   {POLICIES.map((p) => (
                     <button
@@ -651,6 +759,7 @@ export function HostEditor() {
         <KeyManager
           onClose={() => setKeyMgr(false)}
           onChanged={(list, created) => {
+            keysFromMgr.current = true;
             setKeys(list);
             if (created) clearErr("key");
             setH((p) =>
@@ -659,6 +768,8 @@ export function HostEditor() {
           }}
         />
       )}
-    </>
+
+      {opOpen && op && <OnePasswordImport status={op} onPick={fromOnePassword} onClose={() => setOpOpen(false)} />}
+    </EscLayer>
   );
 }

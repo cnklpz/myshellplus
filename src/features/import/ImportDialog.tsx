@@ -2,7 +2,7 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { CircleX, Download, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Dialog, Field, Toggle, toast } from "../../components/ui";
+import { Dialog, Empty, Field, Toggle, toast } from "../../components/ui";
 import { type ImportCandidate, type ImportPreview, type ImportResult, type ImportSource, api, errMsg } from "../../lib/api";
 import { useApp } from "../../store";
 import "./import.css";
@@ -325,7 +325,7 @@ function PreviewStep(props: {
       <div className="imp-bar">
         <div className="row">
           <span className="lbl">分组</span>
-          <input className="input sm" style={{ width: 160 }} placeholder="保留原分组" value={props.group} onChange={(e) => props.setGroup(e.target.value)} />
+          <input className="input sm" placeholder="原分组" value={props.group} onChange={(e) => props.setGroup(e.target.value)} />
         </div>
         {dupCount > 0 && (
           <div className="row">
@@ -346,18 +346,18 @@ function PreviewStep(props: {
       </div>
 
       {hosts.length === 0 ? (
-        <div className="empty">未找到服务器</div>
+        <Empty text="未找到服务器" />
       ) : (
         <div className="imp-table">
           <table className="table">
             <colgroup>
-              <col style={{ width: 36 }} />
-              <col style={{ width: "22%" }} />
-              <col style={{ width: "14%" }} />
+              <col className="c-check" />
+              <col className="c-name" />
+              <col className="c-group" />
               <col />
-              <col style={{ width: 64 }} />
-              <col style={{ width: "13%" }} />
-              <col style={{ width: 72 }} />
+              <col className="c-auth" />
+              <col className="c-jump" />
+              <col className="c-state" />
             </colgroup>
             <thead>
               <tr>
@@ -419,8 +419,8 @@ function DoneStep(props: { result: ImportResult }) {
       <div className="imp-stats">
         {stats.map(([l, v]) => (
           <div key={l} className="imp-stat">
-            <div className="v">{v}</div>
-            <div className="l">{l}</div>
+            <div className="stat-value">{v}</div>
+            <div className="stat-label">{l}</div>
           </div>
         ))}
       </div>

@@ -58,7 +58,7 @@ static SWITCH_OPEN: AtomicBool = AtomicBool::new(false);
 static PENDING: Mutex<Option<serde_json::Value>> = Mutex::new(None);
 
 pub fn settings(db: &Db) -> HotkeySettings {
-    db.setting("hotkeys").ok().flatten().unwrap_or_default()
+    db.setting_or_default("hotkeys")
 }
 
 pub fn status() -> HotkeyStatus {

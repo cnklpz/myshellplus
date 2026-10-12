@@ -89,10 +89,10 @@ impl Vault {
         let v = Self { db, key: RwLock::new(None) };
         // Device mode, or a password vault remembered on this device: open without asking.
         let _ = v.try_dpapi_unlock();
-        if !v.is_unlocked() && !v.password_enabled() {
-            if let Err(e) = v.init_device() {
-                log::error!("保险库初始化失败: {e:#}");
-            }
+        if !v.is_unlocked() && !v.password_enabled()
+            && let Err(e) = v.init_device()
+        {
+            log::error!("保险库初始化失败: {e:#}");
         }
         v
     }
@@ -137,8 +137,7 @@ impl Vault {
         rand::thread_rng().fill_bytes(&mut salt);
         let kek = derive_kek(password, &salt)?;
         let (n, ct) = seal(&kek, key.as_ref())?;
-        self.db.meta_set(META_SALT, &salt)?;
-        self.db.meta_set(META_WRAPPED, &pack(&n, &ct))?;
+        self.db.meta_set_many(&[(META_SALT, &salt), (META_WRAPPED, &pack(&n, &ct))])?;
         if !remember {
             self.db.meta_del(META_DPAPI)?;
         }
@@ -184,8 +183,7 @@ impl Vault {
         rand::thread_rng().fill_bytes(&mut salt);
         let kek = derive_kek(new, &salt)?;
         let (n, ct) = seal(&kek, key.as_ref())?;
-        self.db.meta_set(META_SALT, &salt)?;
-        self.db.meta_set(META_WRAPPED, &pack(&n, &ct))?;
+        self.db.meta_set_many(&[(META_SALT, &salt), (META_WRAPPED, &pack(&n, &ct))])?;
         Ok(())
     }
 

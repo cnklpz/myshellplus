@@ -4,11 +4,10 @@ html, body, #root { background: var(--bg-1); overflow: hidden; }
 .sw-row {
   display: flex; align-items: center; gap: var(--sp-3);
   height: var(--h-md); padding: 0 var(--sp-3); border-radius: var(--radius-sm);
-  color: var(--fg-1); cursor: default; font-size: 14px;
+  color: var(--fg-1); cursor: default; font-size: var(--fs-md);
 }
 .sw-row.on { background: var(--accent-soft); color: var(--fg-0); }
 .sw-title { flex: 1 1 auto; }
 .sw-meta { flex: 0 1 auto; max-width: 50%; color: var(--fg-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .sw-hollow { background: transparent; box-shadow: inset 0 0 0 1.5px var(--fg-2); }
 .sw-sep { padding: var(--sp-2) var(--sp-3) var(--sp-1); color: var(--fg-2); font-size: var(--fs-xs); }
-.sw-empty { height: var(--h-md); display: flex; align-items: center; padding: 0 var(--sp-3); color: var(--fg-2); }

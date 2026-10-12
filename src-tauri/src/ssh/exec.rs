@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use russh::ChannelMsg;
 use serde::Serialize;
 
@@ -21,14 +21,32 @@ pub struct ExecResult {
 
 /// Run a non-interactive command on the shared connection.
 pub async fn run(conn: &Conn, command: &str, timeout: Duration) -> Result<ExecResult> {
+    run_input(conn, command, None, timeout).await
+}
+
+/// Like `run`, writing `stdin` to the command first (secrets go here, never into the command line).
+pub async fn run_input(conn: &Conn, command: &str, stdin: Option<&[u8]>, timeout: Duration) -> Result<ExecResult> {
     let start = Instant::now();
-    let mut ch = conn.handle.channel_open_session().await?;
-    ch.exec(true, command).await?;
+    let deadline = tokio::time::Instant::now() + timeout;
+    // Channel open, exec and the stdin write count against the timeout too (a stuck server
+    // could otherwise hang them forever).
+    let setup = async {
+        let ch = conn.handle.channel_open_session().await?;
+        ch.exec(true, command).await?;
+        if let Some(data) = stdin {
+            ch.data(data).await?;
+            ch.eof().await?;
+        }
+        Ok::<_, anyhow::Error>(ch)
+    };
+    let mut ch = tokio::time::timeout_at(deadline, setup)
+        .await
+        .map_err(|_| anyhow!("执行超时：服务器未响应"))??;
     let mut out = Vec::new();
     let mut err = Vec::new();
     let mut code = None;
     let mut truncated = false;
-    let res = tokio::time::timeout(timeout, async {
+    let res = tokio::time::timeout_at(deadline, async {
         while let Some(msg) = ch.wait().await {
             match msg {
                 ChannelMsg::Data { data } => {
@@ -54,7 +72,7 @@ pub async fn run(conn: &Conn, command: &str, timeout: Duration) -> Result<ExecRe
     .await;
     let timed_out = res.is_err();
     if timed_out {
-        let _ = ch.close().await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), ch.close()).await;
     }
     Ok(ExecResult {
         stdout: String::from_utf8_lossy(&out).into_owned(),

@@ -1,6 +1,6 @@
 // Main window side of the terminal switcher: publishes the tab list in most-recently-used order
 // (the switcher window reads it from the shared localStorage) and handles its pick.
-import { listen } from "@tauri-apps/api/event";
+import { onTauriEvent } from "../../lib/events";
 import type { SwitcherTarget } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
 import { useApp } from "../../store";
@@ -49,7 +49,7 @@ export function startSwitcherSync(): () => void {
   const unsub = useApp.subscribe((s, prev) => {
     if (s.tabs !== prev.tabs || s.activeTab !== prev.activeTab || s.view !== prev.view || s.modal !== prev.modal) publish();
   });
-  const unlisten = listen<SwitcherTarget>("switcher-pick", (e) => {
+  const unlisten = onTauriEvent<SwitcherTarget>("switcher-pick", (e) => {
     const t = e.payload;
     const s = useApp.getState();
     if ("tabId" in t) {
@@ -65,6 +65,6 @@ export function startSwitcherSync(): () => void {
   });
   return () => {
     unsub();
-    unlisten.then((f) => f());
+    unlisten();
   };
 }

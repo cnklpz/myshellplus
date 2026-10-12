@@ -1,35 +1,39 @@
 // Upload/download progress strip shown at the bottom of the files panel.
-import { listen } from "@tauri-apps/api/event";
 import { ArrowDownToLine, ArrowUpFromLine, Check, Copy, FolderOpen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Bar, toast } from "../../components/ui";
 import { api, errMsg, type TransferInfo } from "../../lib/api";
-import { fmtBytes, fmtRate } from "../../lib/format";
+import { copyText } from "../../lib/clipboard";
+import { onTauriEvent } from "../../lib/events";
+import { baseName, fmtBytes, fmtRate } from "../../lib/format";
+import { chainAddrs, maskText, usePrivacy } from "../../lib/privacy";
 import { useApp } from "../../store";
 import { useContextMenu } from "../terminal/ContextMenu";
 
-const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 
 /** Subscribes to transfer events; `onFinished` fires once per transfer that reaches "done". */
 export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo) => void }) {
   const [map, setMap] = useState<Record<string, TransferInfo>>({});
   const menu = useContextMenu();
+  const priv = usePrivacy();
   const finishedCb = useRef(props.onFinished);
   finishedCb.current = props.onFinished;
   const seen = useRef(new Map<string, TransferInfo["state"]>());
 
   useEffect(() => {
     let alive = true;
-    let unlisten: (() => void) | null = null;
-    listen<TransferInfo>("transfer", (e) => {
+    const unlisten = onTauriEvent<TransferInfo>("transfer", (e) => {
       const t = e.payload;
       if (t.hostId !== props.hostId) return;
       const prev = seen.current.get(t.id);
       seen.current.set(t.id, t.state);
       if (t.state === "done" && prev !== "done") finishedCb.current?.(t);
-      if (t.state === "error" && prev !== "error") toast(`传输失败：${t.error ?? baseName(t.remote)}`, "error");
+      if (t.state === "error" && prev !== "error") {
+        const why = t.error ?? baseName(t.remote);
+        toast(`传输失败：${useApp.getState().privacy ? maskText(why, chainAddrs(t.hostId)) : why}`, "error");
+      }
       setMap((m) => ({ ...m, [t.id]: t }));
-    }).then((f) => (alive ? (unlisten = f) : f()));
+    });
     api
       .transferList()
       .then((list) => {
@@ -47,15 +51,11 @@ export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo
       .catch(() => {});
     return () => {
       alive = false;
-      unlisten?.();
+      unlisten();
     };
   }, [props.hostId]);
 
-  const copy = (text: string) =>
-    navigator.clipboard.writeText(text).then(
-      () => toast("已复制路径", "success"),
-      () => toast("复制失败", "error"),
-    );
+  const copy = (text: string) => copyText(text, "路径");
   const cancel = (id: string) => api.transferCancel(id).catch((e) => toast(errMsg(e), "error"));
 
   const list = Object.values(map).sort((a, b) => (a.state === "running" ? 0 : 1) - (b.state === "running" ? 0 : 1));
@@ -109,7 +109,7 @@ export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo
               {t.state === "running" || t.state === "done" ? fmtBytes(t.total) : t.state === "cancelled" ? "已取消" : ""}
             </span>
             {t.state === "running" ? (
-              <button className="icon-btn" title="取消" onClick={() => cancel(t.id)}>
+              <button className="icon-btn sm" title="取消" onClick={() => cancel(t.id)}>
                 <X />
               </button>
             ) : t.state === "done" ? (
@@ -119,14 +119,14 @@ export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo
             )}
             {t.state === "running" && (
               <div className="prog">
-                <Bar value={pct} />
+                <Bar value={pct} thin />
                 <span className="num">{pct.toFixed(0)}%</span>
                 <span className="num">{fmtRate(t.speed)}</span>
               </div>
             )}
             {t.state === "error" && (
-              <div className="prog" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-                <span className="ellipsis selectable err" title={t.error ?? ""}>{t.error || "失败"}</span>
+              <div className="prog msg">
+                <span className="ellipsis selectable err" title={priv.hostText(t.error ?? "", t.hostId)}>{t.error ? priv.hostText(t.error, t.hostId) : "失败"}</span>
               </div>
             )}
           </div>

@@ -1,0 +1,56 @@
+/* Side panel AI chat. Prefixed `aip-` so it never collides with the terminal Ctrl+K bar (`.ai-bar`/`.ai-input` in terminal.css). */
+.aip-root { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.aip-list {
+  flex: 1 1 auto; min-height: 0; overflow: auto;
+  padding: var(--sp-4) var(--sp-4) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-4);
+}
+.aip-list > .empty { flex: 1; }
+
+.aip-user {
+  align-self: flex-end; max-width: 88%; padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--sp-1) var(--radius-lg);
+  background: var(--bg-3); color: var(--fg-0);
+  white-space: pre-wrap; word-break: break-word; font-size: var(--fs-md); line-height: 1.6;
+}
+.aip-reply-wrap { min-width: 0; }
+.aip-reply { min-width: 0; font-size: var(--fs-md); line-height: 1.7; color: var(--fg-0); word-break: break-word; }
+.aip-reply .md-code { margin: var(--sp-2) 0; }
+.aip-reply .md-code pre { margin: 0; }
+
+.aip-code-actions { display: flex; gap: var(--sp-1); margin-top: var(--sp-1); }
+.aip-code-actions .btn { color: var(--fg-1); }
+.aip-code-actions .btn:hover { color: var(--fg-0); }
+
+.aip-wait { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.aip-wait svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+.aip-err {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--err); font-size: var(--fs-sm);
+}
+.aip-err > span { flex: 1; min-width: 0; word-break: break-word; }
+.aip-err svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; }
+
+/* Composer: one surface holding the textarea and its toolbar; edges on the list's --sp-4 line. */
+.aip-composer {
+  flex: none; margin: 0 var(--sp-4) var(--sp-3);
+  display: flex; flex-direction: column;
+  border-radius: var(--radius-lg); background: var(--bg-2);
+  box-shadow: inset 0 0 0 1px var(--line); transition: box-shadow 0.12s;
+}
+.aip-composer:focus-within { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
+.aip-text {
+  display: block; width: 100%; min-height: 64px; max-height: 200px;
+  padding: var(--sp-3) var(--sp-3) var(--sp-1);
+  border: none; outline: none; resize: none; background: transparent;
+  color: var(--fg-0); font: inherit; font-size: var(--fs-md); line-height: 1.6; user-select: text;
+}
+.aip-text::placeholder { color: var(--fg-2); }
+.aip-tools { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2) var(--sp-2) var(--sp-3); }
+.aip-opt { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--fg-1); cursor: pointer; }
+.aip-tools .icon-btn { color: var(--fg-2); }
+.aip-tools .icon-btn:hover { color: var(--fg-0); }
+.aip-tools .icon-btn svg { width: var(--icon-sm); height: var(--icon-sm); }
+.aip-send { width: var(--h-sm); padding: 0; justify-content: center; border-radius: 50%; }
+.aip-send svg { width: var(--icon-sm); height: var(--icon-sm); }

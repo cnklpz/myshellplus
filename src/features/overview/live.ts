@@ -1,5 +1,5 @@
 // Live data for the overview: monitor samples for many hosts, and a bulk connect queue.
-import { listen } from "@tauri-apps/api/event";
+import { onTauriEvent } from "../../lib/events";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { api, type Sample, type SysInfo } from "../../lib/api";
 import { useApp } from "../../store";
@@ -20,8 +20,9 @@ interface MonitorEvent {
 }
 
 /**
- * Subscribe to the monitor of every host in `ids` (only pass connected hosts: subscribing
- * makes the backend connect). Renders are batched to one per animation frame.
+ * Subscribe to the monitor of every host in `ids`. Pass connected hosts only: the backend does not connect
+ * for a monitor and stops it on disconnect, so a host that reconnects re-enters the list and is subscribed
+ * again. Renders are batched to one per animation frame.
  */
 export function useMonitors(ids: string[]): Record<string, HostLive> {
   const data = useRef<Record<string, HostLive>>({});
@@ -37,9 +38,7 @@ export function useMonitors(ids: string[]): Record<string, HostLive> {
 
   // One event listener for all hosts.
   useEffect(() => {
-    let alive = true;
-    let un: (() => void) | null = null;
-    listen<MonitorEvent>("monitor", (e) => {
+    const un = onTauriEvent<MonitorEvent>("monitor", (e) => {
       const p = e.payload;
       const cur = data.current[p.hostId];
       if (!cur) return;
@@ -52,13 +51,9 @@ export function useMonitors(ids: string[]): Record<string, HostLive> {
         [p.hostId]: { history, info: p.info ?? cur.info, error: p.error ?? (p.sample ? null : cur.error) },
       };
       bump();
-    }).then((f) => {
-      if (alive) un = f;
-      else f();
     });
     return () => {
-      alive = false;
-      un?.();
+      un();
       cancelAnimationFrame(frame.current);
       frame.current = 0;
     };

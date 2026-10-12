@@ -82,6 +82,11 @@ pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
             password_secret: Some(secret),
             key_id: None,
             jump_host_id: None,
+            proxy_enabled: false,
+            proxy_host: String::new(),
+            proxy_port: crate::db::default_proxy_port(),
+            proxy_user: String::new(),
+            proxy_secret: None,
             tags: vec![],
             color: String::new(),
             notes: String::new(),
@@ -151,7 +156,7 @@ pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
     });
 
     step!("monitor", async {
-        monitor::subscribe(ctx.clone(), host_id.clone());
+        monitor::subscribe(ctx.clone(), host_id.clone(), false);
         for _ in 0..40 {
             tokio::time::sleep(Duration::from_millis(250)).await;
             if ctx.monitors.latest(&host_id).is_some() {
@@ -159,7 +164,7 @@ pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
             }
         }
         let snap = ctx.monitors.snapshot(&host_id);
-        monitor::unsubscribe(&ctx, &host_id);
+        monitor::unsubscribe(&ctx, &host_id, false);
         if let Some(e) = snap.error {
             bail!(e);
         }
@@ -198,10 +203,10 @@ pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
             async move {
                 for _ in 0..200 {
                     tokio::time::sleep(Duration::from_millis(100)).await;
-                    if let Some(t) = ctx.transfers.list().into_iter().find(|t| t.id == id) {
-                        if t.state != "running" {
-                            return Ok::<_, anyhow::Error>(t);
-                        }
+                    if let Some(t) = ctx.transfers.list().into_iter().find(|t| t.id == id)
+                        && t.state != "running"
+                    {
+                        return Ok::<_, anyhow::Error>(t);
                     }
                 }
                 bail!("transfer timeout")

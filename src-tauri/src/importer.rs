@@ -180,6 +180,11 @@ pub fn apply(ctx: &Ctx, hosts: Vec<Candidate>, snippets: Vec<Snippet>, backup: O
                 password_secret: None,
                 key_id: None,
                 jump_host_id: None,
+                proxy_enabled: false,
+                proxy_host: String::new(),
+                proxy_port: crate::db::default_proxy_port(),
+                proxy_user: String::new(),
+                proxy_secret: None,
                 tags: c.tags.clone(),
                 color: String::new(),
                 notes: c.notes.clone(),
@@ -258,7 +263,7 @@ pub fn apply(ctx: &Ctx, hosts: Vec<Candidate>, snippets: Vec<Snippet>, backup: O
             res.tunnels += 1;
         }
     }
-    let _ = ctx.db.audit("user", None, "import", &format!("{} hosts", res.hosts), "ok");
+    crate::util::log_err("写入审计日志失败", ctx.db.audit("user", None, "import", &format!("{} hosts", res.hosts), "ok"));
     Ok(res)
 }
 
@@ -441,8 +446,13 @@ fn urldecode(s: &str) -> String {
     let mut out = Vec::new();
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+        if b[i] == b'%' {
+            // Byte slice + from_utf8: `s[i + 1..i + 3]` would panic inside a multi-byte char.
+            let hex = b
+                .get(i + 1..i + 3)
+                .filter(|h| h.iter().all(u8::is_ascii_hexdigit))
+                .and_then(|h| std::str::from_utf8(h).ok());
+            if let Some(v) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
                 out.push(v);
                 i += 3;
                 continue;
@@ -765,11 +775,12 @@ pub fn export_backup(ctx: &Ctx, path: &str, secrets: bool, password: Option<&str
         json!({ "format": "myshellplus-backup", "version": 1, "encrypted": false, "data": payload })
     };
     std::fs::write(path, serde_json::to_vec_pretty(&file)?)?;
-    let _ = ctx.db.audit("user", None, "export", path, match (with_secrets, encrypt) {
+    let result = match (with_secrets, encrypt) {
         (false, _) => "no secrets",
         (true, true) => "with secrets, encrypted",
         (true, false) => "with secrets, plain text",
-    });
+    };
+    crate::util::log_err("写入审计日志失败", ctx.db.audit("user", None, "export", path, result));
     Ok(hosts.len())
 }
 
@@ -864,6 +875,15 @@ mod tests {
         let r = parse_csv("主机名称,协议,主机地址,端口,用户名,认证方式,分组,标签,备注,系统类型\r\nweb,SSH,10.0.0.1,22,root,密码,生产,,,Linux\r\n", "iShell", &mut vec![]).unwrap();
         assert_eq!(r.len(), 1);
         assert!(r[0].password.is_none() && r[0].key_text.is_none());
+    }
+
+    #[test]
+    fn urldecode_multibyte() {
+        assert_eq!(urldecode("a%20b"), "a b");
+        assert_eq!(urldecode("%e4%b8%ad"), "中");
+        assert_eq!(urldecode("%中文"), "%中文");
+        assert_eq!(urldecode("x%"), "x%");
+        assert_eq!(urldecode("x%4"), "x%4");
     }
 
     #[test]

@@ -1,14 +1,14 @@
 //! SFTP file browsing and transfers with progress events.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 use parking_lot::Mutex;
-use russh_sftp::protocol::OpenFlags;
+use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
 use serde::Serialize;
 use tauri::Emitter;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -49,10 +49,10 @@ pub async fn list_dir(ctx: Arc<Ctx>, host_id: String, path: String) -> Result<(S
         let ft = e.file_type();
         let full = join(&real, &name);
         let mut is_dir = ft.is_dir();
-        if ft.is_symlink() {
-            if let Ok(t) = sftp.metadata(full.clone()).await {
-                is_dir = t.is_dir();
-            }
+        if ft.is_symlink()
+            && let Ok(t) = sftp.metadata(full.clone()).await
+        {
+            is_dir = t.is_dir();
         }
         out.push(FileEntry {
             name,
@@ -232,23 +232,181 @@ async fn run_transfer(ctx: &Arc<Ctx>, t: &mut TransferInfo, cancel: &AtomicBool)
         }};
     }
 
+    // Both directions write to a hidden temp file next to the target and rename it on success, so
+    // a failed or cancelled transfer never leaves a truncated file under the real name.
     if t.direction == "upload" {
         let mut src = tokio::fs::File::open(&t.local).await?;
         t.total = src.metadata().await?.len();
-        let mut dst = sftp
-            .open_with_flags(t.remote.clone(), OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE)
-            .await?;
-        pump!(src, dst);
+        let remote = t.remote.clone();
+        let old = sftp.symlink_metadata(remote.clone()).await.ok();
+        // Replacing a symlink or a hard-linked file by rename would break the link: write in place.
+        let in_place = match &old {
+            Some(md) if md.file_type().is_symlink() => true,
+            Some(md) if md.file_type().is_file() => remote_nlink(&conn, &remote).await > 1,
+            _ => false,
+        };
+        let tmp = remote_temp_path(&remote);
+        let opened = if in_place {
+            None
+        } else {
+            match sftp.open_with_flags(tmp.clone(), OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE).await {
+                Ok(f) => Some(f),
+                // The directory isn't writable, but the file itself may be.
+                Err(e) if old.is_some() && is_permission_denied(&e) => None,
+                Err(e) => return Err(e.into()),
+            }
+        };
+        let Some(mut dst) = opened else {
+            let mut dst = sftp
+                .open_with_flags(remote, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE)
+                .await?;
+            pump!(src, dst);
+            t.speed = t.done as f64 / start.elapsed().as_secs_f64().max(0.001);
+            return Ok(());
+        };
+        let res = async {
+            pump!(src, dst);
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        if let Err(e) = res {
+            crate::util::log_err("删除临时文件失败", sftp.remove_file(tmp).await);
+            return Err(e);
+        }
+        if let Some(md) = &old {
+            copy_owner_perms(&sftp, &tmp, md).await;
+        }
+        replace_remote(&sftp, &tmp, &remote, old.is_some()).await?;
     } else {
+        let local = PathBuf::from(&t.local);
+        check_local_path(&local)?;
         let mut src = sftp.open(t.remote.clone()).await?;
         t.total = src.metadata().await?.size.unwrap_or(0);
-        let local = PathBuf::from(&t.local);
         if let Some(p) = local.parent() {
             tokio::fs::create_dir_all(p).await?;
         }
-        let mut dst = tokio::fs::File::create(&local).await?;
-        pump!(src, dst);
+        let tmp = local_temp_path(&local);
+        let res = async {
+            let mut dst = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).await?;
+            pump!(src, dst);
+            drop(dst);
+            tokio::fs::rename(&tmp, &local).await?;
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        if let Err(e) = res {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(e);
+        }
     }
     t.speed = t.done as f64 / start.elapsed().as_secs_f64().max(0.001);
     Ok(())
+}
+
+fn is_permission_denied(e: &russh_sftp::client::error::Error) -> bool {
+    matches!(e, russh_sftp::client::error::Error::Status(s) if s.status_code == StatusCode::PermissionDenied)
+}
+
+/// Hard-link count of a remote file. SFTP v3 attributes don't carry it, so ask `stat`; 1 when
+/// unknown (non-GNU stat, exec refused).
+async fn remote_nlink(conn: &crate::ssh::Conn, path: &str) -> u64 {
+    let cmd = format!("stat -c %h -- {} 2>/dev/null", sh_quote(path));
+    match exec::run(conn, &cmd, Duration::from_secs(15)).await {
+        Ok(r) if r.exit_code == Some(0) => r.stdout.trim().parse().unwrap_or(1),
+        _ => 1,
+    }
+}
+
+/// Give the new file the old one's mode and owner. Best effort: changing the owner needs root.
+async fn copy_owner_perms(sftp: &russh_sftp::client::SftpSession, tmp: &str, old: &FileAttributes) {
+    if let Some(perms) = old.permissions {
+        let attrs = FileAttributes { permissions: Some(perms & 0o7777), ..FileAttributes::empty() };
+        crate::util::log_err("复制文件权限失败", sftp.set_metadata(tmp.to_string(), attrs).await);
+    }
+    if let (Some(uid), Some(gid)) = (old.uid, old.gid) {
+        let attrs = FileAttributes { uid: Some(uid), gid: Some(gid), ..FileAttributes::empty() };
+        crate::util::log_err("复制文件属主失败", sftp.set_metadata(tmp.to_string(), attrs).await);
+    }
+}
+
+/// Move the uploaded temp file over the target. SFTP v3 rename doesn't overwrite, so an existing
+/// target is removed first; once it's gone the temp file is the only copy and is never deleted.
+async fn replace_remote(sftp: &russh_sftp::client::SftpSession, tmp: &str, remote: &str, exists: bool) -> Result<()> {
+    let first = match sftp.rename(tmp.to_string(), remote.to_string()).await {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    let cleanup = |e: anyhow::Error| async move {
+        crate::util::log_err("删除临时文件失败", sftp.remove_file(tmp.to_string()).await);
+        Err(e)
+    };
+    if !exists {
+        return cleanup(anyhow!("重命名临时文件失败: {first}")).await;
+    }
+    if let Err(e) = sftp.remove_file(remote.to_string()).await {
+        return cleanup(anyhow!("无法替换原文件: {e}")).await;
+    }
+    sftp.rename(tmp.to_string(), remote.to_string())
+        .await
+        .map_err(|e| anyhow!("原文件已删除但重命名失败，上传内容保存在 {tmp}: {e}"))
+}
+
+/// `dir/.name.myshell-<random>.part`: hidden, and never clobbers a user's own `name.part`.
+fn temp_name(name: &str) -> String {
+    format!(".{name}.myshell-{:08x}.part", rand::random::<u32>())
+}
+
+fn remote_temp_path(remote: &str) -> String {
+    match remote.rsplit_once('/') {
+        Some((dir, name)) => format!("{dir}/{}", temp_name(name)),
+        None => temp_name(remote),
+    }
+}
+
+fn local_temp_path(p: &Path) -> PathBuf {
+    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    p.with_file_name(temp_name(&name))
+}
+
+/// Download targets come from remote file names: never let one escape the chosen directory.
+fn check_local_path(p: &Path) -> Result<()> {
+    if !p.is_absolute() {
+        bail!("本地路径必须是绝对路径");
+    }
+    for c in p.components() {
+        match c {
+            Component::ParentDir => bail!("本地路径不能包含 .."),
+            // `name:stream` would write an NTFS alternate data stream.
+            Component::Normal(n) if cfg!(windows) && n.to_string_lossy().contains(':') => {
+                bail!("文件名不能包含冒号")
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_path_checks() {
+        let base = if cfg!(windows) { "C:\\dl" } else { "/dl" };
+        assert!(check_local_path(Path::new(&format!("{base}/a.txt"))).is_ok());
+        assert!(check_local_path(Path::new(&format!("{base}/../evil.txt"))).is_err());
+        assert!(check_local_path(Path::new(&format!("{base}/x/../../evil"))).is_err());
+        assert!(check_local_path(Path::new("relative.txt")).is_err());
+        if cfg!(windows) {
+            assert!(check_local_path(Path::new("C:\\dl\\..\\evil")).is_err());
+            assert!(check_local_path(Path::new("C:\\dl\\a:stream")).is_err());
+        }
+        let tmp = local_temp_path(Path::new(&format!("{base}/a.txt")));
+        assert_eq!(tmp.parent(), Some(Path::new(base)));
+        let name = tmp.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(".a.txt.myshell-") && name.ends_with(".part"), "{name}");
+        let r = remote_temp_path("/srv/a.txt");
+        assert!(r.starts_with("/srv/.a.txt.myshell-") && r.ends_with(".part"), "{r}");
+        assert!(remote_temp_path("/a.txt").starts_with("/.a.txt.myshell-"));
+    }
 }

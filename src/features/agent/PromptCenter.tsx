@@ -1,11 +1,12 @@
 // Dialogs for backend prompts: host key confirmation and agent approvals.
 // Pending prompts are re-fetched on mount, so a webview reload doesn't lose them.
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { ShieldAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Dialog, toast } from "../../components/ui";
 import { api, errMsg, type AgentPrompt, type HostKeyPrompt, type PromptEvent } from "../../lib/api";
+import { onTauriEvent } from "../../lib/events";
+import { usePrivacy } from "../../lib/privacy";
 import "./PromptCenter.css";
 
 const ACTIONS: Record<string, string> = {
@@ -39,8 +40,8 @@ export function PromptCenter() {
       });
     const remove = (id: string) => setQueue((q) => q.filter((p) => p.id !== id));
     const un = [
-      listen<PromptEvent>("prompt", (e) => add([e.payload])),
-      listen<string>("prompt-closed", (e) => remove(e.payload)),
+      onTauriEvent<PromptEvent>("prompt", (e) => add([e.payload])),
+      onTauriEvent<string>("prompt-closed", (e) => remove(e.payload)),
     ];
     api
       .promptList()
@@ -48,7 +49,7 @@ export function PromptCenter() {
       .catch(() => {});
     return () => {
       alive = false;
-      un.forEach((p) => p.then((f) => f()));
+      un.forEach((f) => f());
     };
   }, []);
 
@@ -100,7 +101,8 @@ function fmtSecs(s: number) {
 function HostKeyDialog(props: { ev: PromptEvent<HostKeyPrompt>; more: number; onAnswer: (v: unknown) => void }) {
   const d = props.ev.data;
   const left = useCountdown(props.ev.expires);
-  const addr = `${d.host}:${d.port}`;
+  const priv = usePrivacy();
+  const addr = `${priv.addr(d.host)}:${d.port}`;
   return (
     <Dialog
       title={d.changed ? `主机密钥已改变 · ${addr}` : `首次连接 · ${addr}`}
@@ -132,7 +134,7 @@ function HostKeyDialog(props: { ev: PromptEvent<HostKeyPrompt>; more: number; on
             <span>可能遭到中间人攻击，未确认请拒绝</span>
           </div>
         )}
-        <div className="pc-kv">
+        <div className="kv loose">
           <span>算法</span>
           <span className="mono selectable">{d.algo}</span>
           {d.changed && (
@@ -152,6 +154,7 @@ function HostKeyDialog(props: { ev: PromptEvent<HostKeyPrompt>; more: number; on
 function AgentDialog(props: { ev: PromptEvent<AgentPrompt>; more: number; onAnswer: (v: unknown) => void }) {
   const d = props.ev.data;
   const left = useCountdown(props.ev.expires);
+  const priv = usePrivacy();
   return (
     <Dialog
       title={
@@ -179,10 +182,10 @@ function AgentDialog(props: { ev: PromptEvent<AgentPrompt>; more: number; onAnsw
       }
     >
       <div className="stack gap-3">
-        <div className="pc-kv">
+        <div className="kv loose">
           <span>服务器</span>
           <span className="ellipsis">
-            {d.hostName} <span className="faint mono">{d.host}</span>
+            {priv.text(d.hostName, d.host)} <span className="faint mono">{priv.addr(d.host)}</span>
           </span>
           <span>操作</span>
           <span>{ACTIONS[d.action] ?? d.action}</span>

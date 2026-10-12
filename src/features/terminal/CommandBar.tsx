@@ -6,6 +6,8 @@ import { Dialog } from "../../components/ui";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "../../components/ui";
 import { api, errMsg } from "../../lib/api";
+import { usePrivacy } from "../../lib/privacy";
+import { lsGet, lsSet } from "../../lib/storage";
 import { termBus } from "../../lib/termBus";
 import { type TermTab, useApp } from "../../store";
 
@@ -84,25 +86,16 @@ const DANGER =
   /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r|-r\s+-f|-f\s+-r|-[a-z]*r[a-z]*\s+--force|--recursive\s+--force|--force\s+--recursive)|\b(reboot|shutdown|poweroff|halt)\b|\binit\s+[06]\b|\bmkfs(\.\w+)?\b|\bdd\s+.*\bif=|\bsystemctl\s+(stop|disable|mask|kill|reboot|poweroff|halt)\b|:\(\)\s*\{|>\s*\/dev\/[sh]d[a-z]/i;
 
 function loadPref<T extends string | number>(key: string, ok: (v: string) => boolean, def: T): T {
-  try {
-    const v = localStorage.getItem(key);
-    if (v !== null && ok(v)) return (typeof def === "number" ? Number(v) : v) as T;
-  } catch {
-    /* storage unavailable */
-  }
-  return def;
+  const v = lsGet(key);
+  return v !== null && ok(v) ? ((typeof def === "number" ? Number(v) : v) as T) : def;
 }
-function savePref(key: string, v: string | number) {
-  try {
-    localStorage.setItem(key, String(v));
-  } catch {
-    /* storage unavailable */
-  }
-}
+const savePref = (key: string, v: string | number) => lsSet(key, String(v));
 
 export function BatchDialog(props: { tab: TermTab; initialText?: string; onClose: () => void }) {
   const { tab } = props;
-  const hostName = useApp((s) => s.hosts.find((h) => h.id === tab.hostId)?.name ?? tab.title);
+  const host = useApp((s) => s.hosts.find((h) => h.id === tab.hostId));
+  const priv = usePrivacy();
+  const hostName = priv.text(host?.name ?? tab.title, host?.host);
   const [text, setText] = useState(() => {
     if (props.initialText === undefined) return drafts.get(tab.id) ?? "";
     drafts.set(tab.id, props.initialText);

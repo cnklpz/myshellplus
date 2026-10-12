@@ -5,19 +5,11 @@
 import {
   ClipboardPaste, Copy, Download, Plus, Scissors, Search, Settings, SquareTerminal, TextSelect, Undo2,
 } from "lucide-react";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useState } from "react";
+import { ContextMenu, type MenuItem } from "../features/terminal/ContextMenu";
 import { useApp } from "../store";
+import { copyText } from "../lib/clipboard";
 import { toast } from "./ui";
-
-interface Entry {
-  label: string;
-  icon?: ReactNode;
-  hint?: string;
-  disabled?: boolean;
-  run?: () => void;
-  sep?: boolean;
-}
 
 type Editable = HTMLInputElement | HTMLTextAreaElement;
 
@@ -41,9 +33,7 @@ function insertText(el: Editable, text: string) {
 }
 
 export function GlobalContextMenu() {
-  const [menu, setMenu] = useState<{ x: number; y: number; items: Entry[] } | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   useEffect(() => {
     const onContext = (e: MouseEvent) => {
@@ -55,109 +45,53 @@ export function GlobalContextMenu() {
     return () => window.removeEventListener("contextmenu", onContext);
   }, []);
 
-  useLayoutEffect(() => {
-    if (!menu || !ref.current) return setPos(null);
-    const r = ref.current.getBoundingClientRect();
-    const left = menu.x + r.width > window.innerWidth - 8 ? Math.max(8, menu.x - r.width) : menu.x;
-    const top = menu.y + r.height > window.innerHeight - 8 ? Math.max(8, menu.y - r.height) : menu.y;
-    setPos({ left, top });
-  }, [menu]);
-
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && close();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("mousedown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("blur", close);
-    window.addEventListener("resize", close);
-    window.addEventListener("wheel", close, true);
-    return () => {
-      window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("blur", close);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("wheel", close, true);
-    };
-  }, [menu]);
-
-  if (!menu) return null;
-  return createPortal(
-    <div
-      ref={ref}
-      className="ctx-menu gctx"
-      style={{ left: pos?.left ?? menu.x, top: pos?.top ?? menu.y, visibility: pos ? "visible" : "hidden" }}
-      onMouseDown={(e) => e.preventDefault()}
-    >
-      {menu.items.map((it, i) =>
-        it.sep ? (
-          <div key={i} className="ctx-sep" />
-        ) : (
-          <div
-            key={i}
-            className={"ctx-item" + (it.disabled ? " disabled" : "")}
-            onClick={() => {
-              if (it.disabled) return;
-              setMenu(null);
-              it.run?.();
-            }}
-          >
-            <span className="ctx-icon">{it.icon}</span>
-            <span className="ctx-label">{it.label}</span>
-            {it.hint && <span className="ctx-hint">{it.hint}</span>}
-          </div>
-        ),
-      )}
-    </div>,
-    document.body,
-  );
+  return menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />;
 }
 
-function build(e: MouseEvent): Entry[] {
+function build(e: MouseEvent): MenuItem[] {
   const field = editableOf(e.target);
   const selected = (field ? field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0) : window.getSelection()?.toString() ?? "").trim();
-  const copy = (text: string) => navigator.clipboard.writeText(text).catch(() => toast("无法写入剪贴板", "error"));
+  const copy = (text: string) => void copyText(text, "", { silent: true });
 
   if (field) {
     const ro = field.readOnly || field.disabled;
     const hasSel = (field.selectionEnd ?? 0) > (field.selectionStart ?? 0);
     return [
-      { label: "撤销", icon: <Undo2 />, hint: "Ctrl+Z", disabled: ro, run: () => (field.focus(), document.execCommand("undo")) },
-      { sep: true, label: "" },
+      { label: "撤销", icon: <Undo2 />, hint: "Ctrl+Z", disabled: ro, onSelect: () => (field.focus(), document.execCommand("undo")) },
+      "sep",
       {
         label: "剪切", icon: <Scissors />, hint: "Ctrl+X", disabled: ro || !hasSel,
-        run: () => {
+        onSelect: () => {
           copy(selected || field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0));
           insertText(field, "");
         },
       },
-      { label: "复制", icon: <Copy />, hint: "Ctrl+C", disabled: !hasSel, run: () => copy(field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0)) },
+      { label: "复制", icon: <Copy />, hint: "Ctrl+C", disabled: !hasSel, onSelect: () => copy(field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0)) },
       {
         label: "粘贴", icon: <ClipboardPaste />, hint: "Ctrl+V", disabled: ro,
-        run: () => navigator.clipboard.readText().then((t) => insertText(field, t), () => toast("无法读取剪贴板", "error")),
+        onSelect: () => navigator.clipboard.readText().then((t) => insertText(field, t), () => toast("无法读取剪贴板", "error")),
       },
-      { sep: true, label: "" },
-      { label: "全选", icon: <TextSelect />, hint: "Ctrl+A", run: () => (field.focus(), field.select()) },
+      "sep",
+      { label: "全选", icon: <TextSelect />, hint: "Ctrl+A", onSelect: () => (field.focus(), field.select()) },
     ];
   }
 
   const s = useApp.getState();
-  const items: Entry[] = [];
+  const items: MenuItem[] = [];
   if (selected) {
     items.push(
-      { label: "复制", icon: <Copy />, hint: "Ctrl+C", run: () => copy(selected) },
-      { label: `搜索“${selected.length > 16 ? selected.slice(0, 16) + "…" : selected}”`, icon: <Search />, run: () => openSearch(selected) },
-      { sep: true, label: "" },
+      { label: "复制", icon: <Copy />, hint: "Ctrl+C", onSelect: () => copy(selected) },
+      { label: `搜索“${selected.length > 16 ? selected.slice(0, 16) + "…" : selected}”`, icon: <Search />, onSelect: () => openSearch(selected) },
+      "sep",
     );
   }
   items.push(
-    { label: "搜索", icon: <Search />, hint: "Ctrl+P", run: () => openSearch("") },
-    { label: "新建服务器", icon: <Plus />, run: () => s.openEditor("") },
-    { label: "导入服务器", icon: <Download />, run: () => s.setImportOpen(true) },
-    { label: s.view === "terminal" ? "首页" : "终端", icon: <SquareTerminal />, run: () => s.setView(s.view === "terminal" ? "home" : "terminal") },
-    { sep: true, label: "" },
-    { label: "设置", icon: <Settings />, run: () => s.openSettings("ai") },
+    { label: "搜索", icon: <Search />, hint: "Ctrl+P", onSelect: () => openSearch("") },
+    { label: "新建服务器", icon: <Plus />, onSelect: () => s.openEditor("") },
+    { label: "导入服务器", icon: <Download />, onSelect: () => s.setImportOpen(true) },
+    { label: s.view === "terminal" ? "首页" : "终端", icon: <SquareTerminal />, onSelect: () => s.setView(s.view === "terminal" ? "home" : "terminal") },
+    "sep",
+    { label: "设置", icon: <Settings />, onSelect: () => s.openSettings("ai") },
   );
   return items;
 }

@@ -1,21 +1,21 @@
 /* Window frame: dark chrome around raised content surfaces. Sizes use the tokens in base.css. */
 .shell { display: flex; flex-direction: column; height: 100%; background: var(--chrome); }
 
-.titlebar { display: flex; align-items: center; gap: var(--sp-1); height: 44px; flex: none; padding-left: var(--sp-5); }
+.titlebar { display: flex; align-items: center; gap: var(--sp-1); height: var(--h-titlebar); flex: none; padding-left: var(--sp-5); }
 .tb-brand { display: flex; align-items: center; gap: var(--sp-3); flex: none; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
 .tb-mark { width: 22px; height: 22px; flex: none; }
 .tb-mark rect { fill: var(--accent); }
 .tb-mark path { fill: none; stroke: var(--accent-fg); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .tb-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 48px; height: 44px; border: none; background: transparent; color: var(--fg-1); cursor: pointer; flex: none;
+  width: calc(2 * var(--sp-6)); height: var(--h-titlebar); border: none; background: transparent; color: var(--fg-1); cursor: pointer; flex: none;
 }
 .tb-btn:hover { background: var(--bg-3); color: var(--fg-0); }
 .tb-btn.on { color: var(--accent); }
-.tb-btn.close:hover { background: #e5484d; color: #fff; }
-.tb-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.2; }
-.tb-btn > .lucide { width: 16px; height: 16px; stroke-width: 1.75; }
-.tb-sep { width: 1px; height: 18px; background: var(--line-strong); margin: 0 var(--sp-1); }
+.tb-btn.close:hover { background: var(--danger-solid); color: var(--on-danger); }
+.tb-btn svg { width: var(--icon-sm); height: var(--icon-sm); fill: none; stroke: currentColor; stroke-width: 1.2; }
+.tb-btn > .lucide { width: var(--icon-md); height: var(--icon-md); stroke-width: 1.75; }
+.tb-sep { width: 1px; height: var(--sp-4); background: var(--line-strong); margin: 0 var(--sp-1); }
 
 .app {
   display: grid;
@@ -30,7 +30,7 @@
 /* ---------- sidebar ---------- */
 .sidebar { display: flex; flex-direction: column; min-height: 0; background: var(--chrome); }
 .sb { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-.sb-pages, .sb-tools { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) var(--sp-3); flex: none; }
+.sb-pages, .sb-tools { display: flex; flex-direction: column; gap: var(--sp-half); padding: var(--sp-2) var(--sp-3); flex: none; }
 .sb-pages { padding-bottom: var(--sp-3); margin-bottom: var(--sp-2); box-shadow: inset 0 -1px 0 var(--line); }
 .sb-tools { box-shadow: inset 0 1px 0 var(--line); padding-top: var(--sp-3); padding-bottom: var(--sp-3); }
 .sb-hosts { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding-top: var(--sp-1); }
@@ -45,20 +45,19 @@
 .sb-item > svg { width: var(--icon-lg); height: var(--icon-lg); flex: none; stroke-width: 1.75; }
 .sb-item.on > svg { color: var(--accent); }
 .sb-item > span:first-of-type { flex: 1 1 auto; }
-.sb-count { flex: none; min-width: 22px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--bg-4); color: var(--fg-1); font-size: var(--fs-xs); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
 
 /* ---------- content surfaces ---------- */
 .main, .side, .side-rail {
   display: flex; flex-direction: column; min-width: 0; min-height: 0;
   background: var(--bg-0); border-radius: var(--radius-lg); overflow: hidden;
-  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-sm);
 }
 .side { background: var(--bg-1); }
 .view { position: relative; flex: 1 1 auto; min-height: 0; flex-direction: column; }
 
 /* Side panel: full-width tabs, collapse button aligned on the same row. */
 .side-tabs {
-  display: flex; align-items: stretch; height: 48px; flex: none; padding: 0 var(--sp-2);
+  display: flex; align-items: stretch; height: var(--h-panel-head); flex: none; padding: 0 var(--sp-2);
   box-shadow: inset 0 -1px 0 var(--line);
 }
 .side-tabs > button {
@@ -66,11 +65,11 @@
   border: none; background: transparent; color: var(--fg-2); font-size: var(--fs-md); font-weight: 500; cursor: pointer;
   position: relative; transition: color 0.12s;
 }
-.side-tabs > button svg { width: 16px; height: 16px; stroke-width: 1.75; }
+.side-tabs > button svg { width: var(--icon-md); height: var(--icon-md); stroke-width: 1.75; }
 .side-tabs > button:hover { color: var(--fg-0); }
 .side-tabs > button.on { color: var(--fg-0); }
 .side-tabs > button.on::after {
-  content: ""; position: absolute; left: var(--sp-4); right: var(--sp-4); bottom: 0; height: 2px; border-radius: 2px; background: var(--accent);
+  content: ""; position: absolute; left: var(--sp-4); right: var(--sp-4); bottom: 0; height: var(--sp-half); border-radius: var(--sp-half); background: var(--accent);
 }
 .side-tabs > .side-collapse { flex: 0 0 40px; color: var(--fg-2); }
 .side-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
@@ -78,7 +77,7 @@
 /* Collapsed side panel: slim icon rail */
 .side-rail { align-items: center; gap: var(--sp-1); padding: var(--sp-2) 0; background: var(--bg-1); }
 .side-rail-btn {
-  width: 36px; height: 36px; border: none; border-radius: var(--radius-md); background: transparent;
+  width: var(--h-md); height: var(--h-md); border: none; border-radius: var(--radius-md); background: transparent;
   color: var(--fg-1); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
 }
 .side-rail-btn:hover { background: var(--bg-3); color: var(--fg-0); }
@@ -86,17 +85,17 @@
 
 /* ---------- full-page views (also used inside PageModal) ---------- */
 .page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-.page-header { display: flex; align-items: center; gap: var(--sp-3); height: 64px; padding: 0 var(--sp-6); flex: none; }
-.page-header h1 { font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.page-header { display: flex; align-items: center; gap: var(--sp-3); height: var(--h-page-head); padding: 0 var(--sp-6); flex: none; }
+.page-header h1 { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.02em; margin: 0; }
 .page-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-2) var(--sp-6) var(--sp-6); }
 
 .page-modal-overlay { z-index: 90; }
 .page-modal {
   position: relative; display: flex; flex-direction: column;
   max-width: calc(100vw - 64px); height: min(820px, calc(100vh - 96px));
-  background: var(--bg-0); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden;
+  background: var(--bg-0); border-radius: var(--radius-lg); box-shadow: var(--shadow); overflow: hidden;
 }
 /* Close button sits on the page header line; headers leave room for it. */
-.page-modal-close { position: absolute; top: 14px; right: var(--sp-4); z-index: 3; }
-.page-modal .page-header { padding-right: 64px; }
+.page-modal-close { position: absolute; top: calc((var(--h-page-head) - var(--h-md)) / 2); right: var(--sp-4); z-index: 3; }
+.page-modal .page-header { padding-right: calc(var(--sp-4) + var(--h-md) + var(--sp-3)); }
 .snippets-modal-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 0 var(--sp-2) var(--sp-2); }

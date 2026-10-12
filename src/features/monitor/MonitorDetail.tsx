@@ -7,11 +7,15 @@ import { Select } from "../../components/Select";
 import { Bar, Dialog } from "../../components/ui";
 import { api, errMsg, type Sample, type SysInfo } from "../../lib/api";
 import { fmtBytes, fmtPct, fmtRate } from "../../lib/format";
+import { pctColor } from "../../lib/level";
+import { copyText } from "../../lib/clipboard";
 import { reducedMotion } from "../../lib/motion";
+import { usePrivacy } from "../../lib/privacy";
+import { shq } from "../../lib/remote";
 import { useApp } from "../../store";
 import { useContextMenu } from "../terminal/ContextMenu";
 import { AreaChart } from "./AreaChart";
-import { copyText, useProcActions } from "./procMenu";
+import { useProcActions } from "./procMenu";
 
 export type DetailKind = "cpu" | "mem" | "net" | "io" | "disk" | "proc";
 
@@ -32,8 +36,6 @@ const SPAN = "3 分钟";
 
 const bytesAxis = (v: number) => fmtBytes(v).replace(/\.0 /, " ");
 const rateAxis = (v: number) => `${bytesAxis(v)}/s`;
-const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-const pctColor = (p: number) => (p >= 90 ? "var(--err)" : p >= 75 ? "var(--warn)" : undefined);
 const lines = (s: string) => s.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim());
 const fields = (l: string) => l.trim().split(/\s+/);
 
@@ -113,7 +115,8 @@ export function MonitorDetail(props: {
   info: SysInfo | null;
   onClose: () => void;
 }) {
-  const hostName = useApp((s) => s.hosts.find((h) => h.id === props.hostId)?.name);
+  const host = useApp((s) => s.hosts.find((h) => h.id === props.hostId));
+  const priv = usePrivacy();
   const [tick, setTick] = useState(0);
   const [pending, setPending] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
@@ -128,7 +131,7 @@ export function MonitorDetail(props: {
 
   const ctx = useMemo(() => ({ hostId: props.hostId, tick, refresh, track }), [props.hostId, tick, refresh, track]);
   const cur = props.history[props.history.length - 1];
-  const name = hostName || props.info?.hostname || "";
+  const name = priv.text(host?.name || props.info?.hostname || "", host?.host);
 
   // Play the slide-out before unmounting (instant with reduced motion).
   const [leaving, setLeaving] = useState(false);
@@ -156,7 +159,7 @@ export function MonitorDetail(props: {
             {name && <span className="host"> · {name}</span>}
           </span>
           <button className="icon-btn" title="刷新" onClick={refresh}>
-            <RefreshCw className={pending > 0 ? "mon-spin" : undefined} />
+            <RefreshCw className={pending > 0 ? "spin" : undefined} />
           </button>
         </span>
       }
@@ -263,7 +266,7 @@ function CpuView({ history, cur, info }: { history: Sample[]; cur: Sample; info:
               <div className="mon-stat" key={l}>
                 <span className="lbl">{l}</span>
                 <span className="val" style={{ color: pctColor(r) }}>{v.toFixed(2)}</span>
-                <Bar value={r} />
+                <Bar value={r} thin />
               </div>
             );
           })}
@@ -275,7 +278,7 @@ function CpuView({ history, cur, info }: { history: Sample[]; cur: Sample; info:
             {cur.cores.map((c, i) => (
               <div className="mon-d-core" key={i}>
                 <span className="lbl mono">{i}</span>
-                <Bar value={c} />
+                <Bar value={c} thin />
                 <span className="num" style={{ color: pctColor(c) }}>{fmtPct(c, 0)}</span>
               </div>
             ))}
@@ -285,10 +288,10 @@ function CpuView({ history, cur, info }: { history: Sample[]; cur: Sample; info:
       <Sec title="CPU 占用最高" meta={top.data?.length ?? ""} error={top.error}>
         <table className="table mon-d-table mon-d-procs">
           <colgroup>
-            <col style={{ width: 72 }} />
-            <col style={{ width: 96 }} />
-            <col style={{ width: 64 }} />
-            <col style={{ width: 64 }} />
+            <col className="mon-w-72" />
+            <col className="mon-w-96" />
+            <col className="mon-w-64" />
+            <col className="mon-w-64" />
             <col />
           </colgroup>
           <thead>
@@ -426,10 +429,10 @@ function MemView({ history, cur }: { history: Sample[]; cur: Sample }) {
       <Sec title="内存占用前 10">
         <table className="table mon-d-table">
           <colgroup>
-            <col style={{ width: 80 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 96 }} />
-            <col style={{ width: 72 }} />
+            <col className="mon-w-80" />
+            <col className="mon-w-120" />
+            <col className="mon-w-96" />
+            <col className="mon-w-72" />
             <col />
           </colgroup>
           <thead>
@@ -641,10 +644,10 @@ function NetView({ history, cur }: { history: Sample[]; cur: Sample }) {
         <table className="table mon-d-table">
           <colgroup>
             <col />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 120 }} />
+            <col className="mon-w-120" />
+            <col className="mon-w-120" />
+            <col className="mon-w-120" />
+            <col className="mon-w-120" />
           </colgroup>
           <thead>
             <tr>
@@ -671,9 +674,9 @@ function NetView({ history, cur }: { history: Sample[]; cur: Sample }) {
       <Sec title="监听端口" meta={r.data ? r.data.listen.length : undefined}>
         <table className="table mon-d-table">
           <colgroup>
-            <col style={{ width: 72 }} />
-            <col style={{ width: 240 }} />
-            <col style={{ width: 80 }} />
+            <col className="mon-w-72" />
+            <col className="mon-w-240" />
+            <col className="mon-w-80" />
             <col />
           </colgroup>
           <thead>
@@ -797,11 +800,11 @@ function IoView({ history }: { history: Sample[] }) {
         <table className="table mon-d-table">
           <colgroup>
             <col />
-            <col style={{ width: 96 }} />
-            <col style={{ width: 96 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 80 }} />
+            <col className="mon-w-96" />
+            <col className="mon-w-96" />
+            <col className="mon-w-120" />
+            <col className="mon-w-120" />
+            <col className="mon-w-80" />
           </colgroup>
           <thead>
             <tr>
@@ -921,12 +924,12 @@ function DiskView() {
         <table className="table mon-d-table">
           <colgroup>
             <col />
-            <col style={{ width: 80 }} />
-            <col style={{ width: 88 }} />
-            <col style={{ width: 88 }} />
-            <col style={{ width: 88 }} />
-            <col style={{ width: 160 }} />
-            <col style={{ width: 72 }} />
+            <col className="mon-w-80" />
+            <col className="mon-w-88" />
+            <col className="mon-w-88" />
+            <col className="mon-w-88" />
+            <col className="mon-w-160" />
+            <col className="mon-w-72" />
           </colgroup>
           <thead>
             <tr>
@@ -962,7 +965,7 @@ function DiskView() {
                   <td className="num">{fmtBytes(m.avail)}</td>
                   <td>
                     <div className="mon-d-usage">
-                      <Bar value={used} />
+                      <Bar value={used} thin />
                       <span className="num" style={{ color: pctColor(used) }}>{fmtPct(used, 0)}</span>
                     </div>
                   </td>
@@ -986,7 +989,7 @@ function DiskView() {
             disabled={duBusy}
           />
           <button className="btn sm" disabled={duBusy || !mounts.length} onClick={() => scan()}>
-            {duBusy ? <LoaderCircle className="mon-spin" /> : <FolderSearch />}
+            {duBusy ? <LoaderCircle className="spin" /> : <FolderSearch />}
             查找大文件
           </button>
           {duBusy && <span className="faint mon-d-hint">最长 60 秒</span>}
@@ -1017,7 +1020,7 @@ function DiskView() {
                 onDoubleClick={() => !duBusy && x.path !== du.mount && scan(x.path)}
               >
                 <span className="num">{x.size}</span>
-                <div className="mon-du-bar">
+                <div className="bar thin">
                   <i style={{ width: `${Math.min(100, (x.bytes / maxBytes) * 100)}%` }} />
                 </div>
                 <span className={"mono ellipsis" + (x.path === du.mount ? " faint" : "")} title={x.path}>{x.path}</span>
@@ -1149,9 +1152,9 @@ function ProcView() {
       <table className="table mon-d-table mon-d-procs">
         <colgroup>
           {PS_COLS.map((c) => (
-            <col key={c.key} style={c.width ? { width: c.width } : undefined} />
+            <col key={c.key} className={c.width ? "mon-w-" + c.width : undefined} />
           ))}
-          <col style={{ width: 64 }} />
+          <col className="mon-w-64" />
         </colgroup>
         <thead>
           <tr>
@@ -1190,10 +1193,10 @@ function ProcView() {
               <td className="mono faint">{p.stat}</td>
               <td className="mono ellipsis-cell" title={p.args}>{p.args}</td>
               <td className="act">
-                <button className="icon-btn" title="结束" onClick={() => acts.confirmKill(ref(p))}>
+                <button className="icon-btn sm danger hover-reveal" title="结束" onClick={() => acts.confirmKill(ref(p))}>
                   <X />
                 </button>
-                <button className="icon-btn" title="强制结束" onClick={() => acts.confirmKill(ref(p), true)}>
+                <button className="icon-btn sm danger hover-reveal" title="强制结束" onClick={() => acts.confirmKill(ref(p), true)}>
                   <Skull />
                 </button>
               </td>

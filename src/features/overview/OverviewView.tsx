@@ -11,6 +11,7 @@ import {
   Bar,
   Confirm,
   Dialog,
+  Empty,
   Field,
   Toggle,
   toast,
@@ -21,6 +22,8 @@ import { sortByGroupOrder, useGroupOrder } from "../../lib/groupOrder";
 import { usePrivacy } from "../../lib/privacy";
 import { useApp } from "../../store";
 import { GroupTabs } from "../home/GroupTabs";
+import { useHostMenu } from "../hosts/hostMenu";
+import { useContextMenu } from "../terminal/ContextMenu";
 import { Sparkline } from "../monitor/Sparkline";
 import { openTerminal } from "../terminal/open";
 import {
@@ -102,6 +105,7 @@ export function OverviewView() {
   const bulk = useBulkConnect();
   const [group, setGroup] = useState(ALL);
   const [customizing, setCustomizing] = useState(false);
+  const menu = useContextMenu();
   const [disconnecting, setDisconnecting] = useState<{
     name: string;
     ids: string[];
@@ -260,7 +264,7 @@ export function OverviewView() {
           </button>
         </div>
         <button className="btn" onClick={() => setCustomizing(true)}>
-          <SlidersHorizontal /> 自定义
+          <SlidersHorizontal /> 自定义…
         </button>
         {allOn ? (
           <button
@@ -327,25 +331,29 @@ export function OverviewView() {
         )}
 
         {visibleHosts.length === 0 ? (
-          <div className="empty">
-            <div>{hosts.length ? "所有分组都已隐藏" : "还没有服务器"}</div>
-            {hosts.length > 0 && (
-              <button className="btn sm" onClick={() => setCustomizing(true)}>
-                自定义
-              </button>
-            )}
-          </div>
+          <Empty
+            text={hosts.length ? "所有分组都已隐藏" : "还没有服务器"}
+            action={
+              hosts.length > 0 && (
+                <button className="btn sm" onClick={() => setCustomizing(true)}>
+                  自定义…
+                </button>
+              )
+            }
+          />
         ) : groups.length === 0 ? (
-          <div className="empty">
-            <div>没有已连接的服务器</div>
-            <button
-              className="btn sm"
-              disabled={!!bulk}
-              onClick={() => connectScope(scopeIds)}
-            >
-              <Plug /> 连接全部
-            </button>
-          </div>
+          <Empty
+            text="没有已连接的服务器"
+            action={
+              <button
+                className="btn sm"
+                disabled={!!bulk}
+                onClick={() => connectScope(scopeIds)}
+              >
+                <Plug /> 连接全部
+              </button>
+            }
+          />
         ) : (
           groups.map((g) => {
             const all = rows.filter((r) => groupOf(r.host) === g.name);
@@ -353,9 +361,27 @@ export function OverviewView() {
             return (
               <section key={g.name} className="ov-group">
                 {prefs.grouped && (
-                  <div className="section-title ov-group-title">
+                  <div
+                    className="section-title ov-group-title"
+                    onContextMenu={(e) =>
+                      menu.open(e, [
+                        {
+                          label: "连接本组",
+                          icon: <Plug />,
+                          disabled: !!bulk || on.length === all.length,
+                          onSelect: () => connectScope(all.map((r) => r.host.id)),
+                        },
+                        {
+                          label: "断开本组…",
+                          icon: <Unplug />,
+                          disabled: !on.length,
+                          onSelect: () => setDisconnecting({ name: g.name, ids: on.map((r) => r.host.id) }),
+                        },
+                      ])
+                    }
+                  >
                     <span className="ellipsis">{g.name}</span>
-                    <span className="ov-group-count">
+                    <span className="count">
                       {on.length}/{all.length}
                     </span>
                     <div className="spacer" />
@@ -395,6 +421,7 @@ export function OverviewView() {
         )}
       </div>
 
+      {menu.node}
       {customizing && (
         <CustomizeDialog hosts={hosts} onClose={() => setCustomizing(false)} />
       )}
@@ -429,8 +456,8 @@ function Stat(props: {
 }) {
   return (
     <div className="ov-stat">
-      <span className="ov-stat-label">{props.label}</span>
-      <span className={"ov-stat-value" + (props.tone ? " " + props.tone : "")}>
+      <span className="stat-label">{props.label}</span>
+      <span className={"stat-value" + (props.tone ? " " + props.tone : "")}>
         {props.value}
         {props.sub && <span className="ov-stat-sub">{props.sub}</span>}
       </span>
@@ -516,108 +543,113 @@ function Tile({ row, prefs }: { row: Row; prefs: OverviewPrefs }) {
   const addr =
     `${h.username}@${priv.addr(h.host)}` + (h.port !== 22 ? `:${h.port}` : "");
   const text = statusText(row);
+  const menu = useHostMenu();
 
   return (
-    <div
-      className={
-        "ov-tile" + (s ? "" : " off") + (row.status === "alert" ? " alert" : "")
-      }
-      onDoubleClick={() => openTerminal(h.id)}
-    >
-      <div className="ov-tile-head">
-        <span className={"dot " + DOT[row.status]} />
-        <span className="ov-name ellipsis" title={name}>
-          {name}
-        </span>
-        <div className="spacer" />
-        {has("latency") && s && <Latency hostId={h.id} />}
-        <HostActions row={row} />
-      </div>
-      {row.live?.info?.os ? (
-        <div className="ov-addr ellipsis" title={`${addr} · ${row.live.info.os}`}>
-          <span className="mono">{priv.addr(h.host)}</span>
-          {" · "}
-          {row.live.info.os}
+    <>
+      <div
+        className={
+          "ov-tile" + (s ? "" : " off") + (row.status === "alert" ? " alert" : "")
+        }
+        onDoubleClick={() => openTerminal(h.id)}
+        onContextMenu={(e) => menu.open(e, h)}
+      >
+        <div className="ov-tile-head">
+          <span className={"dot " + DOT[row.status]} />
+          <span className="ov-name ellipsis" title={name}>
+            {name}
+          </span>
+          <div className="spacer" />
+          {has("latency") && s && <Latency hostId={h.id} />}
+          <HostActions row={row} />
         </div>
-      ) : (
-        <div className="ov-addr mono ellipsis" title={addr}>
-          {addr}
-        </div>
-      )}
+        {row.live?.info?.os ? (
+          <div className="ov-addr ellipsis" title={`${addr} · ${row.live.info.os}`}>
+            <span className="mono">{priv.addr(h.host)}</span>
+            {" · "}
+            {row.live.info.os}
+          </div>
+        ) : (
+          <div className="ov-addr mono ellipsis" title={addr}>
+            {addr}
+          </div>
+        )}
 
-      {s ? (
-        <>
-          <div className="ov-meters">
-            {has("cpu") && (
-              <Meter label="CPU" pct={s.cpu} alert={prefs.alertPct} />
+        {s ? (
+          <>
+            <div className="ov-meters">
+              {has("cpu") && (
+                <Meter label="CPU" pct={s.cpu} alert={prefs.alertPct} />
+              )}
+              {has("mem") && (
+                <Meter label="内存" pct={s.mem} alert={prefs.alertPct} />
+              )}
+              {has("disk") && (
+                <Meter label="磁盘" pct={s.disk} alert={prefs.alertPct} />
+              )}
+            </div>
+            {has("chart") && (
+              <div className="ov-chart">
+                <Sparkline
+                  height={36}
+                  max={100}
+                  slots={40}
+                  series={[
+                    { values: hist.map((x) => x.cpu), color: "var(--chart-1)" },
+                    {
+                      values: hist.map((x) =>
+                        x.memTotal ? (x.memUsed / x.memTotal) * 100 : 0,
+                      ),
+                      color: "var(--chart-2)",
+                    },
+                  ]}
+                />
+              </div>
             )}
-            {has("mem") && (
-              <Meter label="内存" pct={s.mem} alert={prefs.alertPct} />
+            {(has("net") || has("load") || has("uptime")) && (
+              <div className="ov-foot">
+                {has("net") && (
+                  <>
+                    <span title="下行">↓ {fmtRate(s.rx)}</span>
+                    <span title="上行">↑ {fmtRate(s.tx)}</span>
+                  </>
+                )}
+                {has("load") && (
+                  <span title="1 分钟负载">负载 {s.load.toFixed(2)}</span>
+                )}
+                {has("uptime") && (
+                  <span title="运行时间">{fmtUptime(s.uptime)}</span>
+                )}
+              </div>
             )}
-            {has("disk") && (
-              <Meter label="磁盘" pct={s.disk} alert={prefs.alertPct} />
+          </>
+        ) : (
+          <div
+            className={
+              "ov-off-row" +
+              (row.status === "failed" || row.status === "error" ? " err" : "")
+            }
+          >
+            {row.status === "connecting" || row.status === "loading" ? (
+              <LoaderCircle className="spin" />
+            ) : null}
+            <span className="ellipsis grow selectable" title={text}>
+              {text}
+            </span>
+            {(row.status === "offline" || row.status === "failed") && (
+              <button
+                className="btn sm"
+                onClick={() => connectHosts([h.id])}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                <Plug /> 连接
+              </button>
             )}
           </div>
-          {has("chart") && (
-            <div className="ov-chart">
-              <Sparkline
-                height={36}
-                max={100}
-                slots={40}
-                series={[
-                  { values: hist.map((x) => x.cpu), color: "var(--chart-1)" },
-                  {
-                    values: hist.map((x) =>
-                      x.memTotal ? (x.memUsed / x.memTotal) * 100 : 0,
-                    ),
-                    color: "var(--chart-2)",
-                  },
-                ]}
-              />
-            </div>
-          )}
-          {(has("net") || has("load") || has("uptime")) && (
-            <div className="ov-foot">
-              {has("net") && (
-                <>
-                  <span title="下行">↓ {fmtRate(s.rx)}</span>
-                  <span title="上行">↑ {fmtRate(s.tx)}</span>
-                </>
-              )}
-              {has("load") && (
-                <span title="1 分钟负载">负载 {s.load.toFixed(2)}</span>
-              )}
-              {has("uptime") && (
-                <span title="运行时间">{fmtUptime(s.uptime)}</span>
-              )}
-            </div>
-          )}
-        </>
-      ) : (
-        <div
-          className={
-            "ov-off-row" +
-            (row.status === "failed" || row.status === "error" ? " err" : "")
-          }
-        >
-          {row.status === "connecting" || row.status === "loading" ? (
-            <LoaderCircle className="spin" />
-          ) : null}
-          <span className="ellipsis grow selectable" title={text}>
-            {text}
-          </span>
-          {(row.status === "offline" || row.status === "failed") && (
-            <button
-              className="btn sm"
-              onClick={() => connectHosts([h.id])}
-              onDoubleClick={(e) => e.stopPropagation()}
-            >
-              <Plug /> 连接
-            </button>
-          )}
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+      {menu.node}
+    </>
   );
 }
 
@@ -643,6 +675,7 @@ function Meter({
 
 function ListTable({ rows, prefs }: { rows: Row[]; prefs: OverviewPrefs }) {
   const priv = usePrivacy();
+  const menu = useHostMenu();
   const has = (k: MetricKey) => prefs.metrics.includes(k);
   const pctCell = (v: number | undefined) => (
     <td
@@ -691,6 +724,7 @@ function ListTable({ rows, prefs }: { rows: Row[]; prefs: OverviewPrefs }) {
                 key={r.host.id}
                 className={s ? "" : "off"}
                 onDoubleClick={() => openTerminal(r.host.id)}
+                onContextMenu={(e) => menu.open(e, r.host)}
               >
                 <td>
                   <div className="ov-cell-name">
@@ -751,6 +785,7 @@ function ListTable({ rows, prefs }: { rows: Row[]; prefs: OverviewPrefs }) {
           })}
         </tbody>
       </table>
+      {menu.node}
     </div>
   );
 }

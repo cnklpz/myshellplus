@@ -1,0 +1,47 @@
+.dk-root { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.dk-top { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) var(--sp-2); flex: none; }
+.dk-seg { display: flex; }
+.dk-seg > button { flex: 1 1 0; }
+.dk-sudo { display: flex; align-items: center; gap: var(--sp-2); }
+
+.dk-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 var(--sp-2) var(--sp-4); display: flex; flex-direction: column; }
+.dk-listhead { display: flex; align-items: center; gap: var(--sp-1); height: var(--h-sm); padding: 0 0 0 var(--sp-2); font-size: var(--fs-xs); flex: none; }
+.dk-listhead .btn.on { background: var(--bg-3); color: var(--fg-0); }
+
+.dk-item { border-radius: var(--radius-md); flex: none; }
+.dk-item.open { background: var(--bg-2); }
+.dk-row {
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: var(--h-sm); padding: 0 var(--sp-2);
+  border: none; border-radius: var(--radius-md); background: transparent; color: var(--fg-0); font: inherit; font-size: var(--fs-md);
+  text-align: left; cursor: pointer; min-width: 0;
+}
+.dk-row:hover { background: var(--bg-3); }
+.dk-row.static { cursor: default; }
+.dk-item.open > .dk-row:hover { background: transparent; }
+.dk-name { flex: 0 1 auto; max-width: 55%; }
+.dk-sub { font-size: var(--fs-xs); color: var(--fg-2); }
+.dk-nums {
+  display: inline-flex; gap: var(--sp-2); flex: none; font-size: var(--fs-xs); color: var(--fg-1);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.dk-nums > span { min-width: 48px; }
+.dk-chev { width: var(--icon-sm); height: var(--icon-sm); flex: none; color: var(--fg-2); transition: transform 0.15s; }
+.dk-item.open .dk-chev { transform: rotate(90deg); }
+/* Room for two .icon-btn.sm */
+.dk-ctl { display: inline-flex; align-items: center; justify-content: flex-end; flex: none; width: calc(var(--h-xs) * 2); }
+.dk-ctl-spin { width: var(--icon-sm); height: var(--icon-sm); margin-right: var(--sp-1); color: var(--fg-2); }
+.dk-del { flex: none; height: var(--h-xs); color: var(--fg-2); }
+.dk-del:hover { color: var(--err); }
+
+.dk-detail { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2) var(--sp-3); min-width: 0; }
+.dk-btns { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.dk-btns .btn.on { background: var(--bg-4); }
+.dk-action { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+
+.dk-form { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); margin-bottom: var(--sp-2); border-radius: var(--radius-md); background: var(--bg-2); flex: none; }
+.dk-env { flex: 1 1 auto; min-width: 0; font-size: var(--fs-xs); }
+.dk-pull { display: flex; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); flex: none; }
+.dk-df { margin: 0 var(--sp-2) var(--sp-2); flex: none; }
+.dk-install { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-2); }
+.dk-install-title { padding: 0 var(--sp-2); font-weight: 600; }
+.dk-install > .btn { align-self: flex-start; margin-left: var(--sp-2); }

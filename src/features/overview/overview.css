@@ -9,19 +9,12 @@
   display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0;
   padding: var(--sp-4); border-radius: var(--radius-lg); background: var(--bg-1);
 }
-.ov-stat-label { font-size: var(--fs-xs); color: var(--fg-2); }
-.ov-stat-value {
-  font-size: var(--fs-xl); font-weight: 600; line-height: 1.1; letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums; color: var(--fg-0); white-space: nowrap;
-}
-.ov-stat-value.err { color: var(--err); }
 .ov-stat-sub { margin-left: var(--sp-1); font-size: var(--fs-md); font-weight: 500; color: var(--fg-2); }
 .ov-stat > .bar { width: 100%; }
 
 /* ---------- groups ---------- */
 .ov-group + .ov-group { margin-top: var(--sp-6); }
-.ov-group-title { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-sm); margin-bottom: var(--sp-2); }
-.ov-group-count { color: var(--fg-2); font-weight: 500; font-variant-numeric: tabular-nums; }
+.ov-group-title { margin-bottom: var(--sp-2); }
 .ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-3); }
 
 /* ---------- tile ---------- */
@@ -38,7 +31,7 @@
 .ov-tile-head { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-sm); min-width: 0; }
 .ov-name { font-size: var(--fs-md); font-weight: 600; color: var(--fg-0); }
 .ov-tile.off .ov-name { color: var(--fg-1); }
-.ov-addr { font-size: var(--fs-xs); color: var(--fg-2); line-height: 20px; padding-left: calc(8px + var(--sp-2)); }
+.ov-addr { font-size: var(--fs-xs); color: var(--fg-2); line-height: 20px; padding-left: calc(var(--sp-2) + var(--sp-2)); } /* past the 8px .dot + gap */
 
 .ov-latency { font-size: var(--fs-xs); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ov-latency.ok { color: var(--ok); }
@@ -92,11 +85,10 @@
 .ov-table col.c-act { width: 120px; }
 .ov-table th:first-child, .ov-table td:first-child { padding-left: var(--sp-4); }
 .ov-table tr.off td { color: var(--fg-2); }
-.ov-table tbody tr:last-child td { border-bottom: none; }
 .ov-cell-name { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .ov-cell-name > .ellipsis:first-of-type { flex: none; max-width: 240px; }
 .ov-cell-status { min-width: 0; font-size: var(--fs-xs); color: var(--fg-2); }
-.ov-col-actions { text-align: right; padding-right: var(--sp-3) !important; }
+.ov-table .ov-col-actions { text-align: right; padding-right: var(--sp-3); }
 .ov-col-actions .ov-actions { justify-content: flex-end; }
 
 /* ---------- customize dialog ---------- */
@@ -113,6 +105,6 @@
 .ov-groups-head { font-size: var(--fs-xs); color: var(--fg-2); }
 .ov-groups-row { font-size: var(--fs-sm); }
 .ov-groups-row + .ov-groups-row { box-shadow: inset 0 1px 0 var(--line); }
-.ov-groups-num { width: 32px; text-align: right; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.ov-groups-num { width: var(--sp-8); text-align: right; color: var(--fg-2); font-variant-numeric: tabular-nums; }
 .ov-groups-col { width: 72px; display: flex; justify-content: center; flex: none; }
-.ov-groups-head .ov-groups-col:first-of-type { margin-left: calc(32px + var(--sp-2)); }
+.ov-groups-head .ov-groups-col:first-of-type { margin-left: calc(var(--sp-8) + var(--sp-2)); }

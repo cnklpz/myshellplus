@@ -1,0 +1,20 @@
+.cp { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.cp-head { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-xs); font-size: var(--fs-xs); }
+.cp-risk { font-weight: 600; color: var(--fg-1); }
+.cp-risk.change { color: var(--warn); }
+.cp-risk.high { color: var(--err); }
+.cp-code {
+  margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-md); background: var(--bg-0);
+  font-size: var(--fs-xs); line-height: 1.55; white-space: pre-wrap; word-break: break-all;
+  max-height: 240px; overflow: auto;
+}
+.cp-note { font-size: var(--fs-xs); color: var(--fg-1); }
+.cp-note.high { color: var(--err); }
+.cp-out { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.cp-out-head { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-xs); font-size: var(--fs-xs); }
+.cp-out .cp-code { max-height: 320px; }
+.cp-fail { color: var(--err); }
+.cp-ms { margin-left: auto; font-variant-numeric: tabular-nums; }
+/* Compact segmented control: outer height = --h-xs. */
+.cp-seg > button { height: calc(var(--h-xs) - 2 * var(--sp-half)); font-size: var(--fs-xs); }
+.cp-view { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; max-height: 360px; overflow: auto; padding: var(--sp-3); border-radius: var(--radius-md); background: var(--bg-0); }

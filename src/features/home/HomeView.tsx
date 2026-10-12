@@ -1,46 +1,40 @@
 // Home page: server overview — summary stats + grouped host cards.
-import { listen } from "@tauri-apps/api/event";
 import {
   Download,
   Gauge,
   Upload,
-  Link,
   LoaderCircle,
   MoreHorizontal,
-  Pencil,
   Plus,
   Search,
   SquareTerminal,
-  Trash2,
-  Unplug,
   X,
   Zap,
 } from "lucide-react";
-import { type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Confirm, toast } from "../../components/ui";
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Confirm, Empty, toast } from "../../components/ui";
 import { sortByGroupOrder, useGroupOrder } from "../../lib/groupOrder";
 import { ExportDialog } from "../settings/SettingsView";
+import { DiagnoseDialog } from "../diagnostics/connLog";
 import { GroupTabs } from "./GroupTabs";
 import { api, errMsg, type Host } from "../../lib/api";
 import { useApp } from "../../store";
 import { openTerminal } from "../terminal/open";
+import { ContextMenu } from "../terminal/ContextMenu";
+import { hostMenuItems } from "../hosts/hostMenu";
 import "./home.css";
 import { useLatencyHistory } from "./latencyHistory";
 import { probeHosts, useProbe, useProbing } from "./probe";
 import { usePrivacy } from "../../lib/privacy";
+import { useTauriEvent } from "../../lib/events";
+import { fmtMs } from "../../lib/format";
+import { lsGet, lsSet } from "../../lib/storage";
 
 const UNGROUPED = "未分组";
 const ALL = "";
 const GROUP_KEY = "msp.home.group";
 
-function loadGroup() {
-  try {
-    return localStorage.getItem(GROUP_KEY) ?? ALL;
-  } catch {
-    return ALL;
-  }
-}
+const loadGroup = () => lsGet(GROUP_KEY) ?? ALL;
 const TUNNEL_POLL_MS = 5000;
 
 function matches(h: Host, q: string, os: string | undefined) {
@@ -59,7 +53,6 @@ const STATE_LABEL: Record<ConnKind, string> = {
 };
 
 type Tier = "ok" | "warn" | "err";
-const fmtMs = (ms: number) => (ms < 1 ? "<1 ms" : `${Math.round(ms)} ms`);
 const tierOf = (ms: number | null): Tier => (ms === null || ms >= 200 ? "err" : ms >= 60 ? "warn" : "ok");
 
 /** Running tunnel count, polled while the page is mounted. */
@@ -91,14 +84,11 @@ function useHostOs() {
       .hostOsMap()
       .then((m) => alive && setMap(m))
       .catch(() => {});
-    const un = listen<Record<string, string>>("host-os", (e) => {
-      if (alive) setMap(e.payload);
-    });
     return () => {
       alive = false;
-      un.then((f) => f()).catch(() => {});
     };
   }, []);
+  useTauriEvent<Record<string, string>>("host-os", (e) => setMap(e.payload));
   return map;
 }
 
@@ -116,11 +106,7 @@ export function HomeView() {
   const [group, setGroupState] = useState(loadGroup);
   const setGroup = (g: string) => {
     setGroupState(g);
-    try {
-      localStorage.setItem(GROUP_KEY, g);
-    } catch {
-      /* per-viewer convenience only */
-    }
+    lsSet(GROUP_KEY, g);
   };
   const probing = useProbing();
 
@@ -164,7 +150,7 @@ export function HomeView() {
       <div className="page-header">
         <h1>服务器</h1>
         <div className="spacer" />
-        <div className="home-search">
+        <div className="search-box home-search">
           <Search />
           <input
             className="input"
@@ -184,13 +170,13 @@ export function HomeView() {
           {probing ? <LoaderCircle className="spin" /> : <Gauge />} 全部测速
         </button>
         <button className="btn" onClick={() => setImportOpen(true)}>
-          <Download /> 导入
+          <Download /> 导入…
         </button>
         <button className="btn" disabled={hosts.length === 0} onClick={() => setExporting(true)}>
-          <Upload /> 导出
+          <Upload /> 导出…
         </button>
         <button className="btn" onClick={() => openEditor("")}>
-          <Plus /> 新建
+          <Plus /> 新建…
         </button>
       </div>
 
@@ -203,29 +189,32 @@ export function HomeView() {
         </div>
 
         {groupTabs.length > 1 && (
-          <GroupTabs allCount={hosts.length} tabs={groupTabs} active={activeGroup} onSelect={setGroup} />
+          <GroupTabs
+            allCount={hosts.length}
+            tabs={groupTabs}
+            active={activeGroup}
+            onSelect={setGroup}
+            onProbe={(g) => probeHosts(hosts.filter((h) => !g || (h.groupName.trim() || UNGROUPED) === g).map((h) => h.id))}
+          />
         )}
 
         {hosts.length === 0 ? (
-          <div className="empty home-empty">
-            <div>还没有服务器</div>
-            <div className="row">
+          <Empty
+            text="还没有服务器"
+            action={
               <button className="btn sm primary" onClick={() => openEditor("")}>
-                <Plus /> 新建
+                <Plus /> 新建…
               </button>
-              <button className="btn sm" onClick={() => setImportOpen(true)}>
-                <Download /> 导入
-              </button>
-            </div>
-          </div>
+            }
+          />
         ) : groups.length === 0 ? (
-          <div className="empty home-empty">无匹配</div>
+          <Empty text="无匹配" />
         ) : (
           groups.map((g) => (
             <section key={g.name} className="home-group">
               <div className="section-title">
                 <span className="ellipsis">{g.name}</span>
-                <span className="home-count">{g.items.length}</span>
+                <span className="count">{g.items.length}</span>
               </div>
               <div className="home-grid">
                 {g.items.map((h) => (
@@ -264,8 +253,8 @@ export function HomeView() {
 function Stat(props: { value: number | null; label: string }) {
   return (
     <div className="home-stat">
-      <span className="home-stat-value">{props.value ?? "—"}</span>
-      <span className="home-stat-label">{props.label}</span>
+      <span className="stat-value">{props.value ?? "—"}</span>
+      <span className="stat-label">{props.label}</span>
     </div>
   );
 }
@@ -285,7 +274,7 @@ function Sparkline({ samples }: { samples: readonly (number | null)[] }) {
     })
     .join(" ");
   return (
-    <svg className="home-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none" aria-hidden>
+    <svg className="home-spark" width={SPARK_W} height={SPARK_H} viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none" aria-hidden>
       <polyline points={pts} vectorEffect="non-scaling-stroke" />
     </svg>
   );
@@ -339,6 +328,7 @@ function fmtWhen(ms: number): string {
 /** Last failed connect, kept until the host connects again; click to dismiss. */
 function FailMark({ hostId }: { hostId: string }) {
   const fail = useApp((s) => s.failures[hostId]);
+  const priv = usePrivacy();
   if (!fail) return null;
   const dismiss = (e: MouseEvent) => {
     e.stopPropagation();
@@ -348,7 +338,7 @@ function FailMark({ hostId }: { hostId: string }) {
     api.connFailureDismiss(hostId).catch(() => {});
   };
   return (
-    <button className="home-fail" title={`${fail.error}
+    <button className="home-fail" title={`${priv.hostText(fail.error, hostId)}
 点击忽略`} onClick={dismiss} onDoubleClick={(e) => e.stopPropagation()}>
       <span className="dot err" />
       <span className="ellipsis grow">上次连接失败 · {fmtWhen(fail.at)}</span>
@@ -359,17 +349,30 @@ function FailMark({ hostId }: { hostId: string }) {
 
 function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefined; onDelete: () => void }) {
   const conn = useApp((s) => s.conn[h.id]);
-  const [menu, setMenu] = useState<DOMRect | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; anchor?: DOMRect } | null>(null);
+  const menuWasOpen = useRef(false);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const fail = useApp((s) => s.failures[h.id]);
   const kind: ConnKind = conn?.state ?? "disconnected";
   const priv = usePrivacy();
   const addr = `${h.username}@${priv.addr(h.host)}` + (h.port !== 22 ? `:${h.port}` : "");
   const name = priv.text(h.name, h.host);
   const note = h.notes.trim().split("\n")[0];
   const stop = (e: MouseEvent) => e.stopPropagation();
-  const stateTitle = kind === "error" && conn?.error ? `${STATE_LABEL[kind]}：${conn.error}` : STATE_LABEL[kind];
+  const stateTitle = kind === "error" && conn?.error ? `${STATE_LABEL[kind]}：${priv.hostText(conn.error, h.id)}` : STATE_LABEL[kind];
 
   return (
-    <div className="home-card" onDoubleClick={() => openTerminal(h.id)}>
+    <div
+      className="home-card"
+      // The card's dialogs are portaled but still bubble here: only react to the card's own DOM.
+      onDoubleClick={(e) => e.currentTarget.contains(e.target as Node) && openTerminal(h.id)}
+      onContextMenu={(e) => {
+        if (e.defaultPrevented || !e.currentTarget.contains(e.target as Node)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
+    >
       <div className="home-card-top">
         <span
           className="home-icon"
@@ -382,8 +385,13 @@ function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefine
         <button
           className={"icon-btn home-more" + (menu ? " open" : "")}
           title="更多"
-          onMouseDown={(e) => menu && e.stopPropagation()}
-          onClick={(e) => setMenu(menu ? null : e.currentTarget.getBoundingClientRect())}
+          // The menu closes itself on this mousedown; remember it so the click does not reopen it.
+          onMouseDown={() => (menuWasOpen.current = !!menu?.anchor)}
+          onClick={(e) => {
+            if (menuWasOpen.current) return void (menuWasOpen.current = false);
+            const r = e.currentTarget.getBoundingClientRect();
+            setMenu({ x: r.right, y: r.bottom, anchor: r });
+          }}
           onDoubleClick={stop}
         >
           <MoreHorizontal />
@@ -394,7 +402,7 @@ function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefine
         <span className="home-name ellipsis" title={name}>
           {name}
         </span>
-        <span className="home-proto">SSH</span>
+        <span className="badge mono">SSH</span>
         <span className={"dot " + DOT[kind]} title={stateTitle} />
       </div>
       <div className="home-addr mono ellipsis" title={addr}>
@@ -403,7 +411,7 @@ function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefine
 
       {os && (
         <div className="home-os-row">
-          <span className="home-os ellipsis" title={os}>
+          <span className="badge trunc" title={os}>
             {os}
           </span>
         </div>
@@ -418,7 +426,7 @@ function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefine
       {h.tags.length > 0 ? (
         <div className="home-tags">
           {h.tags.map((t) => (
-            <span key={t} className="home-tag" title={t}>
+            <span key={t} className="badge trunc" title={t}>
               {t}
             </span>
           ))}
@@ -427,115 +435,26 @@ function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefine
         <div className="home-tags-empty">无标签</div>
       )}
 
-      <button className="btn primary home-connect" onClick={() => openTerminal(h.id)} onDoubleClick={stop}>
+      <button className="btn home-connect" onClick={() => openTerminal(h.id)} onDoubleClick={stop}>
         <Zap /> 快速连接
       </button>
 
       {menu && (
-        <CardMenu
-          anchor={menu}
-          host={h}
-          connected={kind === "connected" || kind === "connecting"}
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          anchor={menu.anchor}
+          items={hostMenuItems(h, {
+            state: kind,
+            onDiagnose: fail || kind === "error" ? () => setDiagnosing(true) : undefined,
+            onDelete,
+          })}
           onClose={() => setMenu(null)}
-          onDelete={onDelete}
         />
       )}
-    </div>
-  );
-}
-
-function CardMenu(props: {
-  anchor: DOMRect;
-  host: Host;
-  connected: boolean;
-  onClose: () => void;
-  onDelete: () => void;
-}) {
-  const { anchor, host: h, onClose } = props;
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x: anchor.right, y: anchor.bottom + 4 });
-
-  useEffect(() => {
-    const onDown = (e: globalThis.MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("blur", onClose);
-    window.addEventListener("resize", onClose);
-    window.addEventListener("scroll", onClose, true);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("blur", onClose);
-      window.removeEventListener("resize", onClose);
-      window.removeEventListener("scroll", onClose, true);
-    };
-  }, [onClose]);
-
-  // Right-align to the button; flip above it when there is no room below.
-  useLayoutEffect(() => {
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    const below = anchor.bottom + 4;
-    setPos({
-      x: Math.max(4, anchor.right - r.width),
-      y: below + r.height > window.innerHeight - 4 ? Math.max(4, anchor.top - 4 - r.height) : below,
-    });
-  }, [anchor]);
-
-  const run = (fn: () => unknown) => async () => {
-    onClose();
-    try {
-      await fn();
-    } catch (e) {
-      toast(errMsg(e), "error");
-    }
-  };
-
-  return createPortal(
-    <div
-      className="home-menu"
-      ref={ref}
-      style={{ left: pos.x, top: pos.y }}
-      onDoubleClick={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      <button onClick={run(() => useApp.getState().openEditor(h.id))}>
-        <Pencil /> 编辑
-      </button>
-      <button
-        onClick={run(async () => {
-          const addr = `${h.username}@${h.host}`;
-          await navigator.clipboard.writeText(addr);
-          toast("已复制 " + addr, "success");
-        })}
-      >
-        <Link /> 复制地址
-      </button>
-      <button onClick={run(() => openTerminal(h.id))}>
-        <SquareTerminal /> 新建终端
-      </button>
-      <button onClick={run(() => probeHosts([h.id]))}>
-        <Gauge /> 测速
-      </button>
-      {props.connected && (
-        <button onClick={run(() => api.connDisconnect(h.id))}>
-          <Unplug /> 断开
-        </button>
+      {diagnosing && (
+        <DiagnoseDialog hostId={h.id} name={name} error={fail?.error ?? conn?.error ?? undefined} onClose={() => setDiagnosing(false)} />
       )}
-      <hr />
-      <button
-        className="danger"
-        onClick={() => {
-          onClose();
-          props.onDelete();
-        }}
-      >
-        <Trash2 /> 删除
-      </button>
-    </div>,
-    document.body,
+    </div>
   );
 }

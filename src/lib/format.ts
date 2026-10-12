@@ -37,3 +37,14 @@ export function fmtPerms(mode: number, isDir: boolean): string {
     .map((c, i) => (i === 0 ? c : mode & (1 << (9 - i)) ? c : "-"))
     .join("");
 }
+
+/** Duration or latency: "<1 ms", "120 ms", "1.5 s". */
+export function fmtMs(ms: number): string {
+  if (!isFinite(ms)) return "-";
+  if (ms < 1) return "<1 ms";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+/** Last path segment, for local (\) and remote (/) paths. */
+export const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;

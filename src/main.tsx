@@ -2,12 +2,14 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/base.css";
+import { installDiagnostics } from "./lib/diag";
 import { applyTheme, currentTheme } from "./lib/themes";
 
 async function start() {
   applyTheme(currentTheme().id);
   if ("__TAURI_INTERNALS__" in window) {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    installDiagnostics(getCurrentWindow().label);
     if (getCurrentWindow().label === "switcher") {
       const { Switcher } = await import("./features/switcher/Switcher");
       ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<Switcher />);

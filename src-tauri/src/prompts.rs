@@ -42,12 +42,12 @@ impl Prompts {
             created: now_ms(),
             expires: now_ms() + timeout.as_millis() as i64,
         };
-        let id = ev.id.clone();
-        self.pending.lock().insert(id.clone(), (ev.clone(), tx));
+        self.pending.lock().insert(ev.id.clone(), (ev.clone(), tx));
         let _ = self.app.emit("prompt", &ev);
+        // Removes the prompt from the UI however this ends, including when the caller's
+        // future is dropped (e.g. an outer timeout), so no dead prompt is left behind.
+        let _closer = Closer { prompts: self, id: ev.id };
         let res = tokio::time::timeout(timeout, rx).await;
-        self.pending.lock().remove(&id);
-        let _ = self.app.emit("prompt-closed", &id);
         match res {
             Ok(Ok(v)) => Some(v),
             _ => None,
@@ -64,5 +64,17 @@ impl Prompts {
         let mut v: Vec<_> = self.pending.lock().values().map(|(e, _)| e.clone()).collect();
         v.sort_by_key(|e| e.created);
         v
+    }
+}
+
+struct Closer<'a> {
+    prompts: &'a Prompts,
+    id: String,
+}
+
+impl Drop for Closer<'_> {
+    fn drop(&mut self) {
+        self.prompts.pending.lock().remove(&self.id);
+        let _ = self.prompts.app.emit("prompt-closed", &self.id);
     }
 }

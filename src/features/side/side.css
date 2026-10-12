@@ -1,0 +1,27 @@
+/* More than four tabs: icons only. */
+.side-tabs.compact > button > span { display: none; }
+
+.side-more { position: relative; display: flex; flex: 0 0 40px; }
+.side-more > .side-collapse {
+  flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--fg-2); cursor: pointer;
+}
+.side-more > .side-collapse:hover, .side-more > .side-collapse.open { color: var(--fg-0); }
+.side-more > .side-collapse svg { width: var(--icon-md); height: var(--icon-md); stroke-width: 1.75; }
+
+.side-menu {
+  position: absolute; top: calc(100% - var(--sp-1)); right: 0; z-index: 30; width: 200px;
+  padding: var(--sp-1); border-radius: var(--radius-md); background: var(--bg-2); box-shadow: var(--shadow);
+}
+.side-menu .list-row { padding: 0; gap: 0; }
+.side-menu-open {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--sp-2);
+  height: var(--h-sm); padding: 0 var(--sp-2); border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left;
+}
+.side-menu-open svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; color: var(--fg-1); }
+/* Pin toggle: the shared checkbox, with a full --h-sm hit area. */
+.side-menu-pin { flex: none; width: var(--h-sm); height: var(--h-sm); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.side-menu-pin:has(input:disabled) { cursor: default; }
+
+/* Catches right-clicks on blank panel space without adding a layout box. */
+.side-body-menu { display: contents; }

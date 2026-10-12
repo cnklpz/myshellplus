@@ -1,6 +1,6 @@
 // Larger area chart for the detail dialogs: measured width (ResizeObserver) so text and strokes
 // stay crisp, y-axis labels in a fixed gutter, faint gridlines, hover crosshair with a tooltip.
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { type Pt, useChartTween } from "../../lib/motion";
 import { pathFor } from "./Sparkline";
 
@@ -12,6 +12,8 @@ export interface ChartSeries {
 }
 
 const GUTTER = 72; // y-label column
+/** Exposes GUTTER to CSS so the time hint row (.mon-area-x) lines up with the plot. */
+const GUTTER_VAR = { "--mon-gutter": `${GUTTER}px` } as CSSProperties;
 const TOP = 8;
 
 /** Round up to 1/2/2.5/5 × 10^k, inside the 1024-step unit when `bytes` is set. */
@@ -111,7 +113,7 @@ export function AreaChart(props: {
   const flip = hx > GUTTER + pw / 2;
 
   return (
-    <div className="mon-area">
+    <div className="mon-area" style={GUTTER_VAR}>
       <div className="mon-legend">
         {props.series.map((s) => {
           const vals = s.values.slice(-slots);

@@ -1,8 +1,10 @@
 // Home group filter tabs, reorderable by dragging. Same drag model as the sidebar: window mouse listeners,
 // a 4px threshold, the dragged tab follows the cursor via a direct DOM transform (no React render per move),
 // and React only re-renders when the insertion index changes. Siblings slide into place (FLIP).
+import { ArrowLeft, ArrowRight, Gauge, SquareMousePointer } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { toast } from "../../components/ui";
+import { useContextMenu } from "../terminal/ContextMenu";
 import { hideSlot, showSlot } from "../../lib/dragSlot";
 import { getGroupOrder, setGroupOrder } from "../../lib/groupOrder";
 
@@ -16,7 +18,10 @@ export function GroupTabs(props: {
   tabs: GroupTab[];
   active: string;
   onSelect: (name: string) => void;
+  /** Latency test for a group ("" = every host). */
+  onProbe?: (name: string) => void;
 }) {
+  const menu = useContextMenu();
   const [order, setOrder] = useState<string[] | null>(null); // live order while dragging
   const [dragging, setDragging] = useState<string | null>(null);
   const refs = useRef(new Map<string, HTMLButtonElement>());
@@ -137,6 +142,28 @@ export function GroupTabs(props: {
     window.addEventListener("mouseup", up);
   };
 
+  /** Same result as dragging the tab one place left / right. */
+  const shift = (name: string, d: -1 | 1) => {
+    const cur = props.tabs.map((t) => t.name);
+    const i = cur.indexOf(name);
+    const j = i + d;
+    if (i < 0 || j < 0 || j >= cur.length) return;
+    [cur[i], cur[j]] = [cur[j], cur[i]];
+    const saved = getGroupOrder();
+    setGroupOrder(cur);
+    toast("已调整分组顺序", "success", { label: "撤回", run: () => setGroupOrder(saved) });
+  };
+  const openMenu = (e: React.MouseEvent, name: string) => {
+    const i = props.tabs.findIndex((t) => t.name === name);
+    menu.open(e, [
+      { label: "查看", icon: <SquareMousePointer />, disabled: props.active === name, onSelect: () => props.onSelect(name) },
+      props.onProbe && { label: name ? "本组测速" : "全部测速", icon: <Gauge />, onSelect: () => props.onProbe?.(name) },
+      name !== "" && "sep",
+      name !== "" && { label: "左移", icon: <ArrowLeft />, disabled: i <= 0, onSelect: () => shift(name, -1) },
+      name !== "" && { label: "右移", icon: <ArrowRight />, disabled: i >= props.tabs.length - 1, onSelect: () => shift(name, 1) },
+    ]);
+  };
+
   return (
     <div className="home-tabs" role="tablist">
       <button
@@ -144,6 +171,7 @@ export function GroupTabs(props: {
         aria-selected={props.active === ""}
         className={"home-tab" + (props.active === "" ? " on" : "")}
         onClick={() => props.onSelect("")}
+        onContextMenu={(e) => openMenu(e, "")}
       >
         <span className="ellipsis">全部</span>
         <span className="home-tab-count">{props.allCount}</span>
@@ -163,12 +191,14 @@ export function GroupTabs(props: {
             className={"home-tab" + (n === props.active ? " on" : "") + (dragging === n ? " dragging" : "")}
             onMouseDown={(e) => startDrag(e, n)}
             onClick={() => !suppressClick.current && props.onSelect(n)}
+            onContextMenu={(e) => openMenu(e, n)}
           >
             <span className="ellipsis">{n}</span>
             <span className="home-tab-count">{t.count}</span>
           </button>
         );
       })}
+      {menu.node}
     </div>
   );
 }

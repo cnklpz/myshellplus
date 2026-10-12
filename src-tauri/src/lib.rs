@@ -1,4 +1,5 @@
 mod ai;
+mod applog;
 mod batch;
 mod db;
 mod error;
@@ -33,11 +34,11 @@ use serde_json::{Value, json};
 use tauri::ipc::{Channel, Response};
 use tauri::{Manager, State};
 
-use crate::db::{AuditEntry, Db, Host, KeyEntry, Snippet, TunnelDef};
+use crate::db::{AuditEntry, Db, Host, KeyEntry, KnownHost, Snippet, TunnelDef};
 use crate::error::CmdResult;
 use crate::mcp::{McpServer, McpSettings};
 use crate::state::{Ctx, CtxRef};
-use crate::util::new_id;
+use crate::util::{log_err, new_id};
 
 type S<'a> = State<'a, CtxRef>;
 
@@ -98,40 +99,54 @@ fn host_list(ctx: S) -> CmdResult<Vec<Host>> {
     Ok(ctx.db.list_hosts()?)
 }
 
-/// `password`: Some(non-empty) sets a new password, Some("") clears it, None keeps it.
+/// Some(non-empty) sets a new secret, Some("") clears it, None keeps it.
+fn apply_secret(ctx: &Ctx, slot: &mut Option<String>, value: Option<String>) -> anyhow::Result<()> {
+    match value {
+        Some(p) if !p.is_empty() => *slot = Some(ctx.vault.put(slot.as_deref(), &p)?),
+        Some(_) => {
+            if let Some(id) = slot.take() {
+                ctx.vault.delete(&id)?;
+            }
+        }
+        None => {}
+    }
+    Ok(())
+}
+
+/// `password` / `proxy_password`: Some(non-empty) sets a new one, Some("") clears it, None keeps it.
 #[tauri::command]
-fn host_save(ctx: S, mut host: Host, password: Option<String>) -> CmdResult<Host> {
+fn host_save(ctx: S, mut host: Host, password: Option<String>, proxy_password: Option<String>) -> CmdResult<Host> {
     if host.name.trim().is_empty() {
         host.name = host.host.clone();
     }
     if host.host.trim().is_empty() || host.username.trim().is_empty() {
         bail_msg!("地址和用户名不能为空");
     }
-    if !host.id.is_empty() {
-        if let Ok(old) = ctx.db.get_host(&host.id) {
-            host.password_secret = old.password_secret;
-        }
+    host.proxy_host = host.proxy_host.trim().to_string();
+    host.proxy_user = host.proxy_user.trim().to_string();
+    if host.proxy_enabled && (host.proxy_host.is_empty() || host.proxy_port == 0) {
+        bail_msg!("代理地址或端口无效");
     }
-    match password {
-        Some(p) if !p.is_empty() => {
-            host.password_secret = Some(ctx.vault.put(host.password_secret.as_deref(), &p)?);
-        }
-        Some(_) => {
-            if let Some(id) = host.password_secret.take() {
-                ctx.vault.delete(&id)?;
-            }
-        }
-        None => {}
+    ssh::validate_jump_chain(&ctx.db, &host)?;
+    if !host.id.is_empty()
+        && let Ok(old) = ctx.db.get_host(&host.id)
+    {
+        host.password_secret = old.password_secret;
+        host.proxy_secret = old.proxy_secret;
     }
+    apply_secret(&ctx, &mut host.password_secret, password)?;
+    apply_secret(&ctx, &mut host.proxy_secret, proxy_password)?;
     Ok(ctx.db.save_host(host)?)
 }
 
 #[tauri::command]
 async fn host_delete(ctx: S<'_>, id: String) -> CmdResult<()> {
+    tunnel::stop_host(ctx.inner(), &id).await;
+    monitor::stop_host(ctx.inner(), &id);
     ctx.pool.disconnect(&id).await;
     if let Ok(h) = ctx.db.get_host(&id) {
-        if let Some(s) = h.password_secret {
-            let _ = ctx.vault.delete(&s);
+        for s in [h.password_secret, h.proxy_secret].into_iter().flatten() {
+            log_err("删除主机密码失败", ctx.vault.delete(&s));
         }
     }
     Ok(ctx.db.delete_host(&id)?)
@@ -142,23 +157,29 @@ fn key_list(ctx: S) -> CmdResult<Vec<KeyEntry>> {
     Ok(ctx.db.list_keys()?)
 }
 
+// async + spawn_blocking: bcrypt-pbkdf of an encrypted key takes long enough to freeze the UI.
 #[tauri::command]
-fn key_import(ctx: S, name: String, private_key: String, passphrase: Option<String>) -> CmdResult<KeyEntry> {
-    let pass = passphrase.filter(|p| !p.is_empty());
-    let key = decode_secret_key(&private_key, pass.as_deref()).map_err(|e| anyhow::anyhow!("私钥无法解析: {e}"))?;
-    let public_key = key.public_key().to_openssh().unwrap_or_default();
-    let k = KeyEntry {
-        id: new_id(),
-        name,
-        public_key,
-        private_secret: ctx.vault.put(None, &private_key)?,
-        passphrase_secret: match pass {
-            Some(p) => Some(ctx.vault.put(None, &p)?),
-            None => None,
-        },
-        updated_at: 0,
-    };
-    ctx.db.save_key(&k)?;
+async fn key_import(ctx: S<'_>, name: String, private_key: String, passphrase: Option<String>) -> CmdResult<KeyEntry> {
+    let ctx = ctx.inner().clone();
+    let k = tokio::task::spawn_blocking(move || -> anyhow::Result<KeyEntry> {
+        let pass = passphrase.filter(|p| !p.is_empty());
+        let key = decode_secret_key(&private_key, pass.as_deref()).map_err(|e| anyhow::anyhow!("私钥无法解析: {e}"))?;
+        let public_key = key.public_key().to_openssh().unwrap_or_default();
+        let k = KeyEntry {
+            id: new_id(),
+            name,
+            public_key,
+            private_secret: ctx.vault.put(None, &private_key)?,
+            passphrase_secret: match pass {
+                Some(p) => Some(ctx.vault.put(None, &p)?),
+                None => None,
+            },
+            updated_at: 0,
+        };
+        ctx.db.save_key(&k)?;
+        Ok(k)
+    })
+    .await??;
     Ok(k)
 }
 
@@ -183,10 +204,14 @@ fn key_generate(ctx: S, name: String) -> CmdResult<KeyEntry> {
 
 #[tauri::command]
 fn key_delete(ctx: S, id: String) -> CmdResult<()> {
+    let used = ctx.db.hosts_using_key(&id)?;
+    if used > 0 {
+        bail_msg!("还有 {used} 台主机在使用此密钥，请先修改这些主机的认证方式");
+    }
     if let Ok(k) = ctx.db.get_key(&id) {
-        let _ = ctx.vault.delete(&k.private_secret);
+        log_err("删除私钥失败", ctx.vault.delete(&k.private_secret));
         if let Some(p) = k.passphrase_secret {
-            let _ = ctx.vault.delete(&p);
+            log_err("删除私钥口令失败", ctx.vault.delete(&p));
         }
     }
     Ok(ctx.db.delete_key(&id)?)
@@ -214,6 +239,34 @@ async fn op_item(reference: String, account: Option<String>) -> CmdResult<onepas
     Ok(onepass::item(reference, account).await?)
 }
 
+#[tauri::command]
+async fn op_vaults(account: Option<String>) -> CmdResult<Vec<onepass::OpVault>> {
+    Ok(onepass::vaults(account).await?)
+}
+
+#[tauri::command]
+async fn op_create_ssh_key(
+    title: String,
+    url: String,
+    username: String,
+    vault: Option<String>,
+    account: Option<String>,
+) -> CmdResult<onepass::OpNewKey> {
+    Ok(onepass::create_ssh_key(title, url, username, vault, account).await?)
+}
+
+#[tauri::command]
+async fn op_create_login(
+    title: String,
+    url: String,
+    username: String,
+    password: String,
+    vault: Option<String>,
+    account: Option<String>,
+) -> CmdResult<String> {
+    Ok(onepass::create_login(title, url, username, password, vault, account).await?)
+}
+
 // ---------------- connections & terminals ----------------
 
 #[tauri::command]
@@ -227,6 +280,7 @@ async fn conn_disconnect(ctx: S<'_>, host_id: String) -> CmdResult<()> {
     for t in ctx.terms.list().into_iter().filter(|t| t.host_id == host_id) {
         term::close(ctx.inner(), &t.id).await?;
     }
+    monitor::stop_host(ctx.inner(), &host_id);
     ctx.pool.disconnect(&host_id).await;
     Ok(())
 }
@@ -250,7 +304,7 @@ fn conn_failure_dismiss(ctx: S, host_id: String) {
 /// host id -> remote OS name, learned on connect.
 #[tauri::command]
 fn host_os_map(ctx: S) -> HashMap<String, String> {
-    ctx.db.setting("host_os").ok().flatten().unwrap_or_default()
+    ctx.db.setting_or_default("host_os")
 }
 
 #[tauri::command]
@@ -336,26 +390,28 @@ async fn exec_run(
     command: String,
     timeout_secs: Option<u64>,
     quiet: Option<bool>,
+    stdin: Option<String>,
 ) -> CmdResult<ssh::exec::ExecResult> {
     let c = ssh::get_conn(ctx.inner().clone(), host_id.clone()).await?;
     // Monitor cards poll their command; only the first run of a card is audited.
     if !quiet.unwrap_or(false) {
-        let _ = ctx.db.audit("user", Some(&host_id), "exec", &command, "run");
+        log_err("写入审计日志失败", ctx.db.audit("user", Some(&host_id), "exec", &command, "run"));
     }
-    Ok(ssh::exec::run(&c, &command, Duration::from_secs(timeout_secs.unwrap_or(60))).await?)
+    let timeout = Duration::from_secs(timeout_secs.unwrap_or(60));
+    Ok(ssh::exec::run_input(&c, &command, stdin.as_deref().map(str::as_bytes), timeout).await?)
 }
 
 // ---------------- monitor ----------------
 
 #[tauri::command]
 fn monitor_subscribe(ctx: S, host_id: String) -> monitor::MonitorSnapshot {
-    monitor::subscribe(ctx.inner().clone(), host_id.clone());
+    monitor::subscribe(ctx.inner().clone(), host_id.clone(), true);
     ctx.monitors.snapshot(&host_id)
 }
 
 #[tauri::command]
 fn monitor_unsubscribe(ctx: S, host_id: String) {
-    monitor::unsubscribe(ctx.inner(), &host_id);
+    monitor::unsubscribe(ctx.inner(), &host_id, true);
 }
 
 // ---------------- sftp ----------------
@@ -394,7 +450,7 @@ async fn sftp_rename(ctx: S<'_>, host_id: String, from: String, to: String) -> C
 
 #[tauri::command]
 async fn sftp_remove(ctx: S<'_>, host_id: String, paths: Vec<String>) -> CmdResult<()> {
-    let _ = ctx.db.audit("user", Some(&host_id), "sftp_remove", &paths.join(", "), "run");
+    log_err("写入审计日志失败", ctx.db.audit("user", Some(&host_id), "sftp_remove", &paths.join(", "), "run"));
     Ok(transfer::remove(ctx.inner().clone(), host_id, paths).await?)
 }
 
@@ -508,6 +564,11 @@ async fn ai_explain(ctx: S<'_>, host_id: String, text: String) -> CmdResult<Stri
 }
 
 #[tauri::command]
+async fn ai_chat(ctx: S<'_>, host_id: String, messages: Vec<predict::ChatMsg>, screen: Option<String>) -> CmdResult<String> {
+    Ok(predict::chat(ctx.inner().clone(), host_id, messages, screen).await?)
+}
+
+#[tauri::command]
 fn ai_settings_get(ctx: S) -> ai::AiSettings {
     ai::settings(&ctx.db)
 }
@@ -518,10 +579,10 @@ fn ai_settings_save(ctx: S, mut settings: ai::AiSettings, keys: HashMap<String, 
     let old = ai::settings(&ctx.db);
     // Drop stored keys of providers that were removed.
     for o in &old.providers {
-        if !settings.providers.iter().any(|p| p.id == o.id) {
-            if let Some(id) = &o.api_key_secret {
-                let _ = ctx.vault.delete(id);
-            }
+        if !settings.providers.iter().any(|p| p.id == o.id)
+            && let Some(id) = &o.api_key_secret
+        {
+            log_err("删除 API Key 失败", ctx.vault.delete(id));
         }
     }
     for p in settings.providers.iter_mut() {
@@ -529,7 +590,7 @@ fn ai_settings_save(ctx: S, mut settings: ai::AiSettings, keys: HashMap<String, 
         if let Some(k) = keys.get(&p.id) {
             if k.is_empty() {
                 if let Some(id) = p.api_key_secret.take() {
-                    let _ = ctx.vault.delete(&id);
+                    log_err("删除 API Key 失败", ctx.vault.delete(&id));
                 }
             } else {
                 p.api_key_secret = Some(ctx.vault.put(p.api_key_secret.as_deref(), k)?);
@@ -542,8 +603,14 @@ fn ai_settings_save(ctx: S, mut settings: ai::AiSettings, keys: HashMap<String, 
 // ---------------- MCP / agent ----------------
 
 #[tauri::command]
-fn mcp_settings_get(ctx: S, server: State<'_, Arc<McpServer>>) -> Value {
-    json!({ "settings": mcp::settings(ctx.inner()), "runningPort": *server.running_port.lock() })
+fn mcp_settings_get(ctx: S, server: State<'_, Arc<McpServer>>) -> CmdResult<Value> {
+    // A corrupt row must not lock the user out of the form: show defaults (not persisted, so the
+    // old token isn't silently replaced) plus the error; saving overwrites the bad row.
+    let (settings, error) = match mcp::settings(ctx.inner()) {
+        Ok(s) => (s, None),
+        Err(e) => (mcp::defaults(), Some(format!("MCP 设置无法读取，已显示默认值，保存后覆盖: {e:#}"))),
+    };
+    Ok(json!({ "settings": settings, "runningPort": *server.running_port.lock(), "error": error }))
 }
 
 #[tauri::command]
@@ -566,6 +633,16 @@ fn prompt_list(ctx: S) -> Vec<prompts::PromptEvent> {
 #[tauri::command]
 fn prompt_answer(ctx: S, id: String, value: Value) {
     ctx.prompts.answer(&id, value);
+}
+
+#[tauri::command]
+fn known_host_list(ctx: S) -> CmdResult<Vec<KnownHost>> {
+    Ok(ctx.db.list_known_hosts()?)
+}
+
+#[tauri::command]
+fn known_host_delete(ctx: S, host: String, port: u16) -> CmdResult<()> {
+    Ok(ctx.db.forget_host(&host, port)?)
 }
 
 #[tauri::command]
@@ -599,6 +676,53 @@ fn local_write_text(path: String, content: String) -> CmdResult<()> {
         bail_msg!("内容过大");
     }
     Ok(std::fs::write(&path, content)?)
+}
+
+// ---------------- logs ----------------
+
+/// UI-side events (render errors, uncaught exceptions, long frames) for the app log.
+#[tauri::command]
+fn log_write(level: String, target: String, msg: String) {
+    let target = match target.as_str() {
+        "crash" | "perf" => target.as_str(),
+        _ => "ui",
+    };
+    let msg: String = msg.chars().take(4000).collect();
+    match level.as_str() {
+        "error" => log::error!(target: target, "{msg}"),
+        "warn" => log::warn!(target: target, "{msg}"),
+        _ => log::info!(target: target, "{msg}"),
+    }
+}
+
+/// Recent warnings and errors (crashes, freezes, long frames, connection failures), newest first.
+#[tauri::command]
+async fn log_events(limit: Option<usize>) -> CmdResult<Vec<applog::Entry>> {
+    Ok(tokio::task::spawn_blocking(move || applog::events(limit.unwrap_or(200))).await?)
+}
+
+#[tauri::command]
+fn log_dir() -> Option<String> {
+    applog::dir().map(|d| d.to_string_lossy().into_owned())
+}
+
+/// Whole app log, redacted, to a path picked with the save dialog.
+#[tauri::command]
+async fn log_export(ctx: S<'_>, path: String) -> CmdResult<()> {
+    let c = ctx.inner().clone();
+    Ok(tokio::task::spawn_blocking(move || applog::write_file(&path, &applog::export_all(&c.db))).await??)
+}
+
+/// The host's last connect attempt; `redact` hides addresses and names.
+#[tauri::command]
+async fn conn_log_export(ctx: S<'_>, host_id: String, path: String, redact: bool) -> CmdResult<()> {
+    let c = ctx.inner().clone();
+    Ok(tokio::task::spawn_blocking(move || applog::write_file(&path, &applog::export_conn(&c.db, &host_id, redact))).await??)
+}
+
+#[tauri::command]
+async fn conn_diagnose(ctx: S<'_>, host_id: String) -> CmdResult<String> {
+    Ok(predict::diagnose_conn(ctx.inner().clone(), host_id).await?)
 }
 
 // ---------------- global hotkeys ----------------
@@ -691,7 +815,17 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(hotkey::plugin())
+        // A (re)loaded main page has lost its monitor subscriptions; connections stay untouched.
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
+                && let Some(ctx) = webview.app_handle().try_state::<CtxRef>()
+            {
+                monitor::reset_ui(ctx.inner());
+            }
+        })
         // The hidden switcher window must not keep the app alive.
         .on_window_event(|w, e| {
             if w.label() == "main" && matches!(e, tauri::WindowEvent::Destroyed) {
@@ -705,6 +839,7 @@ pub fn run() {
                 None => app.path().app_data_dir()?,
             };
             std::fs::create_dir_all(&dir)?;
+            applog::init(&dir);
             let db = Arc::new(Db::open(&dir.join("myshellplus.db"))?);
             let vault = Arc::new(vault::Vault::new(db.clone()));
             let unlocked = vault.is_unlocked();
@@ -760,7 +895,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             vault_status, vault_setup, vault_disable_password, vault_unlock, vault_lock, vault_remember, vault_change_password,
             host_list, host_save, host_delete, key_list, key_import, key_generate, key_delete,
-            agent_keys, op_status, op_items, op_item,
+            agent_keys, op_status, op_items, op_item, op_vaults, op_create_ssh_key, op_create_login,
             conn_connect, conn_disconnect, conn_list, conn_failures, conn_failure_dismiss, conn_latency, host_probe, host_os_map,
             term_open, term_attach, term_write, term_resize, term_close, term_list, term_cwd, history_record, history_list, history_delete, exec_run,
             monitor_subscribe, monitor_unsubscribe,
@@ -768,12 +903,18 @@ pub fn run() {
             transfer_start, transfer_list, transfer_cancel, transfer_clear,
             tunnel_list, tunnel_save, tunnel_delete, tunnel_start, tunnel_stop, tunnel_status,
             snippet_list, snippet_save, snippet_delete, batch_start,
-            predict_local, predict_ai, ai_nl2cmd, ai_explain, ai_settings_get, ai_settings_save,
-            mcp_settings_get, mcp_settings_save, mcp_new_token, prompt_list, prompt_answer, audit_list,
+            predict_local, predict_ai, ai_nl2cmd, ai_explain, ai_chat, ai_settings_get, ai_settings_save,
+            mcp_settings_get, mcp_settings_save, mcp_new_token, prompt_list, prompt_answer, audit_list, known_host_list, known_host_delete,
             import_default_path, import_preview, import_apply, export_backup,
             ui_heartbeat, local_read_text, local_write_text,
+            log_write, log_events, log_dir, log_export, conn_log_export, conn_diagnose,
             hotkey_get, hotkey_save, hotkey_suspend, switcher_pending, switcher_present, switcher_hide, switcher_pick,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_, e| {
+            if let tauri::RunEvent::Exit = e {
+                applog::clean_exit();
+            }
+        });
 }

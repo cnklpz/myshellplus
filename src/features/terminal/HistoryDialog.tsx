@@ -1,7 +1,7 @@
 // Command history of a terminal's host (or all hosts): search, insert, run, copy, delete.
 import { Copy, CornerDownLeft, Play, Search, Star, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Dialog, toast } from "../../components/ui";
+import { Dialog, Empty, SearchBox, toast } from "../../components/ui";
 import { api, errMsg, type HistoryHit } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
 import { type TermTab, useApp } from "../../store";
@@ -146,18 +146,15 @@ export function HistoryDialog(props: { tab: TermTab; onClose: () => void }) {
     <Dialog title={`命令历史 · ${hostName}`} width={720} onClose={props.onClose}>
       <div className="stack gap-3">
         <div className="row">
-          <div className="hist-search grow row">
-            <Search />
-            <input
-              autoFocus
-              className="grow mono"
-              spellCheck={false}
-              placeholder="docker ps"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={onKey}
-            />
-          </div>
+          <SearchBox
+            className="hist-search grow"
+            size="sm"
+            autoFocus
+            placeholder="docker ps"
+            value={q}
+            onChange={setQ}
+            onKeyDown={onKey}
+          />
           <div className="seg">
             <button className={scope === "host" ? "on" : ""} onClick={() => setScopePref("host")}>
               本机
@@ -168,7 +165,7 @@ export function HistoryDialog(props: { tab: TermTab; onClose: () => void }) {
           </div>
         </div>
         <div className="hist-list" ref={listRef}>
-          {items?.length === 0 && <div className="hist-empty">没有记录</div>}
+          {items?.length === 0 && <Empty text="没有记录" />}
           {items?.map((it, i) => (
             <div
               key={it.command}
@@ -197,19 +194,19 @@ export function HistoryDialog(props: { tab: TermTab; onClose: () => void }) {
                 <span className="hist-time">{relTime(it.lastUsed, now)}</span>
               </span>
               <span className="hist-actions" onDoubleClick={(e) => e.stopPropagation()}>
-                <button className="icon-btn" title="插入 (Enter)" disabled={dead} onClick={() => insert(it.command)}>
+                <button className="icon-btn sm" title="插入 (Enter)" disabled={dead} onClick={() => insert(it.command)}>
                   <CornerDownLeft />
                 </button>
-                <button className="icon-btn" title="执行 (Ctrl+Enter)" disabled={dead} onClick={() => run(it.command)}>
+                <button className="icon-btn sm" title="执行 (Ctrl+Enter)" disabled={dead} onClick={() => run(it.command)}>
                   <Play />
                 </button>
-                <button className="icon-btn" title="复制" onClick={() => copy(it.command)}>
+                <button className="icon-btn sm" title="复制" onClick={() => copy(it.command)}>
                   <Copy />
                 </button>
-                <button className="icon-btn" title="收藏到命令" onClick={() => setFav(it.command)}>
+                <button className="icon-btn sm" title="收藏到命令" onClick={() => setFav(it.command)}>
                   <Star />
                 </button>
-                <button className="icon-btn danger" title="删除" onClick={() => remove(it.command)}>
+                <button className="icon-btn sm danger" title="删除" onClick={() => remove(it.command)}>
                   <Trash2 />
                 </button>
               </span>

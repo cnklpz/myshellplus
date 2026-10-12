@@ -2,10 +2,12 @@
 //! SFTP, exec and tunnels (channels are multiplexed).
 
 pub mod exec;
+mod socks;
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use futures::future::BoxFuture;
@@ -17,12 +19,86 @@ use russh_sftp::client::SftpSession;
 use serde::Serialize;
 use serde_json::json;
 use tauri::Emitter;
+use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::db::Host;
+use crate::db::{Db, Host};
 use crate::state::Ctx;
 
+/// TCP / proxy / jump-host setup (DNS, TCP connect, SOCKS handshake, direct-tcpip channel).
+const SETUP_TIMEOUT: Duration = Duration::from_secs(20);
+/// SSH key exchange, not counting the time the user spends on the host key prompt.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
+const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+/// Agent auth may wait for the user to approve in 1Password.
+const AGENT_AUTH_TIMEOUT: Duration = Duration::from_secs(120);
+/// Jump hosts allowed in front of a host.
+pub const MAX_JUMPS: usize = 4;
+
+/// A remote (-R) forward registered on a connection.
+pub struct RemoteForward {
+    pub host: String,
+    pub port: u16,
+    /// Resolves (sender dropped) when the tunnel stops; ends its open forwarded connections.
+    pub cancel: tokio::sync::watch::Receiver<()>,
+}
+
 /// Remote (-R) forwards registered on a connection: bound remote port -> local target.
-pub type ForwardMap = Arc<Mutex<HashMap<u32, (String, u16)>>>;
+pub type ForwardMap = Arc<Mutex<HashMap<u32, RemoteForward>>>;
+
+/// Time spent waiting for the user during one connect attempt (host key prompt), which must not
+/// count against the handshake timeout.
+#[derive(Default)]
+struct UserWait {
+    inner: Mutex<(Duration, Option<Instant>)>,
+}
+
+impl UserWait {
+    fn begin(self: &Arc<Self>) -> UserWaitGuard {
+        self.inner.lock().1 = Some(Instant::now());
+        UserWaitGuard(self.clone())
+    }
+
+    /// (total time waited so far, waiting right now)
+    fn waited(&self) -> (Duration, bool) {
+        let g = self.inner.lock();
+        (g.0 + g.1.map(|s| s.elapsed()).unwrap_or_default(), g.1.is_some())
+    }
+}
+
+struct UserWaitGuard(Arc<UserWait>);
+
+impl Drop for UserWaitGuard {
+    fn drop(&mut self) {
+        let mut g = self.0.inner.lock();
+        if let Some(s) = g.1.take() {
+            g.0 += s.elapsed();
+        }
+    }
+}
+
+/// `tokio::time::timeout`, except that time spent waiting for the user does not count. `wait` is
+/// shared by several phases (handshake, auth), so only the waiting done during this call is
+/// excluded, not a prompt from an earlier phase.
+async fn timeout_excluding_user<F: Future>(limit: Duration, wait: &UserWait, fut: F) -> Option<F::Output> {
+    let start = Instant::now();
+    let base = wait.waited().0;
+    let mut fut = std::pin::pin!(fut);
+    loop {
+        let (waited, waiting) = wait.waited();
+        let used = start.elapsed().saturating_sub(waited.saturating_sub(base));
+        if used >= limit && !waiting {
+            return None;
+        }
+        let nap = limit.saturating_sub(used).max(Duration::from_millis(200));
+        tokio::select! {
+            r = &mut fut => return Some(r),
+            _ = tokio::time::sleep(nap) => {}
+        }
+    }
+}
+
+trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
 
 pub struct ClientHandler {
     ctx: Weak<Ctx>,
@@ -30,6 +106,7 @@ pub struct ClientHandler {
     host: String,
     port: u16,
     forwards: ForwardMap,
+    wait: Arc<UserWait>,
 }
 
 fn key_info(k: &PublicKeyOrCertificate) -> (String, String) {
@@ -61,9 +138,14 @@ impl client::Handler for ClientHandler {
             "changed": changed, "oldFingerprint": known.map(|k| k.1),
         });
         emit_step(&ctx, &self.host_id, if changed { "主机指纹已变化，等待确认" } else { "新主机，等待确认指纹" }, None);
-        let ans = ctx.prompts.ask("hostkey", data, Duration::from_secs(180)).await;
+        let ans = {
+            let _waiting = self.wait.begin();
+            ctx.prompts.ask("hostkey", data, Duration::from_secs(180)).await
+        };
         if ans.and_then(|v| v.as_bool()) == Some(true) {
-            let _ = ctx.db.trust_host(&self.host, self.port, &algo, &fp);
+            if let Err(e) = ctx.db.trust_host(&self.host, self.port, &algo, &fp) {
+                log::warn!(target: &crate::applog::conn_target(&self.host_id), "保存主机指纹失败: {e:#}");
+            }
             Ok(true)
         } else {
             Ok(false)
@@ -80,15 +162,21 @@ impl client::Handler for ClientHandler {
         reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let target = self.forwards.lock().get(&connected_port).cloned();
-        let Some((th, tp)) = target else {
+        let target = self.forwards.lock().get(&connected_port).map(|f| (f.host.clone(), f.port, f.cancel.clone()));
+        let Some((th, tp, mut cancel)) = target else {
             return Ok(()); // dropping `reply` rejects
         };
         reply.accept().await;
         tauri::async_runtime::spawn(async move {
-            if let Ok(mut tcp) = tokio::net::TcpStream::connect((th.as_str(), tp)).await {
-                let mut stream = channel.into_stream();
-                let _ = tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
+            let fwd = async {
+                if let Ok(mut tcp) = tokio::net::TcpStream::connect((th.as_str(), tp)).await {
+                    let mut stream = channel.into_stream();
+                    let _ = tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
+                }
+            };
+            tokio::select! {
+                _ = fwd => {}
+                _ = cancel.changed() => {}
             }
         });
         Ok(())
@@ -170,13 +258,23 @@ impl Pool {
 
 /// Get (or open) the shared connection for a host.
 pub fn get_conn(ctx: Arc<Ctx>, host_id: String) -> BoxFuture<'static, Result<Arc<Conn>>> {
-    get_conn_depth(ctx, host_id, 0)
+    get_conn_chain(ctx, host_id, Vec::new())
 }
 
-fn get_conn_depth(ctx: Arc<Ctx>, host_id: String, depth: u8) -> BoxFuture<'static, Result<Arc<Conn>>> {
+fn host_name(db: &Db, id: &str) -> String {
+    db.get_host(id).map(|h| h.name).unwrap_or_else(|_| id.to_string())
+}
+
+/// `chain`: the hosts connecting through this one. A jump-host cycle would otherwise wait
+/// forever on its own per-host connect lock.
+fn get_conn_chain(ctx: Arc<Ctx>, host_id: String, mut chain: Vec<String>) -> BoxFuture<'static, Result<Arc<Conn>>> {
     Box::pin(async move {
-        if depth > 4 {
-            bail!("跳板机链过长或存在循环");
+        if chain.contains(&host_id) {
+            let names: Vec<String> = chain.iter().chain([&host_id]).map(|id| host_name(&ctx.db, id)).collect();
+            bail!("跳板机存在循环: {}", names.join(" → "));
+        }
+        if chain.len() > MAX_JUMPS {
+            bail!("跳板机链过长（最多 {MAX_JUMPS} 级）");
         }
         if let Some(c) = ctx.pool.existing(&host_id) {
             return Ok(c);
@@ -194,8 +292,16 @@ fn get_conn_depth(ctx: Arc<Ctx>, host_id: String, depth: u8) -> BoxFuture<'stati
             return Ok(c);
         }
         emit_state(&ctx, &host_id, "connecting", None);
-        match connect(ctx.clone(), &host_id, depth).await {
+        let target = crate::applog::conn_target(&host_id);
+        match ctx.db.get_host(&host_id) {
+            Ok(h) => log::info!(target: &target, "开始连接 {}@{}:{} 认证={}", h.username, h.host, h.port, h.auth_type),
+            Err(_) => log::info!(target: &target, "开始连接"),
+        }
+        let started = std::time::Instant::now();
+        chain.push(host_id.clone());
+        match connect(ctx.clone(), &host_id, &chain).await {
             Ok(c) => {
+                log::info!(target: &target, "连接成功 {}ms", started.elapsed().as_millis());
                 ctx.pool.conns.lock().insert(host_id.clone(), c.clone());
                 set_failure(&ctx, &host_id, None);
                 emit_state(&ctx, &host_id, "connected", None);
@@ -204,6 +310,7 @@ fn get_conn_depth(ctx: Arc<Ctx>, host_id: String, depth: u8) -> BoxFuture<'stati
                 Ok(c)
             }
             Err(e) => {
+                log::warn!(target: &target, "连接失败 {}ms: {e:#}", started.elapsed().as_millis());
                 set_failure(&ctx, &host_id, Some(format!("{e:#}")));
                 emit_state(&ctx, &host_id, "error", Some(format!("{e:#}")));
                 Err(e)
@@ -226,6 +333,7 @@ pub struct ConnStep {
 }
 
 pub fn emit_step(ctx: &Ctx, host_id: &str, label: &str, detail: Option<String>) {
+    log::info!(target: &crate::applog::conn_target(host_id), "{label} {}", detail.as_deref().unwrap_or(""));
     let _ = ctx.app.emit("conn-step", ConnStep { host_id: host_id.into(), label: label.into(), detail });
 }
 
@@ -240,23 +348,44 @@ pub struct Failure {
 const FAILURES_KEY: &str = "conn_failures";
 
 pub fn failures(ctx: &Ctx) -> HashMap<String, Failure> {
-    ctx.db.setting(FAILURES_KEY).ok().flatten().unwrap_or_default()
+    ctx.db.setting_or_default(FAILURES_KEY)
 }
 
 /// Record (Some) or clear (None) the last failure of a host; notifies the UI on change.
 pub fn set_failure(ctx: &Ctx, host_id: &str, error: Option<String>) {
-    let mut map = failures(ctx);
-    let changed = match error {
+    let r = ctx.db.update_setting(FAILURES_KEY, |map: &mut HashMap<String, Failure>| match error {
         Some(error) => {
             map.insert(host_id.into(), Failure { error, at: crate::util::now_ms() });
             true
         }
         None => map.remove(host_id).is_some(),
-    };
-    if changed {
-        let _ = ctx.db.set_setting(FAILURES_KEY, &map);
-        let _ = ctx.app.emit("conn-failures", &map);
+    });
+    match r {
+        Ok(Some(map)) => {
+            let _ = ctx.app.emit("conn-failures", &map);
+        }
+        Ok(None) => {}
+        Err(e) => log::warn!("保存连接失败记录出错: {e:#}"),
     }
+}
+
+/// Reject jump-host chains that loop back or are too long (checked when saving a host).
+pub fn validate_jump_chain(db: &Db, host: &Host) -> Result<()> {
+    let mut seen = vec![host.id.clone()];
+    let mut next = host.jump_host_id.clone().filter(|s| !s.is_empty());
+    while let Some(j) = next {
+        if seen.contains(&j) {
+            bail!("跳板机不能形成循环");
+        }
+        if seen.len() > MAX_JUMPS {
+            bail!("跳板机链过长（最多 {MAX_JUMPS} 级）");
+        }
+        // A missing jump host is reported when connecting.
+        let Ok(h) = db.get_host(&j) else { break };
+        seen.push(j);
+        next = h.jump_host_id.filter(|s| !s.is_empty());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Serialize)]
@@ -300,7 +429,12 @@ pub async fn probe(ctx: Arc<Ctx>, host_id: String) -> Probe {
                 None => break,
             }
         }
-        let addr = tokio::time::timeout(Duration::from_secs(5), tokio::net::lookup_host((h.host.as_str(), h.port)))
+        // Behind a proxy, likewise measure the hop to the proxy.
+        let (host, port) = match h.proxy_host.trim() {
+            p if h.proxy_enabled && !p.is_empty() => (p, h.proxy_port),
+            _ => (h.host.as_str(), h.port),
+        };
+        let addr = tokio::time::timeout(Duration::from_secs(5), tokio::net::lookup_host((host, port)))
             .await
             .map_err(|_| anyhow!("域名解析超时"))?
             .context("域名解析失败")?
@@ -329,11 +463,19 @@ fn spawn_os_probe(ctx: Arc<Ctx>, c: Arc<Conn>) {
         if os.is_empty() || os.len() > 120 {
             return;
         }
-        let mut map: std::collections::HashMap<String, String> = ctx.db.setting("host_os").ok().flatten().unwrap_or_default();
-        if map.get(&c.host_id) != Some(&os) {
+        let r = ctx.db.update_setting("host_os", |map: &mut HashMap<String, String>| {
+            if map.get(&c.host_id) == Some(&os) {
+                return false;
+            }
             map.insert(c.host_id.clone(), os);
-            let _ = ctx.db.set_setting("host_os", &map);
-            let _ = ctx.app.emit("host-os", &map);
+            true
+        });
+        match r {
+            Ok(Some(map)) => {
+                let _ = ctx.app.emit("host-os", &map);
+            }
+            Ok(None) => {}
+            Err(e) => log::warn!("保存系统名称出错: {e:#}"),
         }
     });
 }
@@ -362,6 +504,8 @@ fn spawn_watch(ctx: Arc<Ctx>, c: Arc<Conn>) {
                     m.remove(&id);
                 }
                 drop(m);
+                let up = (crate::util::now_ms() as u64).saturating_sub(c.since) / 1000;
+                log::warn!(target: &crate::applog::conn_target(&id), "连接断开，已连接 {up}s");
                 emit_state(&ctx, &id, "disconnected", None);
                 return;
             }
@@ -369,7 +513,7 @@ fn spawn_watch(ctx: Arc<Ctx>, c: Arc<Conn>) {
     });
 }
 
-async fn connect(ctx: Arc<Ctx>, host_id: &str, depth: u8) -> Result<Arc<Conn>> {
+async fn connect(ctx: Arc<Ctx>, host_id: &str, chain: &[String]) -> Result<Arc<Conn>> {
     let host = ctx.db.get_host(host_id)?;
     let config = Arc::new(client::Config {
         keepalive_interval: Some(Duration::from_secs(20)),
@@ -379,29 +523,50 @@ async fn connect(ctx: Arc<Ctx>, host_id: &str, depth: u8) -> Result<Arc<Conn>> {
         ..Default::default()
     });
     let forwards: ForwardMap = Default::default();
+    let wait = Arc::new(UserWait::default());
     let handler = ClientHandler {
         ctx: Arc::downgrade(&ctx),
         host_id: host.id.clone(),
         host: host.host.clone(),
         port: host.port,
         forwards: forwards.clone(),
+        wait: wait.clone(),
+    };
+    let unreachable = || format!("无法连接 {}:{}", host.host, host.port);
+
+    // The jump host connects under its own timeouts (it may be waiting on its own host key prompt).
+    let jump = match host.jump_host_id.clone().filter(|s| !s.is_empty()) {
+        Some(jid) => {
+            emit_step(&ctx, host_id, "连接跳板机", Some(host_name(&ctx.db, &jid)));
+            Some(get_conn_chain(ctx.clone(), jid, chain.to_vec()).await.context("跳板机连接失败")?)
+        }
+        None => None,
     };
 
-    let mut jump = None;
-    let connect_fut = async {
-        if let Some(jid) = host.jump_host_id.clone().filter(|s| !s.is_empty()) {
-            let jname = ctx.db.get_host(&jid).map(|h| h.name).unwrap_or_default();
-            emit_step(&ctx, host_id, "连接跳板机", Some(jname));
-            let j = get_conn_depth(ctx.clone(), jid, depth + 1).await.context("跳板机连接失败")?;
+    // Transport only: the host key prompt and auth have their own limits below.
+    let setup = async {
+        if let Some(j) = &jump {
             emit_step(&ctx, host_id, "经跳板机连接目标", Some(format!("{}:{}", host.host, host.port)));
             let ch = j
                 .handle
                 .channel_open_direct_tcpip(host.host.clone(), host.port as u32, "127.0.0.1", 0)
                 .await
                 .context("跳板机无法连到目标")?;
-            jump = Some(j);
-            emit_step(&ctx, host_id, "SSH 握手", None);
-            client::connect_stream(config, ch.into_stream(), handler).await.map_err(anyhow::Error::from)
+            Ok::<Box<dyn Io>, anyhow::Error>(Box::new(ch.into_stream()) as Box<dyn Io>)
+        } else if host.proxy_enabled && !host.proxy_host.trim().is_empty() {
+            let (ph, pp) = (host.proxy_host.trim(), host.proxy_port);
+            emit_step(&ctx, host_id, "连接代理", Some(format!("{ph}:{pp}")));
+            let mut tcp = tokio::net::TcpStream::connect((ph, pp)).await.context("无法连接代理")?;
+            let _ = tcp.set_nodelay(true);
+            let pass = match &host.proxy_secret {
+                Some(id) => Some(ctx.vault.get(id)?),
+                None => None,
+            };
+            let user = host.proxy_user.trim();
+            let auth = (!user.is_empty()).then(|| (user, pass.as_ref().map(|p| p.as_str()).unwrap_or("")));
+            emit_step(&ctx, host_id, "经代理连接目标", Some(format!("{}:{}", host.host, host.port)));
+            socks::handshake(&mut tcp, &host.host, host.port, auth).await.context("SOCKS5 代理握手失败")?;
+            Ok(Box::new(tcp) as Box<dyn Io>)
         } else {
             emit_step(&ctx, host_id, "解析地址", Some(host.host.clone()));
             let addrs: Vec<_> = tokio::net::lookup_host((host.host.as_str(), host.port))
@@ -422,16 +587,26 @@ async fn connect(ctx: Arc<Ctx>, host_id: &str, depth: u8) -> Result<Arc<Conn>> {
             }
             let tcp = tcp.ok_or(last)?;
             let _ = tcp.set_nodelay(true);
-            emit_step(&ctx, host_id, "SSH 握手", None);
-            client::connect_stream(config, tcp, handler).await.map_err(anyhow::Error::from)
+            Ok(Box::new(tcp) as Box<dyn Io>)
         }
     };
-    let mut handle = tokio::time::timeout(Duration::from_secs(20), connect_fut)
+    let stream = tokio::time::timeout(SETUP_TIMEOUT, setup)
         .await
         .map_err(|_| anyhow!("连接超时"))?
-        .with_context(|| format!("无法连接 {}:{}", host.host, host.port))?;
+        .with_context(unreachable)?;
 
-    authenticate(&ctx, &host, &mut handle).await?;
+    emit_step(&ctx, host_id, "SSH 握手", None);
+    let mut handle = timeout_excluding_user(HANDSHAKE_TIMEOUT, &wait, client::connect_stream(config, stream, handler))
+        .await
+        .ok_or_else(|| anyhow!("SSH 握手超时"))
+        .with_context(unreachable)?
+        .map_err(anyhow::Error::from)
+        .with_context(unreachable)?;
+
+    let auth_limit = if host.auth_type == "agent" { AGENT_AUTH_TIMEOUT } else { AUTH_TIMEOUT };
+    timeout_excluding_user(auth_limit, &wait, authenticate(&ctx, &host, &mut handle))
+        .await
+        .ok_or_else(|| anyhow!("身份认证超时"))??;
 
     Ok(Arc::new(Conn {
         host_id: host.id.clone(),
@@ -455,7 +630,10 @@ async fn authenticate(ctx: &Ctx, host: &Host, handle: &mut Handle<ClientHandler>
                 Some(id) => Some(ctx.vault.get(id)?),
                 None => None,
             };
-            let key = decode_secret_key(&pem, pass.as_ref().map(|s| s.as_str())).context("私钥解析失败")?;
+            // bcrypt-pbkdf for encrypted keys is slow: keep it off the async workers.
+            let key = tokio::task::spawn_blocking(move || decode_secret_key(&pem, pass.as_ref().map(|s| s.as_str())))
+                .await?
+                .context("私钥解析失败")?;
             let hash = handle.best_supported_rsa_hash().await?.flatten();
             let r = handle
                 .authenticate_publickey(&host.username, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
@@ -515,4 +693,73 @@ async fn authenticate(ctx: &Ctx, host: &Host, handle: &mut Handle<ClientHandler>
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn host(db: &Db, id: &str, jump: Option<&str>) -> Host {
+        let h: Host = serde_json::from_value(json!({
+            "id": id, "name": id, "host": "10.0.0.1", "port": 22, "username": "root", "authType": "password",
+            "jumpHostId": jump,
+        }))
+        .unwrap();
+        db.save_host(h).unwrap()
+    }
+
+    #[test]
+    fn jump_cycles_rejected() {
+        let path = std::env::temp_dir().join(format!("msp-jump-test-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let db = Db::open(&path).unwrap();
+        let a = host(&db, "a", None);
+        host(&db, "b", Some("a"));
+        assert!(validate_jump_chain(&db, &a).is_ok());
+        // a -> b -> a
+        let mut a2 = a.clone();
+        a2.jump_host_id = Some("b".into());
+        assert!(validate_jump_chain(&db, &a2).is_err());
+        // self jump
+        a2.jump_host_id = Some("a".into());
+        assert!(validate_jump_chain(&db, &a2).is_err());
+        // too long: c -> h1 -> h2 -> h3 -> h4 -> h5
+        host(&db, "h5", None);
+        host(&db, "h4", Some("h5"));
+        host(&db, "h3", Some("h4"));
+        host(&db, "h2", Some("h3"));
+        let h1 = host(&db, "h1", Some("h2"));
+        assert!(validate_jump_chain(&db, &h1).is_ok());
+        let c: Host = serde_json::from_value(json!({
+            "id": "c", "name": "c", "host": "x", "port": 22, "username": "u", "authType": "password", "jumpHostId": "h1",
+        }))
+        .unwrap();
+        assert!(validate_jump_chain(&db, &c).is_err());
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn user_wait_excluded_from_timeout() {
+        let wait = Arc::new(UserWait::default());
+        // Times out normally.
+        let r = timeout_excluding_user(Duration::from_millis(100), &wait, tokio::time::sleep(Duration::from_secs(5))).await;
+        assert!(r.is_none());
+        // 700ms spent on a prompt does not count against a 300ms budget.
+        let w = wait.clone();
+        let fut = async move {
+            {
+                let _g = w.begin();
+                tokio::time::sleep(Duration::from_millis(700)).await;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            7
+        };
+        assert_eq!(timeout_excluding_user(Duration::from_millis(300), &wait, fut).await, Some(7));
+        // That earlier prompt doesn't extend a later phase's budget.
+        let t = Instant::now();
+        let r = timeout_excluding_user(Duration::from_millis(100), &wait, tokio::time::sleep(Duration::from_secs(5))).await;
+        assert!(r.is_none());
+        assert!(t.elapsed() < Duration::from_millis(600), "{:?}", t.elapsed());
+    }
 }

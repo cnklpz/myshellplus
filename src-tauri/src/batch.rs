@@ -64,7 +64,7 @@ pub async fn run_many(ctx: Arc<Ctx>, batch_id: String, host_ids: Vec<String>, co
                         r.error = Some(format!("{e:#}"));
                     }
                 }
-                let _ = ctx.db.record_history(&hid, &command);
+                crate::util::log_err("写入命令历史失败", ctx.db.record_history(&hid, &command));
                 let _ = ctx.app.emit("batch", &r);
                 r
             }
@@ -77,7 +77,7 @@ pub async fn run_many(ctx: Arc<Ctx>, batch_id: String, host_ids: Vec<String>, co
 pub fn start(ctx: Arc<Ctx>, host_ids: Vec<String>, command: String, timeout_secs: u64) -> String {
     let id = new_id();
     let bid = id.clone();
-    let _ = ctx.db.audit("user", None, "batch", &format!("{} 台: {}", host_ids.len(), command), "started");
+    crate::util::log_err("写入审计日志失败", ctx.db.audit("user", None, "batch", &format!("{} 台: {}", host_ids.len(), command), "started"));
     tauri::async_runtime::spawn(async move {
         run_many(ctx, bid, host_ids, command, Duration::from_secs(timeout_secs.clamp(1, 3600))).await;
     });

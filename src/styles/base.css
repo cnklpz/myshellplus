@@ -12,12 +12,20 @@
   --sp-5: 20px;
   --sp-6: 24px;
   --sp-8: 32px;
+  --sp-half: 2px; /* the only sub-4px spacing: hairline insets (segmented control, chip close button) */
 
+  --h-badge: 20px; /* .badge pills, counts */
+  --h-xs: 24px; /* .icon-btn.sm, inline row actions, small chips */
   --h-sm: 32px; /* compact controls, list rows */
   --h-md: 36px; /* default controls */
+  --h-titlebar: 44px;
+  --h-panel-head: 48px; /* .panel-header, side panel tabs */
+  --h-dialog-head: 52px; /* .dialog-header */
+  --h-page-head: 64px; /* .page-header */
   --icon-sm: 15px;
   --icon-md: 17px;
   --icon-lg: 18px;
+  --icon-xl: 20px; /* empty-state icon, palette search icon */
   --label-w: 72px; /* form label column (.field, key/value grids) */
   --scrollbar-w: 10px;
   --radius-sm: 6px;
@@ -31,37 +39,14 @@
   --fs-sm: 13px;
   --fs-md: 14px;
   --fs-lg: 16px;
-  --fs-xl: 22px;
+  --fs-xl: 22px; /* big numbers (.stat-value) */
+  --fs-title: 20px; /* page title (.page-header h1) */
 
-  /* Dark graphite. Surfaces are told apart by tone, not by borders. */
-  --chrome: #0a0c0f;   /* window frame, sidebar */
-  --bg-0: #101317;     /* content surface, terminal */
-  --bg-1: #14181d;     /* panels inside content */
-  --bg-2: #1a1f25;     /* inputs, raised */
-  --bg-3: #20262d;     /* hover */
-  --bg-4: #28303a;     /* selected */
-  --line: rgba(255, 255, 255, 0.055);
-  --line-strong: rgba(255, 255, 255, 0.1);
-  --fg-0: #eceef1;
-  --fg-1: #9aa2ad;
-  --fg-2: #626a75;
-  --accent: #8ea6ff;
-  --accent-fg: #0a0c0f;
-  --accent-soft: rgba(142, 166, 255, 0.13);
-  --ok: #5fd4a0;
-  --warn: #f0b45e;
-  --err: #f07a7d;
-  --info: #8ea6ff;
-  --chart-1: #8ea6ff;
-  --chart-2: #5fd4a0;
-  --chart-3: #c79bf2;
-  --chart-4: #f0b45e;
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
-
+  /* All color tokens (--chrome, --bg-0..4, --fg-0..2, --line*, --accent*, --on-accent, --ok/--warn/--err,
+     --danger-solid, --on-danger, --scrim, --shadow*, --chart-1..4) are set on <html> by
+     src/lib/themes.ts applyTheme(), which main.tsx runs before the first render. */
   color-scheme: dark;
 }
-
-/* Other color themes are applied at runtime by src/lib/themes.ts. */
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -107,19 +92,24 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .panel { display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); }
 .panel-header {
   display: flex; align-items: center; gap: var(--sp-2);
-  height: 48px; padding: 0 var(--sp-4); flex: none;
+  height: var(--h-panel-head); padding: 0 var(--sp-4); flex: none;
   box-shadow: inset 0 -1px 0 var(--line);
   font-weight: 600; font-size: var(--fs-md); letter-spacing: -0.005em;
 }
 .panel-body { padding: var(--sp-4); overflow: auto; min-height: 0; flex: 1 1 auto; }
+/* Block heading inside a page/panel/dialog: the one style for set-block-head, he-sec-title,
+   agent-sec-head h2, tb-group-title etc. Works on div/h2/h3. Trailing .meta (pushed right) and
+   .count are muted numbers; a trailing .icon-btn stays on the same line. */
 .section-title {
-  display: flex; align-items: center; gap: var(--sp-2);
-  height: var(--h-sm); font-size: var(--fs-sm); font-weight: 600; color: var(--fg-1);
+  display: flex; align-items: center; gap: var(--sp-2); margin: 0;
+  height: var(--h-sm); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0; color: var(--fg-1);
 }
+.section-title > .meta { margin-left: auto; }
+.section-title > .meta, .section-title .count { font-weight: 400; color: var(--fg-2); font-variant-numeric: tabular-nums; }
 
 /* ---------- controls (all share --h-md / --h-sm) ---------- */
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); flex-shrink: 0;
   height: var(--h-md); padding: 0 var(--sp-3);
   border: none; border-radius: var(--radius-md);
   background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--line-strong);
@@ -133,10 +123,10 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .btn.primary { background: var(--accent); box-shadow: none; color: var(--accent-fg); font-weight: 600; }
 .btn.primary:hover { background: var(--accent); filter: brightness(1.1); }
 .btn.danger { color: var(--err); }
-.btn.danger.solid { background: var(--err); box-shadow: none; color: #fff; }
+.btn.danger.solid { background: var(--danger-solid); box-shadow: none; color: var(--on-danger); }
+.btn.danger.solid:hover { background: var(--danger-solid); filter: brightness(1.1); }
 .btn.ghost { background: transparent; box-shadow: none; color: var(--fg-1); }
-.btn.ghost:hover { color: var(--fg-0); }
-.btn.ghost:hover { background: var(--bg-3); }
+.btn.ghost:hover { color: var(--fg-0); background: var(--bg-3); }
 .btn svg { width: var(--icon-md); height: var(--icon-md); flex: none; }
 .btn.sm svg { width: var(--icon-sm); height: var(--icon-sm); }
 
@@ -150,6 +140,32 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .icon-btn:disabled { opacity: 0.4; cursor: default; }
 .icon-btn svg { width: var(--icon-md); height: var(--icon-md); }
 .icon-btn.md { width: var(--h-md); height: var(--h-md); }
+/* Small icon button for inline row actions, toolbars inside cards, chips (24px, --icon-sm glyph).
+   Replaces dk-ibtn, tb-ibtn, mon-procs .act .icon-btn, fp-tx-item .icon-btn, hist-actions .icon-btn. */
+.icon-btn.sm { width: var(--h-xs); height: var(--h-xs); color: var(--fg-2); }
+.icon-btn.sm svg { width: var(--icon-sm); height: var(--icon-sm); }
+.icon-btn.sm:hover { background: var(--bg-4); color: var(--fg-0); }
+.icon-btn.danger:hover { background: color-mix(in srgb, var(--err) 12%, transparent); color: var(--err); }
+.icon-btn.ok:hover { color: var(--ok); }
+/* Revealed only while its row is hovered (or the button is keyboard-focused). The row is any
+   tr, .list-row or element with .hover-host. */
+.hover-reveal { opacity: 0; transition: opacity 0.12s; }
+:is(tr, .list-row, .hover-host):hover .hover-reveal, .hover-reveal:focus-visible { opacity: 1; }
+
+/* Search field: leading icon + .input. <SearchBox> in components/ui.tsx renders it:
+     <div class="search-box [sm|flat]"><svg/><input class="input [sm]"/></div>
+   Width comes from the container (flex/grid) or the caller's class. Replaces agent-search,
+   bt-search, home-search, hs-search-box, sn-search, hist-search, host-picker-search. */
+.search-box { position: relative; display: flex; align-items: center; min-width: 0; }
+.search-box > svg {
+  position: absolute; left: var(--sp-3); width: var(--icon-sm); height: var(--icon-sm);
+  color: var(--fg-2); pointer-events: none;
+}
+.search-box > .input { padding-left: calc(var(--sp-3) + var(--icon-sm) + var(--sp-2)); }
+.search-box.sm > svg { left: var(--sp-2); }
+.search-box.sm > .input { padding-left: calc(var(--sp-2) + var(--icon-sm) + var(--sp-2)); }
+/* .flat: no box of its own, for the search row at the top of a popover / picker list. */
+.search-box.flat > .input, .search-box.flat > .input:focus { background: transparent; border-radius: 0; box-shadow: inset 0 -1px 0 var(--line); }
 
 .input, .select, .textarea {
   height: var(--h-md); padding: 0 var(--sp-3); width: 100%;
@@ -170,12 +186,48 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .field > label { color: var(--fg-1); font-size: var(--fs-sm); text-align: left; white-space: nowrap; }
 .field.top { align-items: start; }
 .field.top > label { padding-top: var(--sp-2); }
+/* Hint under a field: one short line, aligned to the input column. Inside <Field hint> it sits in its
+   own .field row; standalone (direct child of a stack after a .field) it pulls up toward the field. */
 .field-hint { grid-column: 2; font-size: var(--fs-xs); color: var(--fg-2); margin-top: calc(-1 * var(--sp-2)); }
+.field > .field-hint { margin-top: 0; }
 
+/* Label/value grid: label column = --label-w, values wrap. Children alternate label, value.
+   Replaces dk-kv, pc-kv, tv-kv. .kv.loose for more row air. */
+.kv {
+  display: grid; grid-template-columns: var(--label-w) minmax(0, 1fr); column-gap: var(--sp-3); row-gap: var(--sp-1);
+  align-items: baseline; font-size: var(--fs-sm); min-width: 0; color: var(--fg-0);
+}
+.kv.loose { row-gap: var(--sp-2); }
+:where(.kv) > :nth-child(odd) { color: var(--fg-1); white-space: nowrap; }
+:where(.kv) > :nth-child(even) { min-width: 0; overflow-wrap: anywhere; } /* color inherits from .kv: value classes (.faint, status) win */
+
+/* Big summary number + its label (home / overview stat strips). Replaces home-stat-value, ov-stat-value. */
+.stat-value {
+  font-size: var(--fs-xl); font-weight: 600; line-height: 1.1; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; color: var(--fg-0); white-space: nowrap;
+}
+.stat-value.ok { color: var(--ok); }
+.stat-value.warn { color: var(--warn); }
+.stat-value.err { color: var(--err); }
+.stat-label { font-size: var(--fs-xs); color: var(--fg-2); }
+
+/* The one pill: tags, protocol/OS labels, counts, tool states. Neutral by default; status variants
+   tint with color-mix. Replaces home-proto/home-os/home-tag, sb-count, he-chip, static ov-chip,
+   term-tool-badge. Use text color or a .dot instead when that is enough. */
 .badge {
-  display: inline-flex; align-items: center; gap: var(--sp-1);
-  height: 20px; padding: 0 7px; border-radius: var(--radius-sm);
-  font-size: var(--fs-xs); font-weight: 500; background: var(--bg-3); color: var(--fg-1); white-space: nowrap;
+  display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; max-width: 100%;
+  height: var(--h-badge); padding: 0 var(--sp-2); border-radius: var(--radius-sm);
+  font-size: var(--fs-xs); font-weight: 500; line-height: var(--h-badge);
+  background: var(--bg-3); color: var(--fg-1); white-space: nowrap;
+}
+.badge svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; }
+.badge.mono { font-family: var(--font-mono); }
+/* Truncating badge (long tags): block-level text so the ellipsis works. */
+.badge.trunc { display: inline-block; overflow: hidden; text-overflow: ellipsis; }
+/* Count: round, centered, tabular (sidebar session count, tab counts). */
+.badge.count {
+  justify-content: center; min-width: var(--h-badge); padding: 0 var(--sp-1);
+  border-radius: calc(var(--h-badge) / 2); background: var(--bg-4); font-weight: 600; font-variant-numeric: tabular-nums;
 }
 .badge.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
 .badge.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
@@ -207,9 +259,10 @@ input, textarea, select, button { font: inherit; color: inherit; }
 }
 .tab:hover { color: var(--fg-0); }
 .tab.active { background: var(--bg-0); color: var(--fg-0); box-shadow: inset 1px 0 0 var(--line), inset -1px 0 0 var(--line); }
-.seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-md); }
+/* Segmented control: outer height = --h-sm. */
+.seg { display: inline-flex; padding: var(--sp-half); gap: var(--sp-half); background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--line); border-radius: var(--radius-md); }
 .seg > button {
-  height: calc(var(--h-sm) - 6px); padding: 0 var(--sp-2); border: none; border-radius: var(--radius-sm);
+  height: calc(var(--h-sm) - 2 * var(--sp-half)); padding: 0 var(--sp-2); border: none; border-radius: var(--radius-sm);
   background: transparent; color: var(--fg-1); cursor: pointer; font-size: var(--fs-sm);
 }
 .seg > button.on { background: var(--bg-4); color: var(--fg-0); }
@@ -218,9 +271,10 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .table th {
   height: var(--h-sm); padding: 0 var(--sp-2); text-align: left; font-weight: 500;
-  color: var(--fg-2); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg-1);
+  color: var(--fg-2); box-shadow: inset 0 -1px 0 var(--line); position: sticky; top: 0; background: var(--bg-1);
 }
-.table td { height: var(--h-sm); padding: 0 var(--sp-2); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.table td { height: var(--h-sm); padding: 0 var(--sp-2); box-shadow: inset 0 -1px 0 var(--line); white-space: nowrap; }
+.table tr:last-child td { box-shadow: none; }
 .table th.num, .table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .table tr:hover td { background: var(--bg-2); }
 
@@ -228,7 +282,7 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .card { background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--line); border-radius: var(--radius-lg); padding: var(--sp-4); }
 
 /* Dialog */
-.overlay { position: fixed; inset: 0; background: rgba(4, 6, 8, 0.6); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 100; animation: overlay-in 0.14s ease-out; }
+.overlay { position: fixed; inset: 0; background: var(--scrim); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 100; animation: overlay-in 0.14s ease-out; }
 .dialog {
   background: var(--bg-1); border: none; border-radius: var(--radius-lg);
   box-shadow: var(--shadow); display: flex; flex-direction: column; max-height: 86vh; max-width: 92vw;
@@ -236,18 +290,24 @@ input, textarea, select, button { font: inherit; color: inherit; }
 }
 @keyframes overlay-in { from { opacity: 0; } }
 @keyframes dialog-in { from { opacity: 0; transform: translateY(var(--sp-1)) scale(0.99); } }
-.dialog-header { display: flex; align-items: center; gap: var(--sp-2); height: 52px; padding: 0 var(--sp-3) 0 var(--sp-6); font-weight: 600; font-size: var(--fs-lg); letter-spacing: -0.01em; flex: none; }
+/* Dialog header: title on the --sp-6 content line, close button at the right. <DialogHeader> renders
+   it; custom dialog shells use it too instead of their own *-head classes. */
+.dialog-header { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-dialog-head); padding: 0 var(--sp-3) 0 var(--sp-6); font-weight: 600; font-size: var(--fs-lg); letter-spacing: -0.01em; flex: none; }
+.dialog-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dialog-body { padding: var(--sp-2) var(--sp-6) var(--sp-6); overflow: auto; min-height: 0; }
 .dialog-footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-3) var(--sp-6); background: var(--bg-0); border-radius: 0 0 var(--radius-lg) var(--radius-lg); box-shadow: inset 0 1px 0 var(--line); flex: none; }
 
-.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); color: var(--fg-2); padding: var(--sp-8) var(--sp-4); text-align: center; }
-.empty svg { width: 22px; height: 22px; opacity: 0.6; }
+/* Empty state (<Empty>): optional icon, one short line, optional action button. .empty.sm for
+   compact spots (side panels, cards, popovers). */
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-3); color: var(--fg-2); padding: var(--sp-8) var(--sp-4); text-align: center; }
+.empty > svg { width: var(--icon-xl); height: var(--icon-xl); opacity: 0.6; }
+.empty.sm { padding: var(--sp-4); gap: var(--sp-2); font-size: var(--fs-sm); }
 
 /* Toggle switch */
-.toggle { position: relative; width: 36px; height: 20px; flex: none; border-radius: 10px; background: var(--bg-4); border: none; cursor: pointer; padding: 0; }
-.toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--fg-1); transition: transform 0.15s; }
+.toggle { position: relative; width: var(--h-md); height: var(--h-badge); flex: none; border-radius: calc(var(--h-badge) / 2); background: var(--bg-4); border: none; cursor: pointer; padding: 0; }
+.toggle::after { content: ""; position: absolute; top: var(--sp-half); left: var(--sp-half); width: calc(var(--h-badge) - 2 * var(--sp-half)); height: calc(var(--h-badge) - 2 * var(--sp-half)); border-radius: 50%; background: var(--fg-1); transition: transform 0.15s; }
 .toggle.on { background: var(--accent); }
-.toggle.on::after { transform: translateX(16px); background: #fff; }
+.toggle.on::after { transform: translateX(calc(var(--h-md) - var(--h-badge))); background: var(--on-accent); }
 
 /* Checkbox: one look app-wide, drawn from theme tokens */
 input[type="checkbox"] {
@@ -271,16 +331,20 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: default; }
 .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1), background-color 0.2s; }
 .bar.warn > i { background: var(--warn); }
 .bar.err > i { background: var(--err); }
+/* Thin variant (4px): inline usage meters, download progress. Replaces mon-du-bar, upd-bar and the
+   3-4px bars in files.css / monitor.css. Fill: accent by default, .warn/.err, or a style on <i>. */
+.bar.thin { height: var(--sp-1); border-radius: var(--sp-half); }
+.bar.thin > i { border-radius: var(--sp-half); }
 
 /* Toasts */
 .toasts { position: fixed; right: var(--sp-4); bottom: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); z-index: 200; }
 .toast {
   display: flex; align-items: center; gap: var(--sp-2); min-width: 240px; max-width: 420px;
   padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-md);
-  background: var(--bg-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow); font-size: var(--fs-sm);
+  background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--line-strong), var(--shadow); font-size: var(--fs-sm);
 }
-.toast.error { border-color: var(--err); }
-.toast.success { border-color: var(--ok); }
+.toast.error { box-shadow: inset 0 0 0 1px var(--err), var(--shadow); }
+.toast.success { box-shadow: inset 0 0 0 1px var(--ok), var(--shadow); }
 /* Drop-slot box for sortable drags (lib/dragSlot.ts); the offsetParent must be positioned. */
 .drop-slot {
   position: absolute; z-index: 1; pointer-events: none; box-sizing: border-box;
@@ -304,7 +368,7 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: default; }
 @keyframes drag-discard-in { from { opacity: 0; } }
 .toast-action { flex: none; margin-right: calc(-1 * var(--sp-2)); color: var(--accent); }
 
-kbd { font-family: var(--font-mono); font-size: var(--fs-xs); padding: 1px var(--sp-1); border: 1px solid var(--line-strong); border-radius: 3px; background: var(--bg-2); color: var(--fg-1); }
+kbd { font-family: var(--font-mono); font-size: var(--fs-xs); padding: 0 var(--sp-1); border-radius: var(--radius-sm); background: var(--bg-3); box-shadow: inset 0 -1px 0 var(--line-strong); color: var(--fg-1); }
 
 /* ---------- custom select (components/Select.tsx) ---------- */
 .select-btn {
@@ -338,13 +402,23 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-xs); padding: 1px var(-
 .select-item.disabled { opacity: 0.45; cursor: default; }
 .select-check { width: var(--icon-sm); flex: none; display: inline-flex; color: var(--accent); }
 .select-check svg { width: var(--icon-sm); height: var(--icon-sm); }
+/* combobox (components/Combobox.tsx): input + chevron, reuses .select-menu */
+.combo { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
+.combo > .input { padding-right: calc(var(--sp-2) + var(--icon-sm) + var(--sp-2)); }
+.combo-toggle {
+  position: absolute; right: var(--sp-1); display: inline-flex; align-items: center; justify-content: center;
+  width: calc(var(--h-md) - var(--sp-2)); height: calc(var(--h-md) - var(--sp-2));
+  border: none; border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); cursor: pointer;
+}
+.combo-toggle:hover { color: var(--fg-0); }
+.combo-toggle svg { width: var(--icon-sm); height: var(--icon-sm); transition: transform 0.15s; }
+.combo.open .combo-toggle svg { transform: rotate(180deg); }
 .select-hint { flex: none; margin-left: var(--sp-4); color: var(--fg-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 
 /* ---------- crash screen (components/ErrorBoundary.tsx) ---------- */
 .crash { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--chrome); z-index: 500; }
 .crash-card { width: 480px; max-width: calc(100vw - 48px); display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-6); background: var(--bg-1); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 .crash-title { font-size: var(--fs-lg); font-weight: 600; }
-.crash-sub { color: var(--fg-1); }
 .crash-msg { margin: 0; max-height: 160px; overflow: auto; padding: var(--sp-3); background: var(--bg-0); border-radius: var(--radius-md); font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--err); white-space: pre-wrap; }
 
 /* ---------- global search (components/GlobalSearch.tsx) ---------- */
@@ -363,13 +437,13 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-xs); padding: 1px var(-
 }
 .pal {
   width: 680px; max-width: calc(100vw - 48px); max-height: 68vh; display: flex; flex-direction: column;
-  background: var(--bg-1); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden;
+  background: var(--bg-1); border-radius: var(--radius-lg); box-shadow: var(--shadow); overflow: hidden;
   animation: pal-in 0.16s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 @keyframes pal-fade { from { opacity: 0; } }
 @keyframes pal-in { from { opacity: 0; transform: translateY(-8px) scale(0.985); } }
 .pal-input-row { display: flex; align-items: center; gap: var(--sp-3); height: 60px; padding: 0 var(--sp-5); box-shadow: inset 0 -1px 0 var(--line); flex: none; }
-.pal-input-row > svg { width: 20px; height: 20px; color: var(--fg-2); flex: none; }
+.pal-input-row > svg { width: var(--icon-xl); height: var(--icon-xl); color: var(--fg-2); flex: none; }
 .pal-input { flex: 1 1 auto; min-width: 0; height: 100%; border: none; outline: none; background: transparent; font-size: var(--fs-lg); color: var(--fg-0); user-select: text; }
 .pal-input::placeholder { color: var(--fg-2); }
 .pal-list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-2); }
@@ -393,17 +467,28 @@ h1, h2, h3, .page-header h1, .dialog-header, .panel-header { font-weight: 600; l
 .btn, .tab, .sb-item, .seg > button { letter-spacing: 0.01em; }
 .mono, code, kbd, pre { font-feature-settings: "calt" 1, "zero" 1; letter-spacing: 0; }
 
-/* ---------- shared context menu (terminal, global) ---------- */
-.ctx-menu.gctx { position: fixed; z-index: 400; min-width: 200px; padding: var(--sp-1); background: var(--bg-2); border-radius: var(--radius-md); box-shadow: var(--shadow); animation: select-in 0.1s ease-out; }
-.gctx .ctx-item { display: flex; align-items: center; gap: var(--sp-3); height: var(--h-sm); padding: 0 var(--sp-3) 0 var(--sp-2); border-radius: var(--radius-sm); cursor: pointer; color: var(--fg-0); font-size: var(--fs-md); white-space: nowrap; }
-.gctx .ctx-item:hover { background: var(--bg-3); }
-.gctx .ctx-item.disabled { opacity: 0.4; cursor: default; }
-.gctx .ctx-item.disabled:hover { background: transparent; }
-.gctx .ctx-icon { display: inline-flex; width: var(--icon-md); flex: none; color: var(--fg-2); }
-.gctx .ctx-icon svg { width: var(--icon-md); height: var(--icon-md); }
-.gctx .ctx-label { flex: 1 1 auto; }
-.gctx .ctx-hint { margin-left: var(--sp-6); color: var(--fg-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
-.gctx .ctx-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--line); }
+/* ---------- right-click menu (features/terminal/ContextMenu.tsx; feature CSS must not override) ---------- */
+.ctx-menu {
+  position: fixed; z-index: 400; min-width: 240px; max-width: 360px; padding: var(--sp-1);
+  background: var(--bg-2); border-radius: var(--radius-md); box-shadow: var(--shadow);
+  font-size: var(--fs-sm); user-select: none; animation: select-in 0.1s ease-out;
+}
+.ctx-item {
+  display: grid; grid-template-columns: var(--sp-4) minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2);
+  width: 100%; height: var(--h-sm); padding: 0 var(--sp-2);
+  border: none; border-radius: var(--radius-sm); background: transparent; cursor: pointer;
+  color: var(--fg-0); font-size: var(--fs-sm); text-align: left;
+}
+.ctx-item.active { background: var(--bg-3); }
+.ctx-item:disabled { color: var(--fg-2); cursor: default; }
+.ctx-icon { display: flex; align-items: center; justify-content: center; width: var(--sp-4); color: var(--fg-2); }
+.ctx-icon svg { width: var(--icon-sm); height: var(--icon-sm); }
+.ctx-item.active .ctx-icon { color: var(--fg-1); }
+.ctx-item:disabled .ctx-icon { opacity: 0.6; }
+.ctx-item.danger, .ctx-item.danger .ctx-icon { color: var(--err); }
+.ctx-item.danger.active { background: color-mix(in srgb, var(--err) 12%, transparent); }
+.ctx-hint { padding-left: var(--sp-4); font-size: var(--fs-xs); color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.ctx-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--line); }
 
 /* Generic loading spinner (lucide LoaderCircle). */
 .spin { animation: msp-spin 0.9s linear infinite; }
@@ -413,7 +498,7 @@ h1, h2, h3, .page-header h1, .dialog-header, .panel-header { font-weight: 600; l
 /* Reduced motion: keep state changes instant (spinners/shimmers still run). */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0s !important; }
-  .overlay, .dialog, .select-menu, .pal-overlay, .pal, .ctx-menu.gctx { animation: none !important; }
+  .overlay, .dialog, .select-menu, .pal-overlay, .pal, .ctx-menu { animation: none !important; }
 }
 
 /* Markdown (AI output). Spacing on the 4px grid; code/quote/table separated by tone, not borders. */

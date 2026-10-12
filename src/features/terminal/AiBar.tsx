@@ -1,8 +1,8 @@
 import { Copy, CornerDownLeft, LoaderCircle, Play, Sparkles, TextCursorInput, TriangleAlert, X } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Markdown } from "../../components/Markdown";
-import { toast } from "../../components/ui";
 import { api, errMsg, type NlCommand } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 
 /** Ctrl+K: natural language -> command. */
 export function AiBar(props: {
@@ -20,7 +20,28 @@ export function AiBar(props: {
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cmdRef = useRef<HTMLTextAreaElement>(null);
   const seq = useRef(0);
+
+  // Grow the command box to fit wrapped lines (capped by CSS max-height), also when the pane width changes.
+  useLayoutEffect(() => {
+    const el = cmdRef.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+    };
+    fit();
+    let w = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth !== w) {
+        w = el.clientWidth;
+        fit();
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [cmd, result]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -73,9 +94,10 @@ export function AiBar(props: {
       {result && (
         <div className="ai-result stack">
           <textarea
+            ref={cmdRef}
             className="textarea mono ai-cmd"
             spellCheck={false}
-            rows={Math.min(6, Math.max(1, cmd.split("\n").length))}
+            rows={1}
             value={cmd}
             onChange={(e) => {
               setCmd(e.target.value);
@@ -99,7 +121,7 @@ export function AiBar(props: {
             <span className="spacer" />
             <button
               className="btn sm ghost"
-              onClick={() => navigator.clipboard.writeText(cmd).then(() => toast("已复制", "success"), () => toast("复制失败", "error"))}
+              onClick={() => void copyText(cmd, "命令")}
             >
               <Copy />
               复制
@@ -126,7 +148,7 @@ export function AiBar(props: {
         <input
           ref={inputRef}
           className="grow"
-          placeholder="描述要执行的操作"
+          placeholder="查看占用 80 端口的进程"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

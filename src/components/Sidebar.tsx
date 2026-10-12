@@ -29,7 +29,7 @@ export function Sidebar() {
                 <button key={p.view} className={"sb-item" + (view === p.view ? " on" : "")} onClick={() => setView(p.view)}>
                   <p.icon />
                   <span>{p.label}</span>
-                  {p.view === "terminal" && sessions > 0 && <span className="sb-count">{sessions}</span>}
+                  {p.view === "terminal" && sessions > 0 && <span className="badge count">{sessions}</span>}
                 </button>
               ))}
             </nav>

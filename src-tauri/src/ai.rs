@@ -76,7 +76,7 @@ impl Default for AiSettings {
 }
 
 pub fn settings(db: &Db) -> AiSettings {
-    db.setting("ai").ok().flatten().unwrap_or_default()
+    db.setting_or_default("ai")
 }
 
 pub struct Request<'a> {
@@ -165,10 +165,10 @@ async fn anthropic(p: &AiProvider, key: &str, req: Request<'_>) -> Result<String
         "messages": [{ "role": "user", "content": req.user }],
         "output_config": { "effort": if req.think { req.effort } else { "low" } },
     });
-    if !req.think {
-        if let Some(t) = anthropic_thinking_off(&p.model) {
-            body["thinking"] = t;
-        }
+    if !req.think
+        && let Some(t) = anthropic_thinking_off(&p.model)
+    {
+        body["thinking"] = t;
     }
     // Server-side refusal fallback (Claude API only; Haiku has none).
     let fallback = official && !p.model.to_ascii_lowercase().contains("haiku");
@@ -250,7 +250,7 @@ pub fn extract_json(s: &str) -> Option<Value> {
     }
     let start = t.find(['{', '['])?;
     let end = t.rfind(['}', ']'])?;
-    serde_json::from_str(&t[start..=end]).ok()
+    serde_json::from_str(t.get(start..=end)?).ok()
 }
 
 #[cfg(test)]
@@ -265,5 +265,15 @@ mod tests {
         assert_eq!(anthropic_thinking_off("claude-haiku-5-5"), Some(json!({ "type": "disabled" })));
         assert!(crate::predict::is_natural_language("  查看磁盘"));
         assert!(!crate::predict::is_natural_language("git commit -m \"修复\""));
+    }
+
+    #[test]
+    fn extract_json_never_panics() {
+        assert_eq!(extract_json("} oops {"), None);
+        assert_eq!(extract_json("]x["), None);
+        assert_eq!(extract_json("说明 {\"a\":1} 结束"), Some(json!({ "a": 1 })));
+        assert_eq!(extract_json("```json
+[1,2]
+```"), Some(json!([1, 2])));
     }
 }

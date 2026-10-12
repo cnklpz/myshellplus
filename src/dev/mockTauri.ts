@@ -67,7 +67,7 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "vault_status": return { ...vault };
     case "vault_unlock": case "vault_setup": vault.unlocked = true; return null;
     case "vault_lock": vault.unlocked = false; return null;
-    case "host_list": return hosts;
+    case "host_list": return hosts.map((h) => ({ proxyEnabled: false, proxyHost: "", proxyPort: 1080, proxyUser: "", ...h }));
     case "key_list": return [{ id: "k1", name: "id_ed25519", publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq3xV2o0 ops@laptop", updatedAt: now }];
     case "conn_list": return ["h1", "h4"];
     case "host_os_map": return { h1: "Ubuntu 24.04.1 LTS", h2: "Ubuntu 24.04.1 LTS", h3: "Debian GNU/Linux 12 (bookworm)", h4: "Alpine Linux v3.24" };
@@ -113,8 +113,8 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
       ];
     case "tunnel_status":
       return [
-        { id: "tu1", running: true, up: 1.2e6, down: 48e6, active: 2, error: null },
-        { id: "tu3", running: false, up: 0, down: 0, active: 0, error: "服务器拒绝远程转发: request denied" },
+        { id: "tu1", running: true, up: 1.2e6, down: 48e6, active: 2, error: null, remotePort: null },
+        { id: "tu3", running: false, up: 0, down: 0, active: 0, error: "服务器拒绝远程转发: request denied", remotePort: null },
       ];
     case "snippet_list":
       return [
@@ -130,7 +130,13 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
       ].filter((s) => s.command.startsWith(args.input));
     case "ai_settings_get":
       return { providers: [{ id: "anthropic", name: "Claude", kind: "anthropic", baseUrl: "https://api.anthropic.com", model: "claude-opus-5-5", apiKeySecret: "x" }], active: "anthropic", predictProvider: "anthropic", predictEnabled: true, aiPredictEnabled: false, nlPredictEnabled: true, thinking: false, predictModel: null };
-    case "mcp_settings_get": return { settings: { enabled: true, port: 17890, token: "msp_3f9a0c1e2b7d4a6f8e1c0b9a7d6e5f4c3b2a1908" }, runningPort: 17890 };
+    case "mcp_settings_get": return { settings: { enabled: true, port: 17890, token: "msp_3f9a0c1e2b7d4a6f8e1c0b9a7d6e5f4c3b2a1908" }, runningPort: 17890, error: null };
+    case "known_host_list":
+      return [
+        { host: "10.0.0.12", port: 22, algo: "ssh-ed25519", fingerprint: "SHA256:Xb2k9QmZ1v0fP7cJt4nWqLr8sHd3yAeU6oGiKpMzN5E" },
+        { host: "prod.example.com", port: 2222, algo: "rsa-sha2-512", fingerprint: "SHA256:4uTqA0dLm9ZcYx2RfHk7VwB1nE8sPjO3iGtCyM6aQvU" },
+      ];
+    case "known_host_delete": return null;
     case "audit_list":
       return [
         { id: 3, ts: now - 60000, source: "agent", hostId: "h1", action: "run_command", detail: "systemctl status nginx", result: "allowed: policy" },

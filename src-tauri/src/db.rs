@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS hosts(
   password_secret TEXT,
   key_id TEXT,
   jump_host_id TEXT,
+  proxy_enabled INTEGER NOT NULL DEFAULT 0,
+  proxy_host TEXT NOT NULL DEFAULT '',
+  proxy_port INTEGER NOT NULL DEFAULT 1080,
+  proxy_user TEXT NOT NULL DEFAULT '',
+  proxy_secret TEXT,
   tags TEXT NOT NULL DEFAULT '[]',
   color TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
@@ -92,6 +97,32 @@ CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS vault_meta(key TEXT PRIMARY KEY, value BLOB NOT NULL);
 "#;
 
+/// Columns added after the first release: (table, column, definition).
+const MIGRATIONS: &[(&str, &str, &str)] = &[
+    ("hosts", "proxy_enabled", "INTEGER NOT NULL DEFAULT 0"),
+    ("hosts", "proxy_host", "TEXT NOT NULL DEFAULT ''"),
+    ("hosts", "proxy_port", "INTEGER NOT NULL DEFAULT 1080"),
+    ("hosts", "proxy_user", "TEXT NOT NULL DEFAULT ''"),
+    ("hosts", "proxy_secret", "TEXT"),
+    ("snippets", "host_id", "TEXT"),
+    ("snippets", "group_name", "TEXT NOT NULL DEFAULT ''"),
+];
+
+fn migrate(c: &Connection) -> Result<()> {
+    for (table, col, def) in MIGRATIONS {
+        let exists: bool = c
+            .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name=?1"))?
+            .exists([col])?;
+        if !exists {
+            c.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} {def}"))?;
+            if *col == "proxy_enabled" {
+                c.execute_batch("UPDATE hosts SET proxy_enabled=1 WHERE proxy_host<>''")?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Host {
@@ -112,6 +143,18 @@ pub struct Host {
     pub key_id: Option<String>,
     #[serde(default)]
     pub jump_host_id: Option<String>,
+    /// SOCKS5 proxy for the direct TCP connection (ignored behind a jump host).
+    /// Turning it off keeps the address and password for later.
+    #[serde(default)]
+    pub proxy_enabled: bool,
+    #[serde(default)]
+    pub proxy_host: String,
+    #[serde(default = "default_proxy_port")]
+    pub proxy_port: u16,
+    #[serde(default)]
+    pub proxy_user: String,
+    #[serde(default)]
+    pub proxy_secret: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -129,6 +172,10 @@ pub struct Host {
 
 fn default_policy() -> String {
     "ask".into()
+}
+
+pub fn default_proxy_port() -> u16 {
+    1080
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +200,11 @@ pub struct Snippet {
     pub command: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// None = every host; Some(id) = only that host.
+    #[serde(default)]
+    pub host_id: Option<String>,
+    #[serde(default)]
+    pub group_name: String,
     #[serde(default)]
     pub updated_at: i64,
 }
@@ -180,6 +232,15 @@ pub struct TunnelDef {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct KnownHost {
+    pub host: String,
+    pub port: u16,
+    pub algo: String,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AuditEntry {
     pub id: i64,
     pub ts: i64,
@@ -197,6 +258,9 @@ pub struct HistoryHit {
     pub count: i64,
     pub last_used: i64,
 }
+
+/// (id, nonce, ciphertext)
+pub type SecretRow = (String, Vec<u8>, Vec<u8>);
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -218,6 +282,11 @@ fn host_from_row(r: &Row) -> rusqlite::Result<Host> {
         password_secret: r.get("password_secret")?,
         key_id: r.get("key_id")?,
         jump_host_id: r.get("jump_host_id")?,
+        proxy_enabled: r.get::<_, i64>("proxy_enabled")? != 0,
+        proxy_host: r.get("proxy_host")?,
+        proxy_port: r.get::<_, i64>("proxy_port")? as u16,
+        proxy_user: r.get("proxy_user")?,
+        proxy_secret: r.get("proxy_secret")?,
         tags: json_vec(r.get("tags")?),
         color: r.get("color")?,
         notes: r.get("notes")?,
@@ -247,6 +316,7 @@ impl Db {
         let conn = Connection::open(path).with_context(|| format!("打开数据库失败: {}", path.display()))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -272,13 +342,16 @@ impl Db {
         h.updated_at = now_ms();
         let c = self.conn.lock();
         c.execute(
-            "INSERT INTO hosts(id,name,group_name,host,port,username,auth_type,password_secret,key_id,jump_host_id,tags,color,notes,agent_policy,sort,updated_at,deleted)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,0)
+            "INSERT INTO hosts(id,name,group_name,host,port,username,auth_type,password_secret,key_id,jump_host_id,tags,color,notes,agent_policy,sort,updated_at,
+               proxy_host,proxy_port,proxy_user,proxy_secret,proxy_enabled,deleted)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,0)
              ON CONFLICT(id) DO UPDATE SET name=?2,group_name=?3,host=?4,port=?5,username=?6,auth_type=?7,password_secret=?8,key_id=?9,
-               jump_host_id=?10,tags=?11,color=?12,notes=?13,agent_policy=?14,sort=?15,updated_at=?16,deleted=0",
+               jump_host_id=?10,tags=?11,color=?12,notes=?13,agent_policy=?14,sort=?15,updated_at=?16,
+               proxy_host=?17,proxy_port=?18,proxy_user=?19,proxy_secret=?20,proxy_enabled=?21,deleted=0",
             params![
                 h.id, h.name, h.group_name, h.host, h.port as i64, h.username, h.auth_type, h.password_secret, h.key_id,
-                h.jump_host_id, serde_json::to_string(&h.tags)?, h.color, h.notes, h.agent_policy, h.sort, h.updated_at
+                h.jump_host_id, serde_json::to_string(&h.tags)?, h.color, h.notes, h.agent_policy, h.sort, h.updated_at,
+                h.proxy_host, h.proxy_port as i64, h.proxy_user, h.proxy_secret, h.proxy_enabled as i64
             ],
         )?;
         Ok(h)
@@ -327,6 +400,17 @@ impl Db {
         Ok(())
     }
 
+    /// Hosts (not deleted) that authenticate with this key.
+    pub fn hosts_using_key(&self, key_id: &str) -> Result<usize> {
+        let c = self.conn.lock();
+        let n: i64 = c.query_row(
+            "SELECT COUNT(*) FROM hosts WHERE deleted=0 AND auth_type='key' AND key_id=?1",
+            [key_id],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
     pub fn delete_key(&self, id: &str) -> Result<()> {
         let c = self.conn.lock();
         c.execute("UPDATE keys SET deleted=1, updated_at=?2 WHERE id=?1", params![id, now_ms()])?;
@@ -352,7 +436,7 @@ impl Db {
     }
 
     #[allow(dead_code)] // used by cloud sync
-    pub fn all_secrets_raw(&self) -> Result<Vec<(String, Vec<u8>, Vec<u8>)>> {
+    pub fn all_secrets_raw(&self) -> Result<Vec<SecretRow>> {
         let c = self.conn.lock();
         let mut st = c.prepare("SELECT id,nonce,data FROM secrets WHERE deleted=0")?;
         let rows = st
@@ -382,6 +466,20 @@ impl Db {
         Ok(())
     }
 
+    /// Set several keys in one transaction (e.g. salt + wrapped key must never be half-written).
+    pub fn meta_set_many(&self, items: &[(&str, &[u8])]) -> Result<()> {
+        let mut c = self.conn.lock();
+        let tx = c.transaction()?;
+        for (key, value) in items {
+            tx.execute(
+                "INSERT INTO vault_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=?2",
+                params![key, value],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn meta_del(&self, key: &str) -> Result<()> {
         let c = self.conn.lock();
         c.execute("DELETE FROM vault_meta WHERE key=?1", [key])?;
@@ -391,7 +489,7 @@ impl Db {
     // ---------- snippets ----------
     pub fn list_snippets(&self) -> Result<Vec<Snippet>> {
         let c = self.conn.lock();
-        let mut st = c.prepare("SELECT id,name,command,tags,updated_at FROM snippets WHERE deleted=0 ORDER BY name")?;
+        let mut st = c.prepare("SELECT id,name,command,tags,updated_at,host_id,group_name FROM snippets WHERE deleted=0 ORDER BY name")?;
         let rows = st
             .query_map([], |r| {
                 Ok(Snippet {
@@ -400,6 +498,8 @@ impl Db {
                     command: r.get(2)?,
                     tags: json_vec(r.get(3)?),
                     updated_at: r.get(4)?,
+                    host_id: r.get(5)?,
+                    group_name: r.get(6)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -413,9 +513,9 @@ impl Db {
         s.updated_at = now_ms();
         let c = self.conn.lock();
         c.execute(
-            "INSERT INTO snippets(id,name,command,tags,updated_at,deleted) VALUES(?1,?2,?3,?4,?5,0)
-             ON CONFLICT(id) DO UPDATE SET name=?2,command=?3,tags=?4,updated_at=?5,deleted=0",
-            params![s.id, s.name, s.command, serde_json::to_string(&s.tags)?, s.updated_at],
+            "INSERT INTO snippets(id,name,command,tags,updated_at,deleted,host_id,group_name) VALUES(?1,?2,?3,?4,?5,0,?6,?7)
+             ON CONFLICT(id) DO UPDATE SET name=?2,command=?3,tags=?4,updated_at=?5,deleted=0,host_id=?6,group_name=?7",
+            params![s.id, s.name, s.command, serde_json::to_string(&s.tags)?, s.updated_at, s.host_id, s.group_name],
         )?;
         Ok(s)
     }
@@ -554,6 +654,23 @@ impl Db {
         Ok(())
     }
 
+    pub fn list_known_hosts(&self) -> Result<Vec<KnownHost>> {
+        let c = self.conn.lock();
+        let mut st = c.prepare("SELECT host,port,algo,fingerprint FROM known_hosts ORDER BY host,port")?;
+        let rows = st
+            .query_map([], |r| {
+                Ok(KnownHost { host: r.get(0)?, port: r.get::<_, i64>(1)? as u16, algo: r.get(2)?, fingerprint: r.get(3)? })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn forget_host(&self, host: &str, port: u16) -> Result<()> {
+        let c = self.conn.lock();
+        c.execute("DELETE FROM known_hosts WHERE host=?1 AND port=?2", params![host, port as i64])?;
+        Ok(())
+    }
+
     // ---------- audit ----------
     pub fn audit(&self, source: &str, host_id: Option<&str>, action: &str, detail: &str, result: &str) -> Result<()> {
         let c = self.conn.lock();
@@ -589,10 +706,48 @@ impl Db {
     pub fn setting<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
         let c = self.conn.lock();
         let v: Option<String> = c.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0)).optional()?;
-        Ok(match v {
-            Some(s) => serde_json::from_str(&s).ok(),
-            None => None,
-        })
+        match v {
+            Some(s) => serde_json::from_str(&s).map(Some).map_err(|e| anyhow::anyhow!("设置 {key} 已损坏: {e}")),
+            None => Ok(None),
+        }
+    }
+
+    /// Like `setting`, falling back to the default when missing or unreadable (logged).
+    pub fn setting_or_default<T: serde::de::DeserializeOwned + Default>(&self, key: &str) -> T {
+        match self.setting(key) {
+            Ok(v) => v.unwrap_or_default(),
+            Err(e) => {
+                log::warn!("{e:#}");
+                T::default()
+            }
+        }
+    }
+
+    /// Read-modify-write of a JSON setting under one lock, so concurrent updates are not lost.
+    /// `f` returns whether it changed the value; the new value is returned when it did.
+    /// An unreadable value starts over from the default.
+    pub fn update_setting<T, F>(&self, key: &str, f: F) -> Result<Option<T>>
+    where
+        T: serde::de::DeserializeOwned + Serialize + Default,
+        F: FnOnce(&mut T) -> bool,
+    {
+        let c = self.conn.lock();
+        let v: Option<String> = c.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0)).optional()?;
+        let mut val: T = match v {
+            Some(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
+                log::warn!("设置 {key} 已损坏，已重置: {e}");
+                T::default()
+            }),
+            None => T::default(),
+        };
+        if !f(&mut val) {
+            return Ok(None);
+        }
+        c.execute(
+            "INSERT INTO settings(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=?2",
+            params![key, serde_json::to_string(&val)?],
+        )?;
+        Ok(Some(val))
     }
 
     pub fn set_setting<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
@@ -624,6 +779,31 @@ mod tests {
         assert_eq!(db.list_history("", "ls", 10).unwrap().len(), 1);
         db.delete_history("h1", "echo hello").unwrap();
         assert_eq!(db.list_history("h1", "", 10).unwrap().len(), 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn settings_and_meta() {
+        let path = std::env::temp_dir().join(format!("msp-db-test2-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let db = Db::open(&path).unwrap();
+        // Corrupt JSON is an error, not a silent None.
+        db.conn.lock().execute("INSERT INTO settings(key,value) VALUES('x','{bad')", []).unwrap();
+        assert!(db.setting::<std::collections::HashMap<String, String>>("x").is_err());
+        assert!(db.setting_or_default::<std::collections::HashMap<String, String>>("x").is_empty());
+        // update_setting: read-modify-write, no write when unchanged.
+        let v = db
+            .update_setting::<std::collections::HashMap<String, String>, _>("m", |m| {
+                m.insert("a".into(), "1".into());
+                true
+            })
+            .unwrap();
+        assert_eq!(v.unwrap().len(), 1);
+        assert!(db.update_setting::<std::collections::HashMap<String, String>, _>("m", |_| false).unwrap().is_none());
+        db.meta_set_many(&[("s", b"1"), ("w", b"2")]).unwrap();
+        assert_eq!(db.meta_get("s").unwrap().as_deref(), Some(&b"1"[..]));
+        assert_eq!(db.meta_get("w").unwrap().as_deref(), Some(&b"2"[..]));
+        drop(db);
         let _ = std::fs::remove_file(&path);
     }
 }

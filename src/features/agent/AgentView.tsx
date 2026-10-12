@@ -1,10 +1,14 @@
 // Agent page: MCP server config + client setup snippets, tool list, host policies, audit log.
-import { Copy, Eye, EyeOff, RefreshCw, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Toggle, toast } from "../../components/ui";
+import { usePrivacy } from "../../lib/privacy";
+import { Copy, Eye, EyeOff, Link, Pencil, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Empty, SearchBox, Toggle, toast } from "../../components/ui";
 import { type AgentPolicy, type AuditEntry, type McpSettings, api, errMsg } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 import { fmtTime } from "../../lib/format";
 import { useApp } from "../../store";
+import { copyHostAddr } from "../hosts/hostMenu";
+import { useContextMenu } from "../terminal/ContextMenu";
 import "./agent.css";
 
 const TOOLS: { name: string; desc: string }[] = [
@@ -43,14 +47,6 @@ function resultCls(r: string) {
 
 const mask = (t: string) => (t.length > 8 ? t.slice(0, 4) + "•".repeat(12) + t.slice(-2) : "•".repeat(12));
 
-async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast("已复制", "success");
-  } catch (e) {
-    toast(errMsg(e), "error");
-  }
-}
 
 export function AgentView() {
   return (
@@ -78,6 +74,9 @@ function McpCard() {
   const [running, setRunning] = useState<number | null>(null);
   const [reveal, setReveal] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Stored settings are unreadable: the form shows defaults and saving overwrites the bad row.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const shownError = useRef<string | null>(null);
 
   const load = async () => {
     try {
@@ -85,6 +84,11 @@ function McpCard() {
       setSaved(r.settings);
       setDraft(r.settings);
       setRunning(r.runningPort);
+      setLoadError(r.error ?? null);
+      if (r.error && shownError.current !== r.error) {
+        shownError.current = r.error;
+        toast(r.error, "error");
+      }
     } catch (e) {
       toast(errMsg(e), "error");
     }
@@ -109,7 +113,8 @@ function McpCard() {
 
   if (!draft || !saved) return null;
   const portValid = Number.isInteger(draft.port) && draft.port > 0 && draft.port < 65536;
-  const dirty = draft.port !== saved.port || draft.token !== saved.token || draft.enabled !== saved.enabled;
+  const dirty =
+    !!loadError || draft.port !== saved.port || draft.token !== saved.token || draft.enabled !== saved.enabled;
   const url = `http://127.0.0.1:${saved.port}/mcp`;
   const cli = (t: string) => `claude mcp add --transport http myshellplus ${url} --header "Authorization: Bearer ${t}"`;
   const json = (t: string) =>
@@ -127,8 +132,8 @@ function McpCard() {
   return (
     <>
       <section className="agent-sec">
-        <div className="agent-sec-head">
-          <h2 className="grow">MCP 服务</h2>
+        <div className="section-title">
+          <span className="grow">MCP 服务</span>
           <span className="agent-status">
             <span className={"dot" + (running ? " ok" : "")} />
             {running ? `运行中 · 127.0.0.1:${running}` : "未运行"}
@@ -143,8 +148,7 @@ function McpCard() {
           <div className="grp">
             <span className="lbl">端口</span>
             <input
-              className="input mono num"
-              style={{ width: 96 }}
+              className="input mono num agent-port"
               inputMode="numeric"
               value={draft.port || ""}
               onChange={(e) => setDraft({ ...draft, port: Number(e.target.value.replace(/\D/g, "")) || 0 })}
@@ -162,7 +166,7 @@ function McpCard() {
             <button className="icon-btn md" title={reveal ? "隐藏" : "显示"} onClick={() => setReveal(!reveal)}>
               {reveal ? <EyeOff /> : <Eye />}
             </button>
-            <button className="icon-btn md" title="复制" onClick={() => copy(saved.token)}>
+            <button className="icon-btn md" title="复制" onClick={() => void copyText(saved.token, "令牌")}>
               <Copy />
             </button>
             <button className="icon-btn md" disabled={busy} title="重新生成（旧 Token 立即失效）" onClick={regen}>
@@ -173,8 +177,8 @@ function McpCard() {
       </section>
 
       <section className="agent-sec">
-        <div className="agent-sec-head">
-          <h2>接入</h2>
+        <div className="section-title">
+          <span>接入</span>
         </div>
         <div className="code-label">Claude Code</div>
         <CodeBox display={cli(shown)} value={cli(saved.token)} />
@@ -189,7 +193,7 @@ function CodeBox(props: { display: string; value: string }) {
   return (
     <div className="code-box">
       <pre>{props.display}</pre>
-      <button className="icon-btn" title="复制" onClick={() => copy(props.value)}>
+      <button className="icon-btn" title="复制" onClick={() => void copyText(props.value)}>
         <Copy />
       </button>
     </div>
@@ -198,20 +202,23 @@ function CodeBox(props: { display: string; value: string }) {
 
 // ---------------------------------------------------------------- tools
 
+
 function ToolsCard() {
+  const menu = useContextMenu();
   return (
     <section className="agent-sec">
-      <div className="agent-sec-head">
-        <h2>工具</h2>
+      <div className="section-title">
+        <span>工具</span>
       </div>
       <div className="agent-tools">
         {TOOLS.map((t) => (
-          <div key={t.name}>
+          <div key={t.name} onContextMenu={(e) => menu.open(e, [{ label: "复制工具名", icon: <Copy />, onSelect: () => void copyText(t.name, "工具名") }])}>
             <span className="mono ellipsis">{t.name}</span>
             <span className="d ellipsis">{t.desc}</span>
           </div>
         ))}
       </div>
+      {menu.node}
     </section>
   );
 }
@@ -220,21 +227,31 @@ function ToolsCard() {
 
 function PolicyCard() {
   const hosts = useApp((s) => s.hosts);
+  const menu = useContextMenu();
+  const priv = usePrivacy();
+  const setPolicy = async (h: (typeof hosts)[number], agentPolicy: AgentPolicy) => {
+    try {
+      await api.hostSave({ ...h, agentPolicy });
+      await useApp.getState().refreshHosts();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
   return (
     <section className="agent-sec">
-      <div className="agent-sec-head">
-        <h2>权限</h2>
+      <div className="section-title">
+        <span>权限</span>
       </div>
       {hosts.length === 0 ? (
-        <div className="agent-empty">暂无服务器</div>
+        <Empty sm text="暂无服务器" />
       ) : (
         <div className="agent-table-wrap">
-          <table className="table">
+          <table className="table agent-policy">
             <colgroup>
-              <col style={{ width: "28%" }} />
-              <col style={{ width: "20%" }} />
+              <col className="c-name" />
+              <col className="c-group" />
               <col />
-              <col style={{ width: 104 }} />
+              <col className="c-policy" />
             </colgroup>
             <thead>
               <tr>
@@ -248,11 +265,30 @@ function PolicyCard() {
               {hosts.map((h) => {
                 const p = POLICY[h.agentPolicy] ?? POLICY.ask;
                 return (
-                  <tr key={h.id} className="click" title="编辑权限" onClick={() => useApp.getState().openEditor(h.id)}>
-                    <td title={h.name}>{h.name}</td>
+                  <tr
+                    key={h.id}
+                    className="click"
+                    title="编辑权限"
+                    onClick={() => useApp.getState().openEditor(h.id)}
+                    onContextMenu={(e) =>
+                      menu.open(e, [
+                        { label: "编辑权限…", icon: <Pencil />, onSelect: () => useApp.getState().openEditor(h.id) },
+                        "sep",
+                        ...(Object.keys(POLICY) as AgentPolicy[]).map((k) => ({
+                          label: `设为${POLICY[k].label}`,
+                          icon: <ShieldCheck />,
+                          disabled: (h.agentPolicy ?? "ask") === k,
+                          onSelect: () => void setPolicy(h, k),
+                        })),
+                        "sep",
+                        { label: "复制地址", icon: <Link />, onSelect: () => void copyHostAddr(h) },
+                      ])
+                    }
+                  >
+                    <td title={priv.text(h.name, h.host)}>{priv.text(h.name, h.host)}</td>
                     <td className="muted">{h.groupName || "-"}</td>
-                    <td className="mono muted" title={`${h.username}@${h.host}:${h.port}`}>
-                      {h.username}@{h.host}:{h.port}
+                    <td className="mono muted" title={`${h.username}@${priv.addr(h.host)}:${h.port}`}>
+                      {h.username}@{priv.addr(h.host)}:{h.port}
                     </td>
                     <td className={p.cls}>{p.label}</td>
                   </tr>
@@ -262,6 +298,7 @@ function PolicyCard() {
           </table>
         </div>
       )}
+      {menu.node}
     </section>
   );
 }
@@ -275,6 +312,7 @@ function AuditCard() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState<SourceFilter>("all");
   const [q, setQ] = useState("");
+  const menu = useContextMenu();
 
   const load = async () => {
     try {
@@ -304,8 +342,8 @@ function AuditCard() {
 
   return (
     <section className="agent-sec">
-      <div className="agent-sec-head">
-        <h2 className="grow">审计日志</h2>
+      <div className="section-title">
+        <span className="grow">审计日志</span>
         <div className="seg">
           {(
             [
@@ -319,26 +357,23 @@ function AuditCard() {
             </button>
           ))}
         </div>
-        <div className="agent-search">
-          <Search />
-          <input className="input sm" placeholder="搜索" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
+        <SearchBox size="sm" className="agent-search" value={q} onChange={setQ} />
         <button className="icon-btn" title="刷新" onClick={load}>
           <RefreshCw />
         </button>
       </div>
       {rows.length === 0 ? (
-        <div className="agent-empty">没有记录</div>
+        <Empty sm text="没有记录" />
       ) : (
         <div className="agent-table-wrap tall">
-          <table className="table">
+          <table className="table agent-audit">
             <colgroup>
-              <col style={{ width: 168 }} />
-              <col style={{ width: 72 }} />
-              <col style={{ width: 128 }} />
-              <col style={{ width: 112 }} />
+              <col className="c-time" />
+              <col className="c-src" />
+              <col className="c-host" />
+              <col className="c-action" />
               <col />
-              <col style={{ width: 96 }} />
+              <col className="c-result" />
             </colgroup>
             <thead>
               <tr>
@@ -354,7 +389,23 @@ function AuditCard() {
               {rows.map((e) => {
                 const hn = e.hostId ? hostName.get(e.hostId) ?? e.hostId : "-";
                 return (
-                  <tr key={e.id}>
+                  <tr
+                    key={e.id}
+                    onContextMenu={(ev) => {
+                      if (window.getSelection()?.toString().trim()) return;
+                      menu.open(ev, [
+                        { label: "复制内容", icon: <Copy />, disabled: !e.detail, onSelect: () => void copyText(e.detail, "内容") },
+                        {
+                          label: "复制整行",
+                          icon: <Copy />,
+                          onSelect: () => void copyText([fmtTime(e.ts), e.source, hn, e.action, e.detail, e.result].join("\t")),
+                        },
+                        "sep",
+                        { label: "只看此服务器", icon: <Search />, disabled: !e.hostId, onSelect: () => setQ(hn) },
+                        { label: "刷新", icon: <RefreshCw />, onSelect: () => void load() },
+                      ]);
+                    }}
+                  >
                     <td className="agent-time">{fmtTime(e.ts)}</td>
                     <td className={e.source === "agent" ? "" : "t-muted"}>{e.source === "agent" ? "Agent" : "用户"}</td>
                     <td title={hn}>{hn}</td>
@@ -374,6 +425,7 @@ function AuditCard() {
           </table>
         </div>
       )}
+      {menu.node}
     </section>
   );
 }

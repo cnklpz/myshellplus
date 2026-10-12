@@ -2,13 +2,21 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { appDataDir } from "@tauri-apps/api/path";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Lock, Plus, Trash2, Zap } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Lock, Plus, Power, Trash2, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Select } from "../../components/Select";
-import { Dialog, Field, Toggle, toast } from "../../components/ui";
-import { type AiProvider, type AiSettings, api, errMsg, type HotkeySettings, type HotkeyStatus } from "../../lib/api";
+import { Dialog, Empty, Field, Toggle, toast } from "../../components/ui";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { type AiProvider, type AiSettings, api, errMsg, type HotkeySettings, type HotkeyStatus, type KnownHost, type LogEntry } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
+import { fmtMs } from "../../lib/format";
+import { usePrivacy } from "../../lib/privacy";
+import { fileStamp } from "../diagnostics/connLog";
 import { useApp } from "../../store";
+import { useContextMenu } from "../terminal/ContextMenu";
 import "./settings.css";
+import "../diagnostics/logs.css";
+import { autoCheckEnabled, checkUpdate, installUpdate, setAutoCheck, useUpdate } from "../../lib/updater";
 import { applyTheme, currentTheme, type Theme, THEMES } from "../../lib/themes";
 import {
   compileRule,
@@ -23,7 +31,7 @@ import {
 } from "../terminal/highlight";
 import { type EchoMode, echoSettings, saveEchoSettings } from "../terminal/localEcho";
 
-type Section = "ai" | "security" | "appearance" | "keys" | "backup" | "sync" | "about";
+type Section = "ai" | "security" | "appearance" | "keys" | "backup" | "sync" | "logs" | "about";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "ai", label: "AI 服务" },
@@ -32,6 +40,7 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: "keys", label: "快捷键" },
   { id: "backup", label: "备份" },
   { id: "sync", label: "云同步" },
+  { id: "logs", label: "日志" },
   { id: "about", label: "关于" },
 ];
 
@@ -65,6 +74,7 @@ export function SettingsView() {
             {section === "keys" && <KeysSection />}
             {section === "backup" && <BackupSection />}
             {section === "sync" && <SyncSection />}
+            {section === "logs" && <LogsSection />}
             {section === "about" && <AboutSection />}
           </div>
         </div>
@@ -88,7 +98,7 @@ function Block(props: { title?: string; actions?: React.ReactNode; children: Rea
   return (
     <div className="set-block">
       {(props.title || props.actions) && (
-        <div className="set-block-head">
+        <div className="section-title">
           <span className="grow">{props.title}</span>
           {props.actions}
         </div>
@@ -205,11 +215,13 @@ function AiSection() {
     setBusy(p.id);
     try {
       await api.aiSettingsSave({ ...s, active: p.id }, keys);
+      const t0 = performance.now();
+      const took = () => fmtMs(performance.now() - t0);
       try {
         const r = await api.aiNl2Cmd("", "列出当前目录");
-        toast(`${p.name} 可用：${r.command || r.explanation}`, "success");
+        toast(`${p.name} 可用（${took()}）：${r.command || r.explanation}`, "success");
       } catch (e) {
-        toast(`${p.name} 测试失败：${errMsg(e)}`, "error");
+        toast(`${p.name} 测试失败（${took()}）：${errMsg(e)}`, "error");
       } finally {
         await api.aiSettingsSave(s, {});
       }
@@ -252,7 +264,7 @@ function AiSection() {
         <div className="set-stack">
           {s.providers.length === 0 && (
             <div className="set-group">
-              <div className="set-empty">未添加服务</div>
+              <Empty sm text="未添加服务" />
             </div>
           )}
           {s.providers.map((p) => {
@@ -430,9 +442,62 @@ function SecuritySection() {
           </>
         )}
       </div>
+      <KnownHostsBlock />
       {changing && <ChangePasswordDialog onClose={() => setChanging(false)} />}
       {pwDialog && <PasswordModeDialog mode={pwDialog} onClose={() => setPwDialog(null)} />}
     </>
+  );
+}
+
+/** Trusted server host keys. Removing one makes the next connection ask again. */
+function KnownHostsBlock() {
+  const [list, setList] = useState<KnownHost[] | null>(null);
+  const menu = useContextMenu();
+  useEffect(() => {
+    api.knownHostList().then(setList, (e) => toast(errMsg(e), "error"));
+  }, []);
+  const remove = async (k: KnownHost) => {
+    try {
+      await api.knownHostDelete(k.host, k.port);
+      setList((l) => l?.filter((x) => x.host !== k.host || x.port !== k.port) ?? null);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  return (
+    <Block title="服务器指纹">
+      <div className="set-group">
+        {list?.length === 0 && <Empty sm text="暂无记录" />}
+        {list?.map((k) => (
+          <div
+            key={`${k.host}:${k.port}`}
+            className="kh-row"
+            onContextMenu={(e) => {
+              if (window.getSelection()?.toString().trim()) return;
+              menu.open(e, [
+                { label: "复制指纹", icon: <Copy />, onSelect: () => void copyText(k.fingerprint, "指纹") },
+                { label: "复制地址", icon: <Copy />, onSelect: () => void copyText(k.port !== 22 ? `${k.host}:${k.port}` : k.host, "地址") },
+                "sep",
+                { label: "删除", icon: <Trash2 />, danger: true, onSelect: () => void remove(k) },
+              ]);
+            }}
+          >
+            <span className="mono ellipsis selectable" title={`${k.host}:${k.port}`}>
+              {k.host}
+              {k.port !== 22 && <span className="faint">:{k.port}</span>}
+            </span>
+            <span className="kh-algo">{k.algo}</span>
+            <code className="kh-fp ellipsis selectable" title={k.fingerprint}>
+              {k.fingerprint}
+            </code>
+            <button className="icon-btn" title="删除" onClick={() => remove(k)}>
+              <Trash2 />
+            </button>
+          </div>
+        ))}
+      </div>
+      {menu.node}
+    </Block>
   );
 }
 
@@ -501,12 +566,16 @@ function PasswordModeDialog(props: { mode: "enable" | "disable"; onClose: () => 
                 onKeyDown={(e) => e.key === "Enter" && submit()}
               />
             </Field>
-            <Field label="自动解锁">
+            <Field
+              label="自动解锁"
+              hint={
+                <span className={tooShort || mismatch ? "set-err" : undefined}>
+                  {tooShort ? "至少 8 位" : mismatch ? "两次输入不一致" : "开启后每次启动需要输入；主密码无法找回"}
+                </span>
+              }
+            >
               <Toggle on={remember} onChange={setRemember} />
             </Field>
-            <div className={"field-hint " + (tooShort || mismatch ? "set-err" : "")} style={{ gridColumn: "auto" }}>
-              {tooShort ? "至少 8 位" : mismatch ? "两次输入不一致" : "开启后每次启动需要输入；主密码无法找回"}
-            </div>
           </>
         )}
       </div>
@@ -687,10 +756,10 @@ function ThemeGrid(props: { themes: Theme[]; value: string; onPick: (id: string)
           <div className="theme-preview" style={{ background: t.ui.chrome }}>
             <div className="tp-side" />
             <div className="tp-main" style={{ background: t.ui.bg0 }}>
-              <span style={{ background: t.ansi[2], width: "38%" }} />
-              <span style={{ background: t.ui.fg2, width: "62%" }} />
-              <span style={{ background: t.ansi[4], width: "48%" }} />
-              <span style={{ background: t.ui.accent, width: "22%" }} />
+              <span style={{ background: t.ansi[2] }} />
+              <span style={{ background: t.ui.fg2 }} />
+              <span style={{ background: t.ansi[4] }} />
+              <span style={{ background: t.ui.accent }} />
             </div>
           </div>
           <div className="theme-name">
@@ -721,6 +790,12 @@ function HighlightBlock(props: { themeId: string }) {
   const pickPreset = (id: string) =>
     setHl({ ...hl, enabled: true, preset: id, rules: id === "custom" ? (hl.custom ?? []) : presetRules(id) });
   const theme = THEMES.find((t) => t.id === props.themeId) ?? currentTheme();
+  const menu = useContextMenu();
+  const move = (i: number, d: -1 | 1) => {
+    const next = [...hl.rules];
+    [next[i], next[i + d]] = [next[i + d], next[i]];
+    setRules(next);
+  };
 
   return (
     <Block
@@ -749,12 +824,25 @@ function HighlightBlock(props: { themeId: string }) {
         <Field label="关键词高亮">
           <Toggle on={hl.enabled} onChange={(enabled) => setHl({ ...hl, enabled })} />
         </Field>
-        {hl.enabled && hl.rules.length === 0 && <div className="set-empty">未添加规则</div>}
+        {hl.enabled && hl.rules.length === 0 && <Empty sm text="未添加规则" />}
         {hl.enabled &&
-          hl.rules.map((r) => {
+          hl.rules.map((r, i) => {
             const bad = r.pattern !== "" && !compileRule(r);
             return (
-              <div key={r.id} className="hl-rule">
+              <div
+                key={r.id}
+                className="hl-rule"
+                onContextMenu={(e) =>
+                  menu.open(e, [
+                    { label: r.on ? "停用" : "启用", icon: <Power />, onSelect: () => setRule(r.id, { on: !r.on }) },
+                    "sep",
+                    { label: "上移", icon: <ArrowUp />, disabled: i === 0, onSelect: () => move(i, -1) },
+                    { label: "下移", icon: <ArrowDown />, disabled: i === hl.rules.length - 1, onSelect: () => move(i, 1) },
+                    "sep",
+                    { label: "删除", icon: <Trash2 />, danger: true, onSelect: () => setRules(hl.rules.filter((x) => x.id !== r.id)) },
+                  ])
+                }
+              >
                 <Toggle on={r.on} onChange={(on) => setRule(r.id, { on })} />
                 <input
                   className={"input sm mono" + (bad ? " set-err" : "")}
@@ -796,6 +884,7 @@ function HighlightBlock(props: { themeId: string }) {
             );
           })}
       </div>
+      {menu.node}
     </Block>
   );
 }
@@ -896,7 +985,7 @@ function SyncSection() {
     <>
       <Title text="云同步" />
       <div className="set-group">
-        <div className="set-empty">即将推出</div>
+        <Empty sm text="即将推出" />
       </div>
     </>
   );
@@ -922,6 +1011,9 @@ const KEY_GROUPS: { title: string; keys: [string, string][] }[] = [
       ["复制", "Ctrl+Shift+C"],
       ["粘贴", "Ctrl+Shift+V"],
       ["复制或粘贴", "Shift+右键"],
+      ["粘贴选中内容", "中键"],
+      ["清屏", "Ctrl+Shift+L"],
+      ["清除缓冲区并重置", "Ctrl+Shift+K"],
       ["终端内搜索", "Ctrl+F"],
       ["AI 生成命令", "Ctrl+K"],
       ["AI 解释选中内容", "Ctrl+Shift+E"],
@@ -1058,15 +1150,15 @@ function GlobalHotkeys() {
   const errHint = (e?: string | null) => (e ? <span className="set-err">{e}</span> : undefined);
   return (
     <div className="set-block">
-      <div className="set-block-head">系统</div>
+      <div className="section-title">系统</div>
       <div className="set-group set-keys-group">
-        <Field label="显示/隐藏主界面" hint={errHint(status.toggleError)}>
+        <Field label="显隐主界面" hint={errHint(status.toggleError)}>
           <HotkeyInput value={s.toggle} onChange={(toggle) => save({ toggle })} />
         </Field>
         <Field label="切换终端" hint={errHint(status.switcherError)}>
           <HotkeyInput value={s.switcher} onChange={(switcher) => save({ switcher })} />
         </Field>
-        <Field label="只显示已打开的终端">
+        <Field label="仅列已开终端">
           <Toggle on={s.openOnly} onChange={(openOnly) => save({ openOnly })} disabled={!s.switcher} />
         </Field>
       </div>
@@ -1081,7 +1173,7 @@ function KeysSection() {
       <GlobalHotkeys />
       {KEY_GROUPS.map((g) => (
         <div key={g.title} className="set-block">
-          <div className="set-block-head">{g.title}</div>
+          <div className="section-title">{g.title}</div>
           <div className="set-group set-keys-group">
             {g.keys.map(([label, combo]) => (
               <Field key={label} label={label}>
@@ -1091,6 +1183,116 @@ function KeysSection() {
           </div>
         </div>
       ))}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- logs
+
+type LogFilter = "all" | "crash" | "perf" | "conn";
+
+function logKind(e: LogEntry): { kind: Exclude<LogFilter, "all"> | "other"; label: string } {
+  if (e.target === "crash") return { kind: "crash", label: "崩溃" };
+  if (e.target === "ui") return { kind: "crash", label: "界面" };
+  if (e.target === "perf") return { kind: "perf", label: "掉帧" };
+  if (e.target.startsWith("conn:")) return { kind: "conn", label: "连接" };
+  return { kind: "other", label: "后台" };
+}
+
+function LogsSection() {
+  const hosts = useApp((s) => s.hosts);
+  const priv = usePrivacy();
+  const [events, setEvents] = useState<LogEntry[] | null>(null);
+  const [filter, setFilter] = useState<LogFilter>("all");
+  const [open, setOpen] = useState<number | null>(null);
+  const [dir, setDir] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = () => api.logEvents(300).then((v) => setEvents(v ?? []), () => setEvents([]));
+  useEffect(() => {
+    load();
+    api.logDir().then((d) => setDir(d ?? ""), () => {});
+  }, []);
+
+  const exportAll = async () => {
+    try {
+      const path = await save({ defaultPath: `myshellplus-log-${fileStamp()}.log`, filters: [{ name: "日志", extensions: ["log", "txt"] }] });
+      if (!path) return;
+      setBusy(true);
+      await api.logExport(path);
+      toast("日志已导出", "success");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const hostName = (target: string) => {
+    const h = hosts.find((x) => "conn:" + x.id === target);
+    return h ? priv.text(h.name, h.host) : "";
+  };
+  const shown = (events ?? []).filter((e) => filter === "all" || logKind(e).kind === filter);
+
+  return (
+    <>
+      <Title text="日志" />
+      <div className="set-group">
+        <Field label="导出日志" hint="地址、用户名已脱敏">
+          <button className="btn" disabled={busy} onClick={exportAll}>
+            导出
+          </button>
+        </Field>
+        <Field label="日志目录">
+          <span className="set-path set-note">{dir || "-"}</span>
+          <button className="btn" disabled={!dir} onClick={() => revealItemInDir(dir + "\\myshellplus.log").catch((e) => toast(errMsg(e), "error"))}>
+            打开
+          </button>
+        </Field>
+      </div>
+      <Block
+        title="异常事件"
+        actions={
+          <>
+            <Seg
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "all", label: "全部" },
+                { value: "crash", label: "崩溃" },
+                { value: "perf", label: "掉帧" },
+                { value: "conn", label: "连接" },
+              ]}
+            />
+            <button className="btn sm" onClick={load}>
+              刷新
+            </button>
+          </>
+        }
+      >
+        <div className="set-group">
+          {events === null ? null : shown.length === 0 ? (
+            <Empty sm text="暂无异常事件" />
+          ) : (
+            <div className="log-list">
+              {shown.map((e, i) => {
+                const k = logKind(e);
+                const name = k.kind === "conn" ? hostName(e.target) : "";
+                return (
+                  <div key={i} className={"log-row" + (open === i ? " open" : "")} onClick={() => setOpen(open === i ? null : i)}>
+                    <span className="log-ts">{e.ts.slice(5, 19)}</span>
+                    <span className="log-kind">
+                      <span className={"dot " + (e.level === "ERROR" ? "err" : "warn")} />
+                      {k.label}
+                    </span>
+                    <span className="log-msg">{name ? `${name} · ${e.msg}` : e.msg}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </Block>
     </>
   );
 }
@@ -1115,6 +1317,53 @@ function AboutSection() {
           <span className="set-path">{dir || "-"}</span>
         </Field>
       </div>
+      <UpdateBlock />
     </>
+  );
+}
+
+function UpdateBlock() {
+  const u = useUpdate();
+  const [auto, setAuto] = useState(autoCheckEnabled);
+  const busy = u.phase === "checking" || u.phase === "downloading";
+  const status =
+    u.phase === "checking" ? "检查中…"
+    : u.phase === "latest" ? "已是最新版本"
+    : u.phase === "available" ? `新版本 ${u.version}`
+    : u.phase === "downloading" ? `下载中 ${u.pct ?? 0}%`
+    : u.phase === "error" ? u.message
+    : "";
+  return (
+    <div className="set-block">
+      <div className="section-title">更新</div>
+      <div className="set-group">
+        <Field label="检查更新" hint={u.phase === "available" ? "安装后将重启，SSH 连接会断开" : undefined}>
+          <span className={"set-note set-upd" + (u.phase === "error" ? " set-err" : "")}>{status}</span>
+          {u.phase === "available" || u.phase === "downloading" ? (
+            <button className="btn primary" disabled={busy} onClick={() => installUpdate()}>
+              安装并重启
+            </button>
+          ) : (
+            <button className="btn" disabled={busy} onClick={() => checkUpdate()}>
+              检查更新
+            </button>
+          )}
+        </Field>
+        {u.phase === "available" && u.notes.trim() && (
+          <Field label="更新内容" top>
+            <div className="set-notes selectable">{u.notes.trim()}</div>
+          </Field>
+        )}
+        <Field label="启动时检查">
+          <Toggle
+            on={auto}
+            onChange={(v) => {
+              setAuto(v);
+              setAutoCheck(v);
+            }}
+          />
+        </Field>
+      </div>
+    </div>
   );
 }

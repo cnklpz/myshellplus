@@ -2,7 +2,7 @@
 // Content stays mounted while hidden so running work (e.g. a batch) and its state survive closing.
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEscClose } from "./ui";
+import { EscLayer, HideDialogs, useEscClose } from "./ui";
 
 export function PageModal(props: { open: boolean; onClose: () => void; width?: number; children: ReactNode }) {
   useEscClose(props.onClose, props.open);
@@ -16,7 +16,9 @@ export function PageModal(props: { open: boolean; onClose: () => void; width?: n
         <button className="icon-btn md page-modal-close" title="关闭" onClick={props.onClose}>
           <X />
         </button>
-        {props.children}
+        <HideDialogs when={!props.open}>
+          <EscLayer>{props.children}</EscLayer>
+        </HideDialogs>
       </div>
     </div>
   );

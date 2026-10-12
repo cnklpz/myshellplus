@@ -15,6 +15,7 @@ use parking_lot::Mutex;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tauri::async_runtime::JoinHandle;
 use tokio::sync::oneshot;
 
 use crate::db::Host;
@@ -31,13 +32,22 @@ pub struct McpSettings {
     pub token: String,
 }
 
-pub fn settings(ctx: &Ctx) -> McpSettings {
-    if let Ok(Some(s)) = ctx.db.setting::<McpSettings>("mcp") {
-        return s;
+/// Errors when the stored settings are unreadable: a corrupt row must not silently become a
+/// fresh token (that would break every configured agent without telling the user).
+pub fn settings(ctx: &Ctx) -> Result<McpSettings> {
+    if let Some(s) = ctx.db.setting::<McpSettings>("mcp")? {
+        return Ok(s);
     }
-    let s = McpSettings { enabled: false, port: 17890, token: new_token() };
-    let _ = ctx.db.set_setting("mcp", &s);
-    s
+    let s = defaults();
+    if let Err(e) = ctx.db.set_setting("mcp", &s) {
+        log::warn!("保存 MCP 设置失败: {e:#}");
+    }
+    Ok(s)
+}
+
+/// Settings for a fresh install (with a new, not yet saved token).
+pub fn defaults() -> McpSettings {
+    McpSettings { enabled: false, port: 17890, token: new_token() }
 }
 
 pub fn new_token() -> String {
@@ -48,16 +58,26 @@ pub fn new_token() -> String {
 
 #[derive(Default)]
 pub struct McpServer {
-    stop: Mutex<Option<oneshot::Sender<()>>>,
+    stop: Mutex<Option<(oneshot::Sender<()>, JoinHandle<()>)>>,
     pub running_port: Mutex<Option<u16>>,
+    /// Serializes restarts so two of them can't race for the port.
+    restart_lock: tokio::sync::Mutex<()>,
 }
 
 pub async fn restart(ctx: Arc<Ctx>, server: Arc<McpServer>) -> Result<()> {
-    if let Some(tx) = server.stop.lock().take() {
+    let _g = server.restart_lock.lock().await;
+    let old = server.stop.lock().take();
+    if let Some((tx, mut task)) = old {
         let _ = tx.send(());
+        // Wait for the old listener to be released before binding the port again. Graceful
+        // shutdown waits for in-flight requests (which may wait on a user prompt), so cap it.
+        if tokio::time::timeout(Duration::from_secs(1), &mut task).await.is_err() {
+            task.abort();
+            let _ = task.await;
+        }
     }
     *server.running_port.lock() = None;
-    let s = settings(&ctx);
+    let s = settings(&ctx)?;
     if !s.enabled {
         return Ok(());
     }
@@ -65,16 +85,16 @@ pub async fn restart(ctx: Arc<Ctx>, server: Arc<McpServer>) -> Result<()> {
         .await
         .map_err(|e| anyhow!("MCP 端口 {} 绑定失败: {e}", s.port))?;
     let (tx, rx) = oneshot::channel();
-    *server.stop.lock() = Some(tx);
-    *server.running_port.lock() = Some(s.port);
     let app = Router::new().route("/mcp", post(handle).get(|| async { StatusCode::METHOD_NOT_ALLOWED })).with_state(ctx);
-    tauri::async_runtime::spawn(async move {
+    let task = tauri::async_runtime::spawn(async move {
         let _ = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = rx.await;
             })
             .await;
     });
+    *server.stop.lock() = Some((tx, task));
+    *server.running_port.lock() = Some(s.port);
     Ok(())
 }
 
@@ -87,7 +107,10 @@ async fn handle(State(ctx): State<Arc<Ctx>>, headers: HeaderMap, body: String) -
     if headers.get("origin").is_some_and(|o| o != "null") {
         return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
     }
-    let token = settings(&ctx).token;
+    let token = match settings(&ctx) {
+        Ok(s) => s.token,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
+    };
     let ok = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -233,7 +256,9 @@ async fn call_tool(ctx: &Arc<Ctx>, name: &str, args: &Value) -> Result<Value> {
         "host_status" => {
             let h = resolve_host(ctx, arg_str(args, "host")?)?;
             if ctx.monitors.latest(&h.id).is_none() {
-                monitor::subscribe(ctx.clone(), h.id.clone());
+                // Monitors only sample live connections.
+                get_conn(ctx.clone(), h.id.clone()).await?;
+                monitor::subscribe(ctx.clone(), h.id.clone(), false);
                 for _ in 0..20 {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     if ctx.monitors.latest(&h.id).is_some() {
@@ -243,7 +268,7 @@ async fn call_tool(ctx: &Arc<Ctx>, name: &str, args: &Value) -> Result<Value> {
                 let (c2, id2) = (ctx.clone(), h.id.clone());
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(60)).await;
-                    monitor::unsubscribe(&c2, &id2);
+                    monitor::unsubscribe(&c2, &id2, false);
                 });
             }
             let snap = ctx.monitors.snapshot(&h.id);

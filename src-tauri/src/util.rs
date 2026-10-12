@@ -13,3 +13,10 @@ pub fn sh_quote(s: &str) -> String {
     }
     format!("'{}'", s.replace('\'', r"'\''"))
 }
+
+/// Log a failure that must not abort the caller (audit rows, settings, cleanup of secrets).
+pub fn log_err<T, E: std::fmt::Display>(what: &str, r: Result<T, E>) {
+    if let Err(e) = r {
+        log::warn!("{what}: {e:#}");
+    }
+}

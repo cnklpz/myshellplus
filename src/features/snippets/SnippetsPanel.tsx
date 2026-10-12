@@ -1,9 +1,14 @@
 // Command snippets list (side panel); click inserts into the active terminal.
-import { Copy, CopyPlus, CornerDownLeft, Pencil, Play, Plus, ScrollText, Search, Sparkles, Tag, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, CopyPlus, CornerDownLeft, FolderInput, Pencil, Play, Plus, ScrollText, RefreshCw, Sparkles, Tag, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Confirm, Dialog, Empty, Field, toast } from "../../components/ui";
+import { Confirm, Dialog, Empty, Field, SearchBox, toast } from "../../components/ui";
 import { api, errMsg, type Snippet } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 import { termBus } from "../../lib/termBus";
+import { Combobox } from "../../components/Combobox";
+import { Select } from "../../components/Select";
+import { useApp } from "../../store";
+import { usePanelItems } from "../side/panelMenu";
 import { useContextMenu } from "../terminal/ContextMenu";
 import "./snippets.css";
 
@@ -30,16 +35,15 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
   const [list, setList] = useState<Snippet[] | null>(null);
   const [q, setQ] = useState("");
   const [tag, setTag] = useState<string | null>(null);
+  /** all = global + this host; host = only this host's */
+  const [scope, setScope] = useState<"all" | "host">("all");
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [editing, setEditing] = useState<Partial<Snippet> | null>(null);
   const [deleting, setDeleting] = useState<Snippet | null>(null);
   const [asking, setAsking] = useState<{ snippet: Snippet; mode: Mode } | null>(null);
 
   const menu = useContextMenu();
-  const copyCmd = (text: string) =>
-    navigator.clipboard.writeText(text).then(
-      () => toast("已复制命令", "success"),
-      () => toast("复制失败", "error"),
-    );
+  const panelExtra = usePanelItems();
 
   const refresh = useCallback(async () => {
     try {
@@ -53,19 +57,46 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
     refresh();
   }, [refresh]);
 
+  // Snippets bound to another host are hidden here.
+  const visible = useMemo(() => (list ?? []).filter((s) => !s.hostId || s.hostId === hostId), [list, hostId]);
+  const groups = useMemo(
+    () => [...new Set((list ?? []).map((s) => s.groupName ?? "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN")),
+    [list],
+  );
+
   const tags = useMemo(() => {
     const s = new Set<string>();
-    (list ?? []).forEach((x) => x.tags.forEach((t) => s.add(t)));
+    visible.forEach((x) => x.tags.forEach((t) => s.add(t)));
     return [...s].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  }, [list]);
+  }, [visible]);
 
   const shown = useMemo(() => {
     const k = q.trim().toLowerCase();
-    return (list ?? [])
+    return visible
+      .filter((s) => scope === "all" || s.hostId === hostId)
       .filter((s) => !tag || s.tags.includes(tag))
       .filter((s) => !k || s.name.toLowerCase().includes(k) || s.command.toLowerCase().includes(k) || s.tags.some((t) => t.toLowerCase().includes(k)))
       .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
-  }, [list, q, tag]);
+  }, [visible, q, tag, scope, hostId]);
+
+  /** [group, items] with named groups first, ungrouped last. */
+  const sections = useMemo(() => {
+    const m = new Map<string, Snippet[]>();
+    for (const s of shown) {
+      const g = s.groupName ?? "";
+      m.set(g, [...(m.get(g) ?? []), s]);
+    }
+    return [...m.entries()].sort(([a], [b]) => (!a ? 1 : !b ? -1 : a.localeCompare(b, "zh-CN")));
+  }, [shown]);
+
+  const moveTo = async (s: Snippet, groupName: string) => {
+    try {
+      await api.snippetSave({ ...s, groupName });
+      await refresh();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
 
   const send = (cmd: string, mode: Mode) => {
     const term = termBus.active();
@@ -91,10 +122,13 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
     <div className="sn-root">
       <div className="sn-top">
         <div className="row">
-          <div className="sn-search grow">
-            <Search />
-            <input className="input sm" placeholder="搜索命令" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
+          <SearchBox className="grow" size="sm" placeholder="搜索命令" value={q} onChange={setQ} />
+          {hostId && (
+            <div className="seg">
+              <button className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>全部</button>
+              <button className={scope === "host" ? "on" : ""} onClick={() => setScope("host")}>本机</button>
+            </div>
+          )}
           <button className="icon-btn" title="新建命令" onClick={() => setEditing({ name: "", command: "", tags: [] })}>
             <Plus />
           </button>
@@ -113,7 +147,17 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
         )}
       </div>
 
-      <div className="sn-body">
+      <div
+        className="sn-body"
+        onContextMenu={(e) =>
+          menu.open(e, [
+            { label: "新建…", icon: <Plus />, onSelect: () => setEditing({ name: "", command: "", tags: [] }) },
+            { label: "刷新", icon: <RefreshCw />, onSelect: () => void refresh() },
+            { label: "显示全部", icon: <Tag />, disabled: tag === null, onSelect: () => setTag(null) },
+            ...panelExtra(),
+          ])
+        }
+      >
         {list && list.length === 0 ? (
           <Empty
             icon={<ScrollText />}
@@ -128,45 +172,72 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
         ) : list && shown.length === 0 ? (
           <Empty text="无匹配" />
         ) : (
-          shown.map((s) => (
-            <div
-              key={s.id}
-              className="sn-item"
-              onClick={() => use(s, "paste")}
-              title="点击插入"
-              onContextMenu={(e) =>
-                menu.open(e, [
-                  { label: "运行", icon: <Play />, onSelect: () => use(s, "run") },
-                  { label: "插入", icon: <CornerDownLeft />, onSelect: () => use(s, "paste") },
-                  { label: "复制命令", icon: <Copy />, onSelect: () => copyCmd(s.command) },
-                  "sep",
-                  { label: "编辑…", icon: <Pencil />, onSelect: () => setEditing({ ...s }) },
-                  { label: "创建副本…", icon: <CopyPlus />, onSelect: () => setEditing({ ...s, id: undefined, name: `${s.name} 副本` }) },
-                  ...s.tags.map((t) => ({ label: `只看「${t}」`, icon: <Tag />, onSelect: () => setTag(t) })),
-                  "sep",
-                  { label: "删除…", icon: <Trash2 />, danger: true, onSelect: () => setDeleting(s) },
-                ])
-              }
-            >
-              <div className="sn-line">
-                <span className="grow ellipsis sn-name">{s.name || "未命名"}</span>
-                {s.tags.length > 0 && <span className="ellipsis sn-tagline">{s.tags.join(" · ")}</span>}
-                <div className="sn-actions" onClick={(e) => e.stopPropagation()}>
-                  <button className="icon-btn" title="运行" onClick={() => use(s, "run")}>
-                    <Play />
-                  </button>
-                  <button className="icon-btn" title="插入" onClick={() => use(s, "paste")}>
-                    <CornerDownLeft />
-                  </button>
-                  <button className="icon-btn" title="编辑" onClick={() => setEditing({ ...s })}>
-                    <Pencil />
-                  </button>
-                  <button className="icon-btn" title="删除" onClick={() => setDeleting(s)}>
-                    <Trash2 />
-                  </button>
+          sections.map(([g, items]) => (
+            <div key={g} className="sn-group">
+              {(sections.length > 1 || g) && (
+                <button
+                  className={"section-title sn-group-head" + (collapsed.has(g) ? " closed" : "")}
+                  onClick={() => {
+                    const next = new Set(collapsed);
+                    if (next.has(g)) next.delete(g);
+                    else next.add(g);
+                    setCollapsed(next);
+                  }}
+                >
+                  <ChevronRight />
+                  <span className="grow ellipsis">{g || "未分组"}</span>
+                  <span className="count">{items.length}</span>
+                </button>
+              )}
+              {!collapsed.has(g) &&
+                items.map((s) => (
+                <div
+                  key={s.id}
+                  className="sn-item"
+                  onClick={() => use(s, "paste")}
+                  title="点击插入"
+                  onContextMenu={(e) =>
+                    menu.open(e, [
+                      { label: "运行", icon: <Play />, onSelect: () => use(s, "run") },
+                      { label: "插入", icon: <CornerDownLeft />, onSelect: () => use(s, "paste") },
+                      { label: "复制命令", icon: <Copy />, onSelect: () => void copyText(s.command, "命令") },
+                      "sep",
+                      { label: "编辑…", icon: <Pencil />, onSelect: () => setEditing({ ...s }) },
+                      { label: "创建副本…", icon: <CopyPlus />, onSelect: () => setEditing({ ...s, id: undefined, name: `${s.name} 副本` }) },
+                      ...s.tags.map((t) => ({ label: `只看「${t}」`, icon: <Tag />, onSelect: () => setTag(t) })),
+                      "sep",
+                      ...groups
+                        .filter((g) => g !== (s.groupName ?? ""))
+                        .map((g) => ({ label: `移到「${g}」`, icon: <FolderInput />, onSelect: () => moveTo(s, g) })),
+                      !!s.groupName && { label: "移出分组", icon: <FolderInput />, onSelect: () => moveTo(s, "") },
+                      "sep",
+                      { label: "删除…", icon: <Trash2 />, danger: true, onSelect: () => setDeleting(s) },
+                    ])
+                  }
+                >
+                  <div className="sn-line">
+                    <span className="grow ellipsis sn-name">{s.name || "未命名"}</span>
+                    {(s.hostId || s.tags.length > 0) && (
+                      <span className="ellipsis sn-tagline">{[s.hostId ? "本机" : "", ...s.tags].filter(Boolean).join(" · ")}</span>
+                    )}
+                    <div className="sn-actions" onClick={(e) => e.stopPropagation()}>
+                      <button className="icon-btn sm" title="运行" onClick={() => use(s, "run")}>
+                        <Play />
+                      </button>
+                      <button className="icon-btn sm" title="插入" onClick={() => use(s, "paste")}>
+                        <CornerDownLeft />
+                      </button>
+                      <button className="icon-btn sm" title="编辑" onClick={() => setEditing({ ...s })}>
+                        <Pencil />
+                      </button>
+                      <button className="icon-btn sm danger" title="删除" onClick={() => setDeleting(s)}>
+                        <Trash2 />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mono faint ellipsis sn-cmd">{s.command.replace(/\s*\n\s*/g, " ⏎ ")}</div>
                 </div>
-              </div>
-              <div className="mono faint ellipsis sn-cmd">{s.command.replace(/\s*\n\s*/g, " ⏎ ")}</div>
+                ))}
             </div>
           ))
         )}
@@ -177,6 +248,7 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
         <SnippetEditor
           initial={editing}
           hostId={hostId}
+          groups={groups}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -264,8 +336,18 @@ export function VarsDialog(props: { title: string; command: string; confirmText?
   );
 }
 
-function SnippetEditor(props: { initial: Partial<Snippet>; hostId: string | null; onClose: () => void; onSaved: () => void }) {
+function SnippetEditor(props: { initial: Partial<Snippet>; hostId: string | null; groups: string[]; onClose: () => void; onSaved: () => void }) {
   const init = props.initial;
+  const hosts = useApp((s) => s.hosts);
+  const [scopeHost, setScopeHost] = useState<string>(init.hostId ?? "");
+  const [group, setGroup] = useState(init.groupName ?? "");
+  const scopeOptions = [
+    { value: "", label: "所有服务器" },
+    ...[...new Set([props.hostId, init.hostId].filter((x): x is string => !!x))].map((id) => ({
+      value: id,
+      label: `仅「${hosts.find((h) => h.id === id)?.name ?? "已删除的服务器"}」`,
+    })),
+  ];
   const [name, setName] = useState(init.name ?? "");
   const [command, setCommand] = useState(init.command ?? "");
   const [tags, setTags] = useState((init.tags ?? []).join(", "));
@@ -280,7 +362,7 @@ function SnippetEditor(props: { initial: Partial<Snippet>; hostId: string | null
     setSaving(true);
     try {
       const tagList = [...new Set(tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean))];
-      await api.snippetSave({ ...init, name: name.trim(), command, tags: tagList });
+      await api.snippetSave({ ...init, name: name.trim(), command, tags: tagList, hostId: scopeHost || null, groupName: group.trim() });
       props.onSaved();
     } catch (e) {
       toast(errMsg(e), "error");
@@ -324,7 +406,7 @@ function SnippetEditor(props: { initial: Partial<Snippet>; hostId: string | null
         </Field>
         <Field
           label="AI 生成"
-          hint={gen.note ? <span className={"sn-ai-note" + (gen.danger ? " danger" : "")}>{gen.danger ? "高风险：" : ""}{gen.note}</span> : undefined}
+          hint={gen.note ? <span className={"selectable" + (gen.danger ? " sn-ai-danger" : "")}>{gen.danger ? "高风险：" : ""}{gen.note}</span> : undefined}
         >
           <input
             className="input"
@@ -363,6 +445,12 @@ function SnippetEditor(props: { initial: Partial<Snippet>; hostId: string | null
               }
             }}
           />
+        </Field>
+        <Field label="分组">
+          <Combobox value={group} options={props.groups} placeholder="部署" onChange={setGroup} />
+        </Field>
+        <Field label="范围">
+          <Select value={scopeHost} options={scopeOptions} width="100%" onChange={setScopeHost} disabled={scopeOptions.length < 2} />
         </Field>
         <Field label="标签">
           <input className="input" value={tags} placeholder="docker, 日志" onChange={(e) => setTags(e.target.value)} />

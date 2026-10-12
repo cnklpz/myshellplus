@@ -5,7 +5,7 @@ import type { Sample, SysInfo } from "../../lib/api";
 import { fmtBytes, fmtRate, fmtUptime } from "../../lib/format";
 
 export type CardType =
-  | "info" | "metric" | "load" | "cores" | "net" | "nic" | "io" | "disks" | "disk" | "procs" | "gpu" | "command" | "service" | "note";
+  | "info" | "metric" | "load" | "cores" | "net" | "nic" | "io" | "disks" | "disk" | "procs" | "gpu" | "apps" | "docker" | "command" | "service" | "note";
 
 /** s = one third, m = half, l = full row. */
 export type CardSize = "s" | "m" | "l";
@@ -59,6 +59,8 @@ export interface CardCfg {
   unit?: string;
   lines?: number;
   services?: string;
+  // apps: process names (matched against the kernel comm)
+  apps?: string;
   // note
   text?: string;
 }
@@ -73,6 +75,8 @@ export interface CardInst {
   host?: string;
   cfg: CardCfg;
 }
+
+export const DEFAULT_APPS = "nginx php-fpm mysqld mariadbd redis-server postgres mongod java node dockerd containerd";
 
 export interface TypeMeta {
   label: string;
@@ -93,12 +97,14 @@ export const TYPE_META: Record<CardType, TypeMeta> = {
   io: { label: "磁盘 IO", group: "存储", size: "l" },
   disks: { label: "磁盘", group: "存储", size: "l" },
   disk: { label: "挂载点", group: "存储", size: "s", cfg: { mount: "/", warn: 75, err: 90 } },
+  apps: { label: "应用占用", group: "应用", size: "l", cfg: { apps: DEFAULT_APPS, interval: 10 } },
+  docker: { label: "Docker 容器", group: "应用", size: "l", cfg: { limit: 10, interval: 10 } },
   command: { label: "命令", group: "自定义", size: "l", cfg: { command: "", interval: 30, output: "text", lines: 6 } },
   service: { label: "服务状态", group: "自定义", size: "l", cfg: { services: "", interval: 30 } },
   note: { label: "便签", group: "自定义", size: "l", cfg: { text: "" } },
 };
 
-export const TYPE_GROUPS = ["概览", "CPU", "网络", "存储", "自定义"];
+export const TYPE_GROUPS = ["概览", "CPU", "网络", "存储", "应用", "自定义"];
 
 export interface MetricMeta {
   label: string;

@@ -1,11 +1,17 @@
 // Batch execution page: run one command on many hosts and compare results.
-import { listen } from "@tauri-apps/api/event";
-import { ChevronDown, ChevronRight, Copy, History, Layers, Play, RotateCcw, ScrollText, Search } from "lucide-react";
+import { useTauriEvent } from "../../lib/events";
+import {
+  CheckSquare, ChevronDown, ChevronRight, ChevronsDownUp, Copy, History, Layers, Play, RotateCcw, ScrollText, SquareTerminal, X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Select } from "../../components/Select";
-import { Confirm, Empty, toast } from "../../components/ui";
+import { Confirm, Empty, SearchBox, toast } from "../../components/ui";
 import { api, errMsg, type BatchHostResult, type Host, type Snippet } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
+import { usePrivacy } from "../../lib/privacy";
 import { useApp } from "../../store";
+import { useContextMenu } from "../terminal/ContextMenu";
+import { openTerminal } from "../terminal/open";
 import "./batch.css";
 
 const TIMEOUTS = [
@@ -86,20 +92,15 @@ export function BatchView() {
     );
   }, []);
 
-  useEffect(() => {
-    const un = listen<BatchHostResult>("batch", (e) => {
-      const r = e.payload;
-      if (known.current.has(r.batchId)) applyResult(r);
-      else {
-        const arr = early.current.get(r.batchId) ?? [];
-        arr.push(r);
-        early.current.set(r.batchId, arr);
-      }
-    });
-    return () => {
-      un.then((f) => f());
-    };
-  }, [applyResult]);
+  useTauriEvent<BatchHostResult>("batch", (e) => {
+    const r = e.payload;
+    if (known.current.has(r.batchId)) applyResult(r);
+    else {
+      const arr = early.current.get(r.batchId) ?? [];
+      arr.push(r);
+      early.current.set(r.batchId, arr);
+    }
+  });
 
   const current = runs.find((r) => r.id === currentId) ?? null;
   const running = !!current && current.ended === null;
@@ -181,7 +182,7 @@ export function BatchView() {
               <Select
                 size="sm"
                 width={112}
-                style={{ flex: "none" }}
+                className="bt-timeout"
                 value={timeout}
                 options={TIMEOUTS.map((t) => ({ value: t.v, label: t.label }))}
                 onChange={setTimeoutSecs}
@@ -282,6 +283,13 @@ function HostPicker(props: {
   };
   const visibleIds = groups.flatMap(([, hs]) => hs.map((h) => h.id));
   const count = hosts.filter((h) => selected.has(h.id)).length;
+  const menu = useContextMenu();
+  const priv = usePrivacy();
+  const openTerm = (id: string) => openTerminal(id).catch((e) => toast(errMsg(e), "error"));
+  const containerItems = () => [
+    { label: "全选", icon: <CheckSquare />, disabled: !visibleIds.length, onSelect: () => setMany(visibleIds, true) },
+    { label: "清空", icon: <X />, disabled: !count, onSelect: () => setSelected(new Set()) },
+  ];
 
   const dot = (id: string) => {
     const st = props.conn[id]?.state;
@@ -291,28 +299,38 @@ function HostPicker(props: {
   return (
     <div className="bt-hosts">
       <div className="bt-hosts-top">
-        <div className="bt-search">
-          <Search />
-          <input className="input sm" placeholder="搜索服务器" value={props.search} onChange={(e) => props.setSearch(e.target.value)} />
-        </div>
+        <SearchBox size="sm" placeholder="搜索服务器" value={props.search} onChange={props.setSearch} />
         <div className="row">
           <span className="faint bt-count grow">已选 {count} 台</span>
           <button className="btn ghost sm" onClick={() => setMany(visibleIds, true)} disabled={!visibleIds.length}>全选</button>
           <button className="btn ghost sm" onClick={() => setSelected(new Set())} disabled={!count}>清空</button>
         </div>
       </div>
-      <div className="bt-hosts-list">
+      <div className="bt-hosts-list" onContextMenu={(e) => menu.open(e, containerItems())}>
         {hosts.length === 0 ? (
-          <div className="empty">还没有服务器</div>
+          <Empty sm text="还没有服务器" />
         ) : groups.length === 0 ? (
-          <div className="empty">无匹配</div>
+          <Empty sm text="无匹配" />
         ) : (
           groups.map(([g, hs]) => {
             const n = hs.filter((h) => selected.has(h.id)).length;
             const ids = hs.map((h) => h.id);
             return (
               <div key={g}>
-                <div className="list-row bt-group" onClick={() => setMany(ids, n < hs.length)}>
+                <div
+                  className="list-row bt-group"
+                  onClick={() => setMany(ids, n < hs.length)}
+                  onContextMenu={(e) =>
+                    menu.open(e, [
+                      n < hs.length
+                        ? { label: "选中本组", icon: <CheckSquare />, onSelect: () => setMany(ids, true) }
+                        : { label: "取消本组", icon: <X />, onSelect: () => setMany(ids, false) },
+                      { label: "只选本组", icon: <CheckSquare />, onSelect: () => setSelected(new Set(ids)) },
+                      "sep",
+                      ...containerItems(),
+                    ])
+                  }
+                >
                   <Check checked={n === hs.length} indeterminate={n > 0 && n < hs.length} onChange={(v) => setMany(ids, v)} />
                   <span className="grow ellipsis">{g}</span>
                   <span className="meta">
@@ -320,11 +338,22 @@ function HostPicker(props: {
                   </span>
                 </div>
                 {hs.map((h) => (
-                  <div key={h.id} className={"list-row bt-host" + (selected.has(h.id) ? " selected" : "")} onClick={() => setMany([h.id], !selected.has(h.id))} title={`${h.username}@${h.host}:${h.port}`}>
+                  <div key={h.id} className={"list-row bt-host" + (selected.has(h.id) ? " selected" : "")} onClick={() => setMany([h.id], !selected.has(h.id))}
+                    onContextMenu={(e) =>
+                      menu.open(e, [
+                        selected.has(h.id)
+                          ? { label: "取消选中", icon: <X />, onSelect: () => setMany([h.id], false) }
+                          : { label: "选中", icon: <CheckSquare />, onSelect: () => setMany([h.id], true) },
+                        { label: "只选此台", icon: <CheckSquare />, onSelect: () => setSelected(new Set([h.id])) },
+                        "sep",
+                        { label: "打开终端", icon: <SquareTerminal />, onSelect: () => void openTerm(h.id) },
+                      ])
+                    }
+                    title={`${h.username}@${priv.addr(h.host)}:${h.port}`}>
                     <Check checked={selected.has(h.id)} onChange={(v) => setMany([h.id], v)} />
                     <span className={"dot " + dot(h.id)} />
-                    <span className="grow ellipsis">{h.name}</span>
-                    <span className="meta ellipsis bt-addr">{h.host}</span>
+                    <span className="grow ellipsis">{priv.text(h.name, h.host)}</span>
+                    <span className="meta ellipsis bt-addr">{priv.addr(h.host)}</span>
                   </div>
                 ))}
               </div>
@@ -332,6 +361,7 @@ function HostPicker(props: {
           })
         )}
       </div>
+      {menu.node}
     </div>
   );
 }
@@ -378,12 +408,12 @@ function SnippetMenu(props: { onPick: (s: Snippet) => void }) {
       </button>
       {open && (
         <div className="bt-pop">
-          <input className="input sm" placeholder="搜索命令" autoFocus value={q} onChange={(e) => setQ(e.target.value)} />
+          <SearchBox size="sm" placeholder="搜索命令" autoFocus value={q} onChange={setQ} />
           <div className="bt-pop-list">
             {list === null ? (
-              <div className="faint bt-pop-empty">加载中…</div>
+              <Empty sm text="加载中…" />
             ) : shown.length === 0 ? (
-              <div className="faint bt-pop-empty">{list.length ? "无匹配" : "还没有命令"}</div>
+              <Empty sm text={list.length ? "无匹配" : "还没有命令"} />
             ) : (
               shown.map((s) => (
                 <div
@@ -438,7 +468,7 @@ function HistoryMenu(props: { runs: Run[]; currentId: string | null; onOpen: (r:
                   <div className="row">
                     <span className="mono ellipsis grow">{r.command.replace(/\s*\n\s*/g, " ⏎ ")}</span>
                     <button
-                      className="icon-btn"
+                      className="icon-btn sm"
                       title="重新执行"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -479,7 +509,11 @@ function Results(props: {
   onRetry: (hostIds: string[]) => void;
 }) {
   const { run, hosts, filter, collapsed } = props;
-  const name = (id: string) => hosts.find((h) => h.id === id)?.name ?? "（已删除）";
+  const priv = usePrivacy();
+  const name = (id: string) => {
+    const h = hosts.find((x) => x.id === id);
+    return h ? priv.text(h.name, h.host) : "（已删除）";
+  };
   const items = run.hostIds.map((h) => run.results[h]).filter(Boolean);
   const c = runCounts(run);
   const elapsed = (run.ended ?? Date.now()) - run.started;
@@ -493,12 +527,7 @@ function Results(props: {
         return [head, r.stdout.trimEnd(), r.stderr.trimEnd(), r.error ?? ""].filter(Boolean).join("\n");
       })
       .join("\n\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      toast("已复制全部输出", "success");
-    } catch (e) {
-      toast(errMsg(e), "error");
-    }
+    await copyText(text, "全部输出");
   };
 
   const toggle = (id: string) => {
@@ -507,6 +536,18 @@ function Results(props: {
     props.setCollapsed(s);
   };
   const allCollapsed = shown.length > 0 && shown.every((r) => collapsed.has(r.hostId));
+  const menu = useContextMenu();
+  const containerItems = () => [
+    {
+      label: allCollapsed ? "全部展开" : "全部折叠",
+      icon: <ChevronsDownUp />,
+      disabled: !shown.length,
+      onSelect: () => props.setCollapsed(allCollapsed ? new Set() : new Set(shown.map((r) => r.hostId))),
+    },
+    { label: "复制全部输出", icon: <Copy />, disabled: !items.length, onSelect: () => void copyAll() },
+    { label: "重试失败", icon: <RotateCcw />, disabled: !failedIds.length || c.running > 0, onSelect: () => props.onRetry(failedIds) },
+  ];
+  const copyOne = (r: BatchHostResult) => copyText([r.stdout.trimEnd(), r.stderr.trimEnd(), r.error ?? ""].filter(Boolean).join("\n"), "输出");
 
   return (
     <div className="bt-results">
@@ -542,15 +583,29 @@ function Results(props: {
         </button>
       </div>
 
-      <div className="bt-cards">
-        {shown.length === 0 && <div className="empty">无{filter === "ok" ? "成功" : "失败"}结果</div>}
+      <div className="bt-cards" onContextMenu={(e) => !window.getSelection()?.toString().trim() && menu.open(e, containerItems())}>
+        {shown.length === 0 && <Empty text={`无${filter === "ok" ? "成功" : "失败"}结果`} />}
         {shown.map((r) => {
           const o = outcome(r);
           const open = !collapsed.has(r.hostId);
           const hasBody = r.stdout || r.stderr || r.error;
           return (
             <div key={r.hostId} className="bt-card">
-              <div className="bt-card-head" onClick={() => toggle(r.hostId)}>
+              <div
+                className="bt-card-head"
+                onClick={() => toggle(r.hostId)}
+                onContextMenu={(e) => {
+                  const exists = hosts.some((h) => h.id === r.hostId);
+                  menu.open(e, [
+                    { label: open ? "折叠" : "展开", icon: open ? <ChevronDown /> : <ChevronRight />, onSelect: () => toggle(r.hostId) },
+                    "sep",
+                    { label: "复制输出", icon: <Copy />, disabled: !hasBody, onSelect: () => void copyOne(r) },
+                    "sep",
+                    { label: "重试此台", icon: <RotateCcw />, disabled: !exists || o === "running", onSelect: () => props.onRetry([r.hostId]) },
+                    { label: "打开终端", icon: <SquareTerminal />, disabled: !exists, onSelect: () => void openTerminal(r.hostId).catch((er) => toast(errMsg(er), "error")) },
+                  ]);
+                }}
+              >
                 {open ? <ChevronDown /> : <ChevronRight />}
                 <span className={"dot " + (o === "ok" ? "ok" : o === "fail" ? "err" : "warn")} />
                 <span className="ellipsis grow bt-card-name">{name(r.hostId)}</span>
@@ -565,7 +620,7 @@ function Results(props: {
               </div>
               {open && (
                 <div className="bt-card-body">
-                  {r.error && <div className="bt-err selectable">{r.error}</div>}
+                  {r.error && <div className="bt-err selectable">{priv.hostText(r.error, r.hostId)}</div>}
                   {r.stdout && <pre className="mono bt-out selectable">{r.stdout}</pre>}
                   {r.stderr && <pre className="mono bt-out bt-stderr selectable">{r.stderr}</pre>}
                   {!hasBody && <div className="faint bt-noout">{o === "running" ? "执行中…" : "无输出"}</div>}
@@ -575,6 +630,7 @@ function Results(props: {
           );
         })}
       </div>
+      {menu.node}
     </div>
   );
 }

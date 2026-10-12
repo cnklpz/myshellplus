@@ -7,12 +7,12 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { openTerminal } from "../features/terminal/open";
-import { api, type HistoryHit, type Snippet, type TunnelDef, type TunnelStatus } from "../lib/api";
+import { api, errMsg, type HistoryHit, type Snippet, type TunnelDef, type TunnelStatus } from "../lib/api";
 import { termBus } from "../lib/termBus";
 import { applyTheme, currentTheme, THEMES } from "../lib/themes";
 import { useApp } from "../store";
 import { toast, useEscClose } from "./ui";
-import { maskAddr, maskText } from "../lib/privacy";
+import { usePrivacy } from "../lib/privacy";
 
 interface Item {
   key: string;
@@ -98,6 +98,7 @@ export function GlobalSearch() {
 function SearchPalette(props: { initial: string; onClose: () => void }) {
   const hosts = useApp((s) => s.hosts);
   const tabs = useApp((s) => s.tabs);
+  const priv = usePrivacy();
   const [query, setQuery] = useState(props.initial);
   const [hi, setHi] = useState(0);
   const [snippets, setSnippets] = useState<Snippet[]>([]);
@@ -130,14 +131,14 @@ function SearchPalette(props: { initial: string; onClose: () => void }) {
 
     for (const h of hosts)
       push({
-        key: "h:" + h.id, group: "服务器", icon: <Server />, title: s.privacy ? maskText(h.name, h.host) : h.name,
-        sub: `${h.username}@${s.privacy ? maskAddr(h.host) : h.host}${h.port !== 22 ? ":" + h.port : ""}`,
+        key: "h:" + h.id, group: "服务器", icon: <Server />, title: priv.text(h.name, h.host),
+        sub: `${h.username}@${priv.addr(h.host)}${h.port !== 22 ? ":" + h.port : ""}`,
         keywords: [h.groupName, h.tags.join(" "), h.notes].join(" "),
         run: () => openTerminal(h.id), alt: () => s.openEditor(h.id), altLabel: "编辑",
       });
     for (const t of tabs)
       push({
-        key: "t:" + t.id, group: "终端", icon: <SquareTerminal />, title: t.title, sub: t.alive ? "已打开" : "已断开",
+        key: "t:" + t.id, group: "终端", icon: <SquareTerminal />, title: priv.hostText(t.title, t.hostId), sub: t.alive ? "已打开" : "已断开",
         run: () => {
           s.setView("terminal");
           s.setActiveTab(t.id);
@@ -157,12 +158,12 @@ function SearchPalette(props: { initial: string; onClose: () => void }) {
     for (const { def, st } of tunnels)
       push({
         key: "tu:" + def.id, group: "隧道", icon: <Network />, title: def.name,
-        sub: `${st?.running ? "运行中" : "已停止"} · ${def.bindPort}${def.kind === "dynamic" ? " SOCKS5" : " → " + def.targetHost + ":" + def.targetPort}`,
+        sub: `${st?.running ? "运行中" : "已停止"} · ${def.bindPort}${def.kind === "dynamic" ? " SOCKS5" : " → " + priv.addr(def.targetHost) + ":" + def.targetPort}`,
         keywords: "隧道 tunnel 转发",
         run: () =>
           (st?.running ? api.tunnelStop(def.id) : api.tunnelStart(def.id)).then(
             () => toast(st?.running ? `已停止 ${def.name}` : `已启动 ${def.name}`, "success"),
-            (e) => toast(String(e), "error"),
+            (e) => toast(errMsg(e), "error"),
           ),
         alt: () => s.setModal("tunnels"), altLabel: "管理",
       });
@@ -219,7 +220,7 @@ function SearchPalette(props: { initial: string; onClose: () => void }) {
       out.push(...inG.slice(0, limit[g]));
     }
     return out;
-  }, [hosts, tabs, snippets, history, tunnels, q]);
+  }, [hosts, tabs, snippets, history, tunnels, q, priv.on]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setHi(0), [q]);
   useEffect(() => {
@@ -262,7 +263,7 @@ function SearchPalette(props: { initial: string; onClose: () => void }) {
           <input
             autoFocus
             className="pal-input"
-            placeholder="搜索服务器、命令、历史、隧道、设置…"
+            placeholder="搜索"
             value={query}
             spellCheck={false}
             onChange={(e) => setQuery(e.target.value)}

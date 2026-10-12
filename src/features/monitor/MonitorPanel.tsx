@@ -1,19 +1,22 @@
 // Server status dashboard for one host (side panel).
-import { listen } from "@tauri-apps/api/event";
 import { AlertTriangle, ArrowDown, ArrowUp, ChartLine, ChevronDown, ChevronRight, Copy, LoaderCircle, Pencil, Plus, RefreshCw, Replace, RotateCcw, Trash2, X } from "lucide-react";
 import { Fragment, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Bar, Empty, toast, TweenNum } from "../../components/ui";
 import { api, errMsg, type Proc, type Sample, type SysInfo } from "../../lib/api";
 import { fmtBytes, fmtPct, fmtRate, fmtUptime } from "../../lib/format";
+import { onTauriEvent } from "../../lib/events";
+import { pctColor } from "../../lib/level";
 import { usePrivacy } from "../../lib/privacy";
 import { useApp } from "../../store";
+import { usePanelItems } from "../side/panelMenu";
 import { ContextMenu, type MenuItem, useContextMenu } from "../terminal/ContextMenu";
-import { copyText, useProcActions } from "./procMenu";
+import { useProcActions } from "./procMenu";
+import { copyText } from "../../lib/clipboard";
 import { Select } from "../../components/Select";
 import { probeHosts, useProbe } from "../home/probe";
 import { hideDiscard, hideSlot, showDiscard, showSlot } from "../../lib/dragSlot";
 import { CardDialog } from "./CardDialog";
-import { type CardCtx, CommandCard, DiskCard, Gauge, GpuCard, Go, isTile, linkProps, MetricCard, NicCard, NoteCard, ServiceCard } from "./CardViews";
+import { AppsCard, type CardCtx, CommandCard, DiskCard, DockerCard, Gauge, GpuCard, Go, isTile, linkProps, MetricCard, NicCard, NoteCard, ServiceCard } from "./CardViews";
 import { type CardInst, cardTitle, DEFAULT_INFO_FIELDS, INFO_FIELDS, type InfoField, getCards, isDefaultLayout, moveCard, newUid, placeAfter, removeCard, resetCards, setCards, upsertCard, useCards } from "./cards";
 import { type DetailKind, MonitorDetail } from "./MonitorDetail";
 import { Sparkline } from "./Sparkline";
@@ -36,7 +39,6 @@ function useMonitor(hostId: string, gen: number) {
 
   useEffect(() => {
     let alive = true;
-    let unlisten: (() => void) | null = null;
     setLoading(true);
     setError(null);
 
@@ -48,7 +50,7 @@ function useMonitor(hostId: string, gen: number) {
         return next;
       });
 
-    listen<MonitorEvent>("monitor", (e) => {
+    const unlisten = onTauriEvent<MonitorEvent>("monitor", (e) => {
       const p = e.payload;
       if (!alive || p.hostId !== hostId) return;
       if (p.error) {
@@ -59,9 +61,6 @@ function useMonitor(hostId: string, gen: number) {
         if (p.sample) append(p.sample);
       }
       setLoading(false);
-    }).then((f) => {
-      if (alive) unlisten = f;
-      else f();
     });
 
     api
@@ -85,7 +84,7 @@ function useMonitor(hostId: string, gen: number) {
 
     return () => {
       alive = false;
-      unlisten?.();
+      unlisten();
       api.monitorUnsubscribe(hostId).catch(() => {});
     };
   }, [hostId, gen]);
@@ -94,12 +93,42 @@ function useMonitor(hostId: string, gen: number) {
 }
 
 
+/** Backend monitor error for a host without an SSH connection (monitors never connect on their own). */
+const NOT_CONNECTED = "未连接";
+
 export function MonitorPanel({ hostId }: { hostId: string }) {
   const [gen, setGen] = useState(0);
-  const { history, info, error } = useMonitor(hostId, gen);
+  const priv = usePrivacy();
+  const { history, info, error: rawError } = useMonitor(hostId, gen);
+  const error = rawError && priv.hostText(rawError, hostId);
   const cur = history[history.length - 1];
   const retry = () => setGen((g) => g + 1);
   const [detail, setDetail] = useState<DetailKind | null>(null);
+
+  // The backend stops a host's monitor on disconnect: subscribe again once it is connected again.
+  const connected = useApp((s) => s.conn[hostId]?.state === "connected");
+  const wasConnected = useRef(connected);
+  useEffect(() => {
+    if (connected && !wasConnected.current) setGen((g) => g + 1);
+    wasConnected.current = connected;
+  }, [connected]);
+
+  const offline = error === NOT_CONNECTED;
+  const connect = () => void api.connConnect(hostId).catch((e) => toast(errMsg(e), "error"));
+  const errorAction = offline ? (
+    <button className="btn sm" onClick={connect}>连接</button>
+  ) : (
+    <button className="btn sm" onClick={retry}>
+      <RefreshCw /> 重试
+    </button>
+  );
+
+  if (!cur && offline)
+    return (
+      <div className="panel-body">
+        <Empty text="未连接" action={errorAction} />
+      </div>
+    );
 
   if (!cur && error)
     return (
@@ -107,11 +136,7 @@ export function MonitorPanel({ hostId }: { hostId: string }) {
         <Empty
           icon={<AlertTriangle />}
           text={<span className="selectable">{error}</span>}
-          action={
-            <button className="btn sm" onClick={retry}>
-              <RefreshCw /> 重试
-            </button>
-          }
+          action={errorAction}
         />
       </div>
     );
@@ -127,7 +152,7 @@ export function MonitorPanel({ hostId }: { hostId: string }) {
           <div className="mon-alert">
             <AlertTriangle />
             <span className="grow ellipsis selectable" title={error}>{error}</span>
-            <button className="btn ghost sm" onClick={retry}>重试</button>
+            <button className="btn ghost sm" onClick={offline ? connect : retry}>{offline ? "连接" : "重试"}</button>
           </div>
         )}
         <Cards hostId={hostId} ctx={ctx} render={(c) => (cur ? renderCard(c, ctx) : renderPending(c, ctx))} />
@@ -165,6 +190,10 @@ function renderCard(c: CardInst, ctx: CardCtx): ReactNode {
       return <ProcSection card={c} hostId={hostId} procs={cur.procs} onOpen={() => open("proc")} />;
     case "gpu":
       return <GpuCard card={c} ctx={ctx} />;
+    case "apps":
+      return <AppsCard card={c} ctx={ctx} />;
+    case "docker":
+      return <DockerCard card={c} ctx={ctx} />;
     case "command":
       return <CommandCard card={c} ctx={ctx} />;
     case "service":
@@ -192,6 +221,8 @@ function renderPending(c: CardInst, ctx: CardCtx): ReactNode {
     case "command":
     case "service":
     case "gpu":
+    case "apps":
+    case "docker":
       // These poll on their own and don't need a sample.
       return renderCard(c, ctx);
   }
@@ -249,10 +280,7 @@ function HostInfo({ card, hostId, info, sample }: { card: CardInst; hostId: stri
   const tier = latency === null ? "err" : latency === undefined ? "" : latency >= 200 ? "err" : latency >= 60 ? "warn" : "ok";
   const copyIp = () => {
     if (!info.ip) return;
-    navigator.clipboard.writeText(info.ip).then(
-      () => toast("已复制 IP", "success"),
-      () => toast("复制失败", "error"),
-    );
+    void copyText(info.ip, " IP");
   };
   const shown = new Set(card.cfg.fields ?? DEFAULT_INFO_FIELDS);
   const root = sample?.disks.find((d) => d.mount === "/") ?? sample?.disks[0];
@@ -421,7 +449,7 @@ function LoadCard({ card, cur, cores, onOpen }: { card: CardInst; cur: Sample; c
             <div key={l}>
               <span className="lbl">{l}</span>
               <span className="val" style={{ color: pctColor(pct) }}>{cur.load[i].toFixed(2)}</span>
-              <Bar value={pct} />
+              <Bar value={pct} thin />
             </div>
           );
         })}
@@ -635,6 +663,8 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
 
   const onPointerDown = (e: ReactPointerEvent) => {
     const t = e.target as Element;
+    // Portaled dialogs / menus of a card still bubble here through React: only drag from the cards' own DOM.
+    if (e.defaultPrevented || !ref.current?.contains(t)) return;
     if (e.button !== 0 || t.closest("button, input, select, textarea, a")) return;
     const card = cardAt(t);
     if (!card) return;
@@ -715,6 +745,7 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
     });
   };
 
+  const panelExtra = usePanelItems();
   const visible = all.filter((c) => !c.host || c.host === hostId);
   const cards = visible.map((c) => [c, render(c)] as const).filter(([, node]) => node);
   const menuCard = menu?.uid ? all.find((c) => c.uid === menu.uid) : undefined;
@@ -739,6 +770,7 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
     menuCard && "sep",
     { label: "添加卡片…", icon: <Plus />, onSelect: () => setDialog({ before: menuCard ? nextOf(menuCard.uid) : undefined }) },
     { label: "恢复默认", icon: <RotateCcw />, disabled: isDefaultLayout(all), onSelect: reset },
+    ...panelExtra(),
   ];
 
   return (
@@ -758,6 +790,7 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
           }
         }}
         onContextMenu={(e) => {
+          if (e.defaultPrevented || !ref.current?.contains(e.target as Node)) return;
           e.preventDefault();
           finish(false);
           setMenu({ x: e.clientX, y: e.clientY, uid: cardAt(e.target as Element)?.dataset.card ?? null });
@@ -776,7 +809,7 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
             {node}
           </div>
         ))}
-        {cards.length === 0 && <div className="mon-cards-empty">暂无卡片</div>}
+        {cards.length === 0 && <Empty sm className="mon-cards-empty" text="暂无卡片" />}
       </div>
       <div className="mon-reset">
         <button className="btn sm" onClick={() => setDialog({})}>
@@ -803,10 +836,6 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
       )}
     </>
   );
-}
-
-function pctColor(p: number) {
-  return p >= 90 ? "var(--err)" : p >= 75 ? "var(--warn)" : undefined;
 }
 
 const fmt0 = (v: number) => v.toFixed(0);
@@ -974,7 +1003,7 @@ function DisksSection({ title, cur, onOpen }: { title: string; cur: Sample; onOp
                 </span>
                 <TweenNum className="pct" style={{ color: pctColor(pct) }} value={pct} fmt={fmtPct0} />
               </div>
-              <Bar value={d.used} max={d.total || 1} />
+              <Bar value={d.used} max={d.total || 1} thin />
             </div>
           );
         })}
@@ -1017,12 +1046,12 @@ function ProcSection({ card, hostId, procs, onOpen }: { card: CardInst; hostId: 
       </div>
       <table className="table mon-procs">
         <colgroup>
-          <col style={{ width: 60 }} />
-          <col style={{ width: 64 }} />
-          <col style={{ width: 48 }} />
-          <col style={{ width: 64 }} />
+          <col className="mon-w-60" />
+          <col className="mon-w-64" />
+          <col className="mon-w-48" />
+          <col className="mon-w-64" />
           <col />
-          <col style={{ width: 28 }} />
+          <col className="mon-w-28" />
         </colgroup>
         <thead>
           <tr>
@@ -1043,7 +1072,7 @@ function ProcSection({ card, hostId, procs, onOpen }: { card: CardInst; hostId: 
               <td className="num" title={fmtPct(p.mem, 1)}>{fmtBytes(p.rss, 0)}</td>
               <td className="cmd mono" title={p.command}>{p.command}</td>
               <td className="act">
-                <button className="icon-btn" title="结束进程" onClick={() => acts.confirmKill(p)}>
+                <button className="icon-btn sm danger hover-reveal" title="结束进程" onClick={() => acts.confirmKill(p)}>
                   <X />
                 </button>
               </td>

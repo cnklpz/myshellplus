@@ -16,6 +16,12 @@ export interface Host {
   passwordSecret?: string | null;
   keyId?: string | null;
   jumpHostId?: string | null;
+  /** SOCKS5 proxy; off keeps the saved settings */
+  proxyEnabled: boolean;
+  proxyHost: string;
+  proxyPort: number;
+  proxyUser: string;
+  proxySecret?: string | null;
   tags: string[];
   color: string;
   notes: string;
@@ -35,15 +41,28 @@ export interface OpAccount { id: string; email: string; url: string }
 export interface OpStatus { detected: boolean; agent: boolean; cli: boolean; accounts: OpAccount[] }
 /** category: SSH_KEY | SERVER | LOGIN | AGENT (agent-only fallback; id = fingerprint) */
 export interface OpItem { id: string; title: string; category: string; vault: string; subtitle: string }
+export interface OpVault { id: string; name: string }
+export interface OpNewKey { id: string; publicKey: string; fingerprint: string }
+export interface ChatMsg { role: "user" | "assistant"; content: string }
 export interface OpHost { title: string; host: string; port?: number | null; username: string; password?: string | null; keyFingerprint?: string | null }
 
 export interface KeyEntry { id: string; name: string; publicKey: string; updatedAt: number }
-export interface Snippet { id: string; name: string; command: string; tags: string[]; updatedAt: number }
+/** hostId null = every host; groupName "" = ungrouped */
+export interface Snippet { id: string; name: string; command: string; tags: string[]; hostId?: string | null; groupName?: string; updatedAt: number }
 export interface TunnelDef {
   id: string; name: string; hostId: string; kind: "local" | "remote" | "dynamic";
   bindAddr: string; bindPort: number; targetHost: string; targetPort: number; autoStart: boolean; updatedAt: number;
 }
-export interface TunnelStatus { id: string; running: boolean; up: number; down: number; active: number; error?: string | null }
+export interface TunnelStatus {
+  id: string;
+  running: boolean;
+  up: number;
+  down: number;
+  active: number;
+  error?: string | null;
+  /** -R with bind port 0: the port the server actually allocated (null until known). */
+  remotePort?: number | null;
+}
 export interface VaultStatus { initialized: boolean; unlocked: boolean; remembered: boolean; passwordEnabled: boolean }
 export interface TermInfo { id: string; hostId: string; created: number; alive: boolean }
 export interface ExecResult { stdout: string; stderr: string; exitCode: number | null; durationMs: number; truncated: boolean; timedOut: boolean }
@@ -80,12 +99,16 @@ export interface McpSettings { enabled: boolean; port: number; token: string }
 export interface PromptEvent<T = any> { id: string; kind: "hostkey" | "agent"; data: T; created: number; expires: number }
 export interface HostKeyPrompt { host: string; port: number; algo: string; fingerprint: string; changed: boolean; oldFingerprint?: string | null }
 export interface AgentPrompt { hostId: string; hostName: string; host: string; action: string; detail: string; reason: string; dangerous: boolean }
+export interface KnownHost { host: string; port: number; algo: string; fingerprint: string }
 export interface AuditEntry { id: number; ts: number; source: string; hostId?: string | null; action: string; detail: string; result: string }
 export interface Latency { hostId: string; ms: number | null; since?: number }
 export interface Probe { hostId: string; ms: number | null; via: "ssh" | "tcp"; error?: string | null }
 export interface ConnStep { hostId: string; label: string; detail?: string | null }
 export interface ConnFailure { error: string; at: number }
 export interface ConnState { hostId: string; state: "connecting" | "connected" | "error" | "disconnected"; error?: string | null }
+
+/** One app log entry; ts is local time "2026-10-12 14:03:01.123". target: crash | perf | ui | app | conn:<hostId> | ... */
+export interface LogEntry { ts: string; level: "ERROR" | "WARN" | "INFO" | "DEBUG"; target: string; msg: string }
 
 export type ImportSource = "openssh" | "putty" | "xshell" | "mobaxterm" | "finalshell" | "termius" | "ishell" | "csv" | "backup";
 export interface ImportCandidate {
@@ -111,7 +134,8 @@ export const api = {
   // hosts & keys
   hostList: () => invoke<Host[]>("host_list"),
   /** password: string sets, "" clears, undefined keeps */
-  hostSave: (host: Partial<Host>, password?: string) => invoke<Host>("host_save", { host, password }),
+  hostSave: (host: Partial<Host>, password?: string, proxyPassword?: string) =>
+    invoke<Host>("host_save", { host, password, proxyPassword }),
   hostDelete: (id: string) => invoke<void>("host_delete", { id }),
   keyList: () => invoke<KeyEntry[]>("key_list"),
   keyImport: (name: string, privateKey: string, passphrase?: string) => invoke<KeyEntry>("key_import", { name, privateKey, passphrase }),
@@ -121,6 +145,12 @@ export const api = {
   opStatus: () => invoke<OpStatus>("op_status"),
   opItems: (account?: string) => invoke<OpItem[]>("op_items", { account }),
   opItem: (reference: string, account?: string) => invoke<OpHost>("op_item", { reference, account }),
+  opVaults: (account?: string) => invoke<OpVault[]>("op_vaults", { account }),
+  /** The key pair is generated inside 1Password; only the public key comes back. */
+  opCreateSshKey: (title: string, url: string, username: string, vault?: string, account?: string) =>
+    invoke<OpNewKey>("op_create_ssh_key", { title, url, username, vault, account }),
+  opCreateLogin: (title: string, url: string, username: string, password: string, vault?: string, account?: string) =>
+    invoke<string>("op_create_login", { title, url, username, password, vault, account }),
 
   // connections & terminals
   connConnect: (hostId: string) => invoke<void>("conn_connect", { hostId }),
@@ -150,8 +180,9 @@ export const api = {
   /** hostId "" = all hosts; newest first */
   historyList: (hostId: string, query = "", limit?: number) => invoke<HistoryHit[]>("history_list", { hostId, query, limit }),
   historyDelete: (hostId: string, command: string) => invoke<void>("history_delete", { hostId, command }),
-  execRun: (hostId: string, command: string, timeoutSecs?: number, quiet?: boolean) =>
-    invoke<ExecResult>("exec_run", { hostId, command, timeoutSecs, quiet }),
+  /** `stdin` is written to the command (keeps secrets out of the command line and the audit log). */
+  execRun: (hostId: string, command: string, timeoutSecs?: number, quiet?: boolean, stdin?: string) =>
+    invoke<ExecResult>("exec_run", { hostId, command, timeoutSecs, quiet, stdin }),
 
   // monitor
   monitorSubscribe: (hostId: string) => invoke<MonitorSnapshot>("monitor_subscribe", { hostId }),
@@ -190,6 +221,7 @@ export const api = {
   predictAi: (hostId: string, input: string, screen: string) => invoke<Suggestion[]>("predict_ai", { hostId, input, screen }),
   aiNl2Cmd: (hostId: string, prompt: string) => invoke<NlCommand>("ai_nl2cmd", { hostId, prompt }),
   aiExplain: (hostId: string, text: string) => invoke<string>("ai_explain", { hostId, text }),
+  aiChat: (hostId: string, messages: ChatMsg[], screen?: string) => invoke<string>("ai_chat", { hostId, messages, screen }),
   aiSettingsGet: () => invoke<AiSettings>("ai_settings_get"),
   /** keys: providerId -> new API key ("" clears) */
   aiSettingsSave: (settings: AiSettings, keys: Record<string, string>) =>
@@ -198,12 +230,14 @@ export const api = {
     }),
 
   // MCP / agent
-  mcpSettingsGet: () => invoke<{ settings: McpSettings; runningPort: number | null }>("mcp_settings_get"),
+  mcpSettingsGet: () => invoke<{ settings: McpSettings; runningPort: number | null; error?: string | null }>("mcp_settings_get"),
   mcpSettingsSave: (settings: McpSettings) => invoke<void>("mcp_settings_save", { settings }),
   mcpNewToken: () => invoke<string>("mcp_new_token"),
   promptList: () => invoke<PromptEvent[]>("prompt_list"),
   promptAnswer: (id: string, value: unknown) => invoke<void>("prompt_answer", { id, value }),
   auditList: (limit?: number) => invoke<AuditEntry[]>("audit_list", { limit }),
+  knownHostList: () => invoke<KnownHost[]>("known_host_list"),
+  knownHostDelete: (host: string, port: number) => invoke<void>("known_host_delete", { host, port }),
 
   // import / export
   importDefaultPath: (source: ImportSource) => invoke<string | null>("import_default_path", { source }),
@@ -222,6 +256,18 @@ export const api = {
   switcherPresent: (height: number) => invoke<void>("switcher_present", { height }),
   switcherHide: () => invoke<void>("switcher_hide"),
   switcherPick: (target: SwitcherTarget) => invoke<void>("switcher_pick", { target }),
+
+  // logs
+  logWrite: (level: "error" | "warn" | "info", target: "crash" | "perf" | "ui", msg: string) => invoke<void>("log_write", { level, target, msg }),
+  /** Recent warnings and errors, newest first. */
+  logEvents: (limit?: number) => invoke<LogEntry[]>("log_events", { limit }),
+  logDir: () => invoke<string | null>("log_dir"),
+  /** Whole app log, redacted. */
+  logExport: (path: string) => invoke<void>("log_export", { path }),
+  /** The host's last connect attempt. */
+  connLogExport: (hostId: string, path: string, redact: boolean) => invoke<void>("conn_log_export", { hostId, path, redact }),
+  /** AI reading of the host's last connect attempt (Markdown); the log is redacted before sending. */
+  connDiagnose: (hostId: string) => invoke<string>("conn_diagnose", { hostId }),
 
   // UI support
   uiHeartbeat: () => invoke<void>("ui_heartbeat"),

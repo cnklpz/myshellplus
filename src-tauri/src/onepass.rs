@@ -157,12 +157,28 @@ fn op_path() -> Option<PathBuf> {
 
 /// Runs `op <args> --format json`. Generous timeout: the first call waits for the user to unlock 1Password.
 async fn op_json(args: &[&str]) -> Result<Value> {
+    op_json_input(args, None).await
+}
+
+/// `op_json` with `stdin` piped in (item templates carrying secrets stay off the command line).
+async fn op_json_input(args: &[&str], stdin: Option<&str>) -> Result<Value> {
+    use tokio::io::AsyncWriteExt;
     let exe = op_path().ok_or_else(|| anyhow!("未安装 1Password CLI"))?;
     let mut cmd = tokio::process::Command::new(exe);
-    cmd.args(args).args(["--format", "json"]).kill_on_drop(true);
+    cmd.args(args)
+        .args(["--format", "json"])
+        .stdin(if stdin.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    let out = tokio::time::timeout(Duration::from_secs(90), cmd.output())
+    let mut child = cmd.spawn()?;
+    if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
+        pipe.write_all(data.as_bytes()).await?;
+        drop(pipe);
+    }
+    let out = tokio::time::timeout(Duration::from_secs(90), child.wait_with_output())
         .await
         .map_err(|_| anyhow!("1Password 未响应"))??;
     if !out.status.success() {
@@ -175,7 +191,7 @@ async fn op_json(args: &[&str]) -> Result<Value> {
     if out.stdout.iter().all(|b| b.is_ascii_whitespace()) {
         return Ok(Value::Array(vec![]));
     }
-    Ok(serde_json::from_slice(&out.stdout).context("1Password 返回格式无法解析")?)
+    serde_json::from_slice(&out.stdout).context("1Password 返回格式无法解析")
 }
 
 pub async fn status() -> OpStatus {
@@ -252,6 +268,82 @@ pub async fn items(account: Option<String>) -> Result<Vec<OpItem>> {
     };
     out.sort_by(|a, b| rank(&a.category).cmp(&rank(&b.category)).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase())));
     Ok(out)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpVault {
+    pub id: String,
+    pub name: String,
+}
+
+pub async fn vaults(account: Option<String>) -> Result<Vec<OpVault>> {
+    let v = op_json(&with_account(vec!["vault", "list"], account.as_deref())).await?;
+    Ok(v.as_array().map(|a| a.as_slice()).unwrap_or_default().iter().map(|x| OpVault { id: s(x, "id"), name: s(x, "name") }).collect())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpNewKey {
+    pub id: String,
+    pub public_key: String,
+    pub fingerprint: String,
+}
+
+fn field_value(v: &Value, names: &[&str]) -> String {
+    v.get("fields")
+        .and_then(|f| f.as_array())
+        .and_then(|a| {
+            a.iter().find(|f| {
+                let (id, label) = (s(f, "id").to_lowercase(), s(f, "label").to_lowercase());
+                names.iter().any(|n| id == *n || label == *n)
+            })
+        })
+        .map(|f| s(f, "value"))
+        .unwrap_or_default()
+}
+
+/// New SSH Key item with a key generated inside 1Password; the private key never leaves it.
+pub async fn create_ssh_key(title: String, url: String, username: String, vault: Option<String>, account: Option<String>) -> Result<OpNewKey> {
+    let user_field = format!("username[text]={username}");
+    let mut args = vec!["item", "create", "--category", "SSH Key", "--title", title.as_str(), "--ssh-generate-key", "ed25519", "--tags", "MyShell+"];
+    if !url.is_empty() {
+        args.extend(["--url", url.as_str()]);
+    }
+    if let Some(v) = vault.as_deref().filter(|v| !v.is_empty()) {
+        args.extend(["--vault", v]);
+    }
+    if !username.is_empty() {
+        args.push(user_field.as_str());
+    }
+    let v = op_json(&with_account(args, account.as_deref())).await?;
+    let public_key = field_value(&v, &["public_key", "public key"]);
+    if public_key.is_empty() {
+        bail!("1Password 未返回公钥");
+    }
+    let fingerprint = PublicKey::from_openssh(&public_key).map(|k| fingerprint(&k)).unwrap_or_else(|_| field_value(&v, &["fingerprint"]));
+    Ok(OpNewKey { id: s(&v, "id"), public_key, fingerprint })
+}
+
+/// New Login item holding a server account's password.
+pub async fn create_login(title: String, url: String, username: String, password: String, vault: Option<String>, account: Option<String>) -> Result<String> {
+    let tpl = serde_json::json!({
+        "title": title,
+        "category": "LOGIN",
+        "tags": ["MyShell+"],
+        "urls": if url.is_empty() { serde_json::json!([]) } else { serde_json::json!([{ "href": url, "primary": true }]) },
+        "fields": [
+            { "id": "username", "type": "STRING", "purpose": "USERNAME", "label": "username", "value": username },
+            { "id": "password", "type": "CONCEALED", "purpose": "PASSWORD", "label": "password", "value": password },
+        ],
+    })
+    .to_string();
+    let mut args = vec!["item", "create"];
+    if let Some(v) = vault.as_deref().filter(|v| !v.is_empty()) {
+        args.extend(["--vault", v]);
+    }
+    let v = op_json_input(&with_account(args, account.as_deref()), Some(&tpl)).await?;
+    Ok(s(&v, "id"))
 }
 
 /// Accepts an item id, an `op://vault/item[/field]` reference or a 1Password private link
@@ -364,11 +456,11 @@ fn split_addr(raw: &str) -> (Option<String>, String, Option<u16>) {
         user = Some(u.split(':').next().unwrap_or(u).to_string()).filter(|u| !u.is_empty());
         a = rest;
     }
-    if let Some(rest) = a.strip_prefix('[') {
-        if let Some((h, tail)) = rest.split_once(']') {
-            let port = tail.strip_prefix(':').and_then(|p| p.parse().ok());
-            return (user, h.to_string(), port);
-        }
+    if let Some(rest) = a.strip_prefix('[')
+        && let Some((h, tail)) = rest.split_once(']')
+    {
+        let port = tail.strip_prefix(':').and_then(|p| p.parse().ok());
+        return (user, h.to_string(), port);
     }
     match a.rsplit_once(':') {
         Some((h, p)) if !h.contains(':') => (user, h.to_string(), p.parse().ok()),

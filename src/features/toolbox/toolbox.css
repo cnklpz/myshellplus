@@ -1,0 +1,86 @@
+/* Content edge at --sp-4, like the other side panels. */
+.tb-root { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.tb-env { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4) var(--sp-2); flex: none; }
+.tb-env-line { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-xs); }
+.tb-env-name { font-weight: 600; }
+.tb-env-meta { font-size: var(--fs-xs); }
+.tb-sudo { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
+
+.tb-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 var(--sp-2) var(--sp-4); }
+.tb-group { display: flex; flex-direction: column; }
+/* .section-title on the tool grid's left edge */
+.tb-group-title { margin-top: var(--sp-2); padding: 0 var(--sp-2); }
+.tb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: var(--sp-2); padding: 0 var(--sp-2); }
+.tb-card {
+  display: flex; flex-direction: column; justify-content: center; gap: var(--sp-1); min-width: 0;
+  height: calc(var(--h-sm) + var(--h-xs)); padding: 0 var(--sp-3);
+  border: none; border-radius: var(--radius-md); background: var(--bg-2); color: var(--fg-0); font: inherit; text-align: left; cursor: pointer;
+  transition: background 0.12s;
+}
+.tb-card:hover { background: var(--bg-3); }
+.tb-card-label { font-size: var(--fs-md); font-weight: 500; }
+.tb-card-meta { font-size: var(--fs-xs); color: var(--fg-2); }
+.dialog-body > .tb-form { padding: 0; gap: var(--sp-3); }
+
+.tb-form { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2) var(--sp-3); min-width: 0; }
+.tb-loading { flex-direction: row; align-items: center; font-size: var(--fs-sm); }
+.tb-loading svg { width: var(--icon-sm); height: var(--icon-sm); }
+/* FieldInput rows (.field): toggles and chip rows keep the input row height */
+.tb-field { min-height: var(--h-sm); }
+.tb-multi { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.tb-chip {
+  height: var(--h-xs); padding: 0 var(--sp-2); border: none; border-radius: var(--radius-sm);
+  background: var(--bg-1); color: var(--fg-2); font-size: var(--fs-xs); font-family: var(--font-mono); cursor: pointer;
+}
+.tb-chip:hover { color: var(--fg-0); }
+.tb-chip.on { background: var(--bg-4); color: var(--fg-0); }
+.tb-cur { font-size: var(--fs-xs); }
+.tb-err { font-size: var(--fs-xs); color: var(--err); }
+.tb-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.tb-hint { font-size: var(--fs-xs); }
+
+.tb-check { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-md); background: var(--bg-2); }
+.tb-check-title { font-size: var(--fs-xs); color: var(--fg-2); font-weight: 500; }
+.tb-check-row { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--h-xs); font-size: var(--fs-sm); }
+.tb-check-row svg { width: var(--icon-sm); height: var(--icon-sm); }
+.tb-check-ack { margin-top: var(--sp-1); cursor: pointer; }
+
+/* Visual output views (views.tsx). Grid cells are blocks (not flex) so ellipsis works; every row is --h-xs tall. */
+.tv-sec { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.tv-sec-extra { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tv-grid, .tv-bars { display: grid; column-gap: var(--sp-3); font-size: var(--fs-sm); min-width: 0; }
+.tv-row, .tv-bar-row { display: contents; }
+.tv-row > *, .tv-bar-row > * {
+  min-width: 0; line-height: var(--h-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; align-self: center;
+}
+.tv-row > .bar, .tv-bar-row > .bar, .tv-row > .dot { line-height: 0; }
+.tv-df { grid-template-columns: minmax(64px, 1.2fr) 48px minmax(80px, 2fr) auto 40px; }
+.tv-kv3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+.tv-login { grid-template-columns: 8px minmax(48px, max-content) minmax(0, 1fr) auto; }
+.tv-bars { grid-template-columns: minmax(48px, min(40%, max-content)) minmax(80px, 1fr) auto; }
+.tv-err { color: var(--err); }
+.tv-num-l { font-variant-numeric: tabular-nums; }
+.tv-lost { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--err) 35%, transparent); line-height: 0; }
+.tv-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+.tv-stat { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-md); background: var(--bg-1); min-width: 0; }
+.tv-stat-label { font-size: var(--fs-xs); color: var(--fg-2); }
+.tv-stat-value { font-size: var(--fs-md); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-stat-value.ok { color: var(--ok); }
+.tv-stat-value.warn { color: var(--warn); }
+.tv-stat-value.err { color: var(--err); }
+.tv-status { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-xs); font-size: var(--fs-sm); }
+.tv-ips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+/* Tables: text edges line up with the sections above (no outer cell padding), no line under the last row. */
+.tv-table th { background: var(--bg-0); height: var(--h-xs); top: calc(-1 * var(--sp-3)); }
+.tv-table th:first-child, .tv-table td:first-child { padding-left: 0; }
+.tv-table th:last-child, .tv-table td:last-child { padding-right: 0; }
+.tv-table tr:hover td { background: transparent; }
+.tv-table td.ellipsis { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Service rows (services.tsx) reuse the Docker list rows; the rows' dot lines up with the group titles. */
+.sv-list { display: flex; flex-direction: column; }
+.sv-kind { display: flex; flex-direction: column; }
+.sv-note { padding: 0 var(--sp-2); font-size: var(--fs-sm); line-height: var(--h-sm); }
+.sv-sub { font-size: var(--fs-xs); color: var(--fg-2); }
+.sv-ok { color: var(--ok); }
+.sv-cli { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2) var(--sp-2); }

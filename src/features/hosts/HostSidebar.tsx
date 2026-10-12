@@ -1,5 +1,5 @@
 // Left sidebar: grouped host list, search, context menu, drag to regroup, hidden groups.
-import { ChevronDown, ChevronRight, Copy, Eye, EyeOff, Link, Pencil, Plug, Plus, SquareTerminal, Trash2, Unplug } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Confirm, Empty, toast } from "../../components/ui";
 import { api, errMsg, type Host } from "../../lib/api";
@@ -8,8 +8,12 @@ import { setGroupOrder, sortByGroupOrder, useGroupOrder } from "../../lib/groupO
 import { nameIsAddr, usePrivacy } from "../../lib/privacy";
 import { useApp } from "../../store";
 import { openTerminal } from "../terminal/open";
+import { DiagnoseDialog } from "../diagnostics/connLog";
+import { useContextMenu } from "../terminal/ContextMenu";
+import { hostMenuItems } from "./hostMenu";
 import "./hosts.css";
 import { GlobalSearch } from "../../components/GlobalSearch";
+import { lsGetJson, lsSetJson } from "../../lib/storage";
 
 const UNGROUPED = "未分组";
 const COLLAPSE_KEY = "hostGroupsCollapsed";
@@ -17,20 +21,6 @@ const HIDDEN_KEY = "hostGroupsHidden";
 /** Collapse key of the "已隐藏" section (cannot clash with a group name). */
 const HIDDEN_SECTION = "\u0000hidden";
 
-function load<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-function save(key: string, v: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(v));
-  } catch {
-    /* ignore */
-  }
-}
 
 function matches(h: Host, q: string) {
   if (!q) return true;
@@ -43,11 +33,6 @@ function connDot(state?: string) {
   if (state === "connecting") return "dot warn";
   if (state === "error") return "dot err";
   return "dot";
-}
-
-async function saveHost(h: Host, password?: string) {
-  await api.hostSave(h, password);
-  await useApp.getState().refreshHosts();
 }
 
 /** Save several hosts: the list updates at once, then each is saved (all rolled back on failure). */
@@ -73,8 +58,6 @@ async function openTerm(id: string) {
   }
 }
 
-interface Menu { x: number; y: number; host: Host }
-interface GroupMenu { x: number; y: number; group: string }
 /** Live arrangement while dragging a host: group order and host ids per group. */
 interface Arrange { order: string[]; items: Record<string, string[]> }
 interface Group { name: string; items: Host[] }
@@ -83,19 +66,20 @@ interface Group { name: string; items: Host[] }
 export function HostSidebar(props: { header?: ReactNode } = {}) {
   const hosts = useApp((s) => s.hosts);
   const conn = useApp((s) => s.conn);
+  const failures = useApp((s) => s.failures);
   const openEditor = useApp((s) => s.openEditor);
   const priv = usePrivacy();
 
   // Search lives in the global palette (Ctrl+P); the list itself is unfiltered.
   const query = "";
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
-    const c = load<Record<string, boolean>>(COLLAPSE_KEY, {});
+    const c = lsGetJson<Record<string, boolean>>(COLLAPSE_KEY, {});
     return HIDDEN_SECTION in c ? c : { ...c, [HIDDEN_SECTION]: true };
   });
-  const [hidden, setHidden] = useState<string[]>(() => load<string[]>(HIDDEN_KEY, []));
+  const [hidden, setHidden] = useState<string[]>(() => lsGetJson<string[]>(HIDDEN_KEY, []));
   const [selected, setSelected] = useState<string | null>(null);
-  const [menu, setMenu] = useState<Menu | null>(null);
-  const [groupMenu, setGroupMenu] = useState<GroupMenu | null>(null);
+  const menu = useContextMenu();
+  const [diagnosing, setDiagnosing] = useState<Host | null>(null);
   const [deleting, setDeleting] = useState<Host | null>(null);
   const [live, setLive] = useState<Arrange | null>(null);
   const [groupLive, setGroupLive] = useState<string[] | null>(null);
@@ -154,14 +138,14 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
   const toggleGroup = (name: string) => {
     const next = { ...collapsed, [name]: !collapsed[name] };
     setCollapsed(next);
-    save(COLLAPSE_KEY, next);
+    lsSetJson(COLLAPSE_KEY, next);
   };
 
   const setGroupHidden = (name: string, hide: boolean) => {
     const next = hidden.filter((g) => g !== name);
     if (hide) next.push(name);
     setHidden(next);
-    save(HIDDEN_KEY, next);
+    lsSetJson(HIDDEN_KEY, next);
   };
 
   // Selection only highlights the row; the side panel follows the active terminal tab, not clicks here.
@@ -190,6 +174,9 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
   const els = useRef(new Map<string, HTMLElement>());
   const flipFrom = useRef<Map<string, DOMRect> | null>(null);
   const dragRef = useRef<{ key: string; place: () => void } | null>(null);
+  /** Ends the drag in progress (window listeners, body class, slot boxes); set from mousedown until release. */
+  const endDrag = useRef<((committed: boolean) => void) | null>(null);
+  useEffect(() => () => endDrag.current?.(false), []);
   const suppressClick = useRef(false);
   const reg = (key: string) => (el: HTMLElement | null) => {
     if (el) els.current.set(key, el);
@@ -217,6 +204,7 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
     },
   ) => {
     if (e.button !== 0) return;
+    endDrag.current?.(false);
     const sx = e.clientX;
     const sy = e.clientY;
     const r0 = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -297,6 +285,7 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
       });
     };
     const end = (committed: boolean) => {
+      if (endDrag.current === end) endDrag.current = null;
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
       window.removeEventListener("keydown", key_, true);
@@ -324,6 +313,7 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
     window.addEventListener("keydown", key_, true);
+    endDrag.current = end;
   };
 
   /** Layout midpoint of a row (ignores FLIP transforms, so sliding rows can't make the target flicker). */
@@ -455,11 +445,13 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
           data-group-head={g.name}
           onMouseDown={(e) => startGroupDrag(e, g.name)}
           onClick={() => !suppressClick.current && toggleGroup(g.name)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setGroupMenu({ x: e.clientX, y: e.clientY, group: g.name });
-          }}
+          onContextMenu={(e) =>
+            menu.open(e, [
+              hidden.includes(g.name)
+                ? { label: "取消隐藏", icon: <Eye />, onSelect: () => setGroupHidden(g.name, false) }
+                : { label: "隐藏分组", icon: <EyeOff />, onSelect: () => setGroupHidden(g.name, true) },
+            ])
+          }
         >
           <span className="hs-icon">{isCollapsed ? <ChevronRight /> : <ChevronDown />}</span>
           <span className="grow ellipsis">{g.name}</span>
@@ -484,9 +476,17 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
               }}
               onDoubleClick={() => openTerm(h.id)}
               onContextMenu={(e) => {
-                e.preventDefault();
                 select(h.id);
-                setMenu({ x: e.clientX, y: e.clientY, host: h });
+                const st = conn[h.id]?.state;
+                menu.open(
+                  e,
+                  hostMenuItems(h, {
+                    state: st,
+                    onDiagnose: failures[h.id] || st === "error" ? () => setDiagnosing(h) : undefined,
+                    onDelete: () => setDeleting(h),
+                    listKeys: true,
+                  }),
+                );
               }}
             >
               {h.color && <span className="marker" style={{ background: h.color }} />}
@@ -505,9 +505,6 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
     <div className="hs">
       <div className="hs-bar">
         <GlobalSearch />
-        <button className="icon-btn md" title="新建服务器" onClick={() => openEditor("")}>
-          <Plus />
-        </button>
       </div>
 
       {props.header}
@@ -524,7 +521,7 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
       ) : (
         <>
           <div className="hs-list" ref={listRef} tabIndex={0} onKeyDown={onListKey}>
-            {groups.length === 0 && <div className="empty">无匹配结果</div>}
+            {groups.length === 0 && <Empty text="无匹配结果" />}
             {shownGroups.map(renderGroup)}
             {hiddenGroups.length > 0 && (
               <div className="hs-hidden">
@@ -540,43 +537,20 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
         </>
       )}
 
-      {groupMenu && (
-        <MenuBox x={groupMenu.x} y={groupMenu.y} onClose={() => setGroupMenu(null)}>
-          {hidden.includes(groupMenu.group) ? (
-            <button
-              onClick={() => {
-                setGroupMenu(null);
-                setGroupHidden(groupMenu.group, false);
-              }}
-            >
-              <Eye /> 取消隐藏
-            </button>
-          ) : (
-            <button
-              onClick={() => {
-                setGroupMenu(null);
-                setGroupHidden(groupMenu.group, true);
-              }}
-            >
-              <EyeOff /> 隐藏分组
-            </button>
-          )}
-        </MenuBox>
-      )}
-
-      {menu && (
-        <HostMenu
-          menu={menu}
-          state={conn[menu.host.id]?.state}
-          onClose={() => setMenu(null)}
-          onDelete={() => setDeleting(menu.host)}
+      {menu.node}
+      {diagnosing && (
+        <DiagnoseDialog
+          hostId={diagnosing.id}
+          name={priv.text(diagnosing.name, diagnosing.host)}
+          error={failures[diagnosing.id]?.error ?? conn[diagnosing.id]?.error ?? undefined}
+          onClose={() => setDiagnosing(null)}
         />
       )}
 
       {deleting && (
         <Confirm
           title="删除服务器"
-          message={`删除「${deleting.name}」及其保存的密码，并断开连接。`}
+          message={`删除「${priv.text(deleting.name, deleting.host)}」及其保存的密码，并断开连接。`}
           confirmText="删除"
           danger
           onCancel={() => setDeleting(null)}
@@ -594,108 +568,5 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
         />
       )}
     </div>
-  );
-}
-
-/** Context menu shell: closes on outside click / Esc / blur and stays inside the window. */
-function MenuBox(props: { x: number; y: number; onClose: () => void; children: ReactNode }) {
-  const { x, y, onClose } = props;
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x, y });
-
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown, true);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("blur", onClose);
-    window.addEventListener("resize", onClose);
-    return () => {
-      window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("blur", onClose);
-      window.removeEventListener("resize", onClose);
-    };
-  }, [onClose]);
-
-  // Keep the menu inside the window.
-  useEffect(() => {
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    setPos({
-      x: Math.min(x, window.innerWidth - r.width - 4),
-      y: Math.min(y, window.innerHeight - r.height - 4),
-    });
-  }, [x, y]);
-
-  return (
-    <div className="ctx-menu" ref={ref} style={{ left: pos.x, top: pos.y }} onContextMenu={(e) => e.preventDefault()}>
-      {props.children}
-    </div>
-  );
-}
-
-function HostMenu(props: { menu: Menu; state?: string; onClose: () => void; onDelete: () => void }) {
-  const { menu, onClose } = props;
-  const h = menu.host;
-
-  const run = (fn: () => unknown) => async () => {
-    onClose();
-    try {
-      await fn();
-    } catch (e) {
-      toast(errMsg(e), "error");
-    }
-  };
-  const isUp = props.state === "connected" || props.state === "connecting";
-
-  return (
-    <MenuBox x={menu.x} y={menu.y} onClose={onClose}>
-      <button onClick={run(() => openTerminal(h.id))}>
-        <SquareTerminal /> 打开终端
-      </button>
-      {isUp ? (
-        <button onClick={run(() => api.connDisconnect(h.id))}>
-          <Unplug /> 断开
-        </button>
-      ) : (
-        <button onClick={run(() => api.connConnect(h.id))}>
-          <Plug /> 连接
-        </button>
-      )}
-      <hr />
-      <button onClick={run(() => useApp.getState().openEditor(h.id))}>
-        <Pencil /> 编辑
-      </button>
-      <button
-        onClick={run(async () => {
-          await saveHost({ ...h, id: "", name: h.name + " 副本", passwordSecret: null, updatedAt: 0 });
-          toast(h.passwordSecret ? "已复制，密码需重新填写" : "已复制", "success");
-        })}
-      >
-        <Copy /> 复制
-      </button>
-      <button
-        onClick={run(async () => {
-          const addr = `${h.username}@${h.host}` + (h.port !== 22 ? ` -p ${h.port}` : "");
-          await navigator.clipboard.writeText(addr);
-          toast("已复制 " + (useApp.getState().privacy ? "地址" : addr), "success");
-        })}
-      >
-        <Link /> 复制地址
-      </button>
-      <hr />
-      <button
-        className="danger"
-        onClick={() => {
-          onClose();
-          props.onDelete();
-        }}
-      >
-        <Trash2 /> 删除
-      </button>
-    </MenuBox>
   );
 }

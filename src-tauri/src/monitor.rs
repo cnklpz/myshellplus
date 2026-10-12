@@ -2,19 +2,21 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::Emitter;
 
-use crate::ssh::{exec, get_conn};
+use crate::ssh::exec;
 use crate::state::Ctx;
 use crate::util::now_ms;
 
 const INTERVAL: Duration = Duration::from_secs(3);
 const HISTORY: usize = 60;
+/// After a UI reload, how long a monitor nobody re-subscribed to keeps running.
+const ORPHAN_GRACE: Duration = Duration::from_secs(30);
 
 const SCRIPT: &str = r#"export LC_ALL=C
 echo '@@stat'; grep '^cpu' /proc/stat
@@ -118,16 +120,28 @@ struct Prev {
 }
 
 struct Entry {
-    subscribers: usize,
+    /// Subscriptions from the webview; reset when it reloads (the old page can't unsubscribe).
+    ui_subs: usize,
+    /// Subscriptions from the Rust side (MCP, self test).
+    internal_subs: usize,
+    /// No subscriber since a UI reload: stopped once ORPHAN_GRACE has passed.
+    orphan_since: Option<Instant>,
     info: Option<SysInfo>,
     history: VecDeque<Sample>,
     error: Option<String>,
     stop: Arc<tokio::sync::Notify>,
 }
 
+/// Lock order: `map` before `stale_ui`.
 #[derive(Default)]
 pub struct Monitors {
     map: Mutex<HashMap<String, Entry>>,
+    /// UI subscriptions of monitors removed by `stop_host` whose unsubscribe hasn't arrived yet.
+    /// The UI unsubscribes by host id only, so without this a late unsubscribe from before the
+    /// stop would decrement a newer monitor's count and stop it under its live subscriber.
+    /// Invariant: live UI subscribers of a host = its entry's `ui_subs` + `stale_ui[host]`, and
+    /// every UI unsubscribe first consumes a stale credit. Cleared when the webview reloads.
+    stale_ui: Mutex<HashMap<String, usize>>,
 }
 
 impl Monitors {
@@ -149,33 +163,94 @@ impl Monitors {
     }
 }
 
-pub fn subscribe(ctx: Arc<Ctx>, host_id: String) {
+/// `ui`: subscription from the webview (see `reset_ui`), otherwise from the Rust side.
+pub fn subscribe(ctx: Arc<Ctx>, host_id: String, ui: bool) {
     let stop = {
         let mut m = ctx.monitors.map.lock();
         if let Some(e) = m.get_mut(&host_id) {
-            e.subscribers += 1;
+            if ui {
+                e.ui_subs += 1;
+            } else {
+                e.internal_subs += 1;
+            }
+            e.orphan_since = None;
             return;
         }
         let stop = Arc::new(tokio::sync::Notify::new());
         m.insert(
             host_id.clone(),
-            Entry { subscribers: 1, info: None, history: VecDeque::new(), error: None, stop: stop.clone() },
+            Entry {
+                ui_subs: ui as usize,
+                internal_subs: !ui as usize,
+                orphan_since: None,
+                info: None,
+                history: VecDeque::new(),
+                error: None,
+                stop: stop.clone(),
+            },
         );
         stop
     };
     tauri::async_runtime::spawn(run_loop(ctx, host_id, stop));
 }
 
-pub fn unsubscribe(ctx: &Ctx, host_id: &str) {
+pub fn unsubscribe(ctx: &Ctx, host_id: &str, ui: bool) {
     let mut m = ctx.monitors.map.lock();
+    if ui {
+        let mut stale = ctx.monitors.stale_ui.lock();
+        if let Some(n) = stale.get_mut(host_id) {
+            *n -= 1;
+            if *n == 0 {
+                stale.remove(host_id);
+            }
+            return;
+        }
+    }
     if let Some(e) = m.get_mut(host_id) {
-        e.subscribers = e.subscribers.saturating_sub(1);
-        if e.subscribers == 0 {
+        if ui {
+            e.ui_subs = e.ui_subs.saturating_sub(1);
+        } else {
+            e.internal_subs = e.internal_subs.saturating_sub(1);
+        }
+        if e.ui_subs == 0 && e.internal_subs == 0 && e.orphan_since.is_none() {
             e.stop.notify_one();
             m.remove(host_id);
         }
     }
 }
+
+/// The webview (re)loaded: its old subscriptions are gone. Monitors keep their history for a
+/// short grace period so the reloaded UI can pick them up again.
+pub fn reset_ui(ctx: &Ctx) {
+    let mut m = ctx.monitors.map.lock();
+    ctx.monitors.stale_ui.lock().clear();
+    for e in m.values_mut() {
+        if e.ui_subs > 0 {
+            e.ui_subs = 0;
+            if e.internal_subs == 0 {
+                e.orphan_since = Some(Instant::now());
+            }
+        }
+    }
+}
+
+/// Stop a host's monitor (host disconnected or deleted).
+pub fn stop_host(ctx: &Ctx, host_id: &str) {
+    let removed = {
+        let mut m = ctx.monitors.map.lock();
+        let e = m.remove(host_id);
+        if let Some(e) = e.as_ref().filter(|e| e.ui_subs > 0) {
+            *ctx.monitors.stale_ui.lock().entry(host_id.to_string()).or_default() += e.ui_subs;
+        }
+        e
+    };
+    if let Some(e) = removed {
+        e.stop.notify_one();
+        let _ = ctx.app.emit("monitor", serde_json::json!({ "hostId": host_id, "error": NOT_CONNECTED }));
+    }
+}
+
+const NOT_CONNECTED: &str = "未连接";
 
 async fn run_loop(ctx: Arc<Ctx>, host_id: String, stop: Arc<tokio::sync::Notify>) {
     let mut prev = Prev::default();
@@ -184,7 +259,12 @@ async fn run_loop(ctx: Arc<Ctx>, host_id: String, stop: Arc<tokio::sync::Notify>
         let mut delay = INTERVAL;
         {
             let mut m = ctx.monitors.map.lock();
-            let Some(e) = m.get_mut(&host_id) else { return };
+            // Gone, or replaced by a newer monitor for the same host.
+            let Some(e) = m.get_mut(&host_id).filter(|e| Arc::ptr_eq(&e.stop, &stop)) else { return };
+            if e.orphan_since.is_some_and(|t| t.elapsed() > ORPHAN_GRACE) {
+                m.remove(&host_id);
+                return;
+            }
             match result {
                 Ok((info, sample)) => {
                     if info.is_some() {
@@ -217,7 +297,8 @@ async fn run_loop(ctx: Arc<Ctx>, host_id: String, stop: Arc<tokio::sync::Notify>
 }
 
 async fn sample_once(ctx: &Arc<Ctx>, host_id: &str, prev: &mut Prev) -> Result<(Option<SysInfo>, Option<Sample>)> {
-    let conn = get_conn(ctx.clone(), host_id.to_string()).await?;
+    // Never connects by itself: monitoring must not resurrect a connection the user closed.
+    let conn = ctx.pool.existing(host_id).ok_or_else(|| anyhow!(NOT_CONNECTED))?;
     let need_info = ctx.monitors.map.lock().get(host_id).is_some_and(|e| e.info.is_none());
     let info = if need_info {
         let r = exec::run(&conn, INFO_SCRIPT, Duration::from_secs(10)).await?;
@@ -287,14 +368,14 @@ fn parse_sample(s: &str, prev: &mut Prev) -> Option<Sample> {
         let idle = n[3] + n.get(4).copied().unwrap_or(0);
         cur_cpu.push((total - idle, total));
     }
-    let pct = |i: usize| -> f32 {
-        match (prev.cpu.get(i), cur_cpu.get(i)) {
+    fn pct(prev: &[(u64, u64)], cur: &[(u64, u64)], i: usize) -> f32 {
+        match (prev.get(i), cur.get(i)) {
             (Some(&(pb, pt)), Some(&(cb, ct))) if ct > pt => ((cb.saturating_sub(pb)) as f32 / (ct - pt) as f32 * 100.0).clamp(0.0, 100.0),
             _ => 0.0,
         }
-    };
-    out.cpu = pct(0);
-    out.cores = (1..cur_cpu.len()).map(pct).collect();
+    }
+    out.cpu = pct(&prev.cpu, &cur_cpu, 0);
+    out.cores = (1..cur_cpu.len()).map(|i| pct(&prev.cpu, &cur_cpu, i)).collect();
 
     // Memory (kB)
     let mut mem: HashMap<&str, u64> = HashMap::new();
@@ -337,7 +418,7 @@ fn parse_sample(s: &str, prev: &mut Prev) -> Option<Sample> {
         out.nets.push(NetIf { name: name.clone(), rx_rate: rr, tx_rate: tr, rx_total: rx, tx_total: tx });
         cur_net.insert(name, (rx, tx));
     }
-    out.nets.sort_by(|a, b| (b.rx_total + b.tx_total).cmp(&(a.rx_total + a.tx_total)));
+    out.nets.sort_by_key(|a| std::cmp::Reverse(a.rx_total.saturating_add(a.tx_total)));
 
     // Disks
     for line in sec.get("disk").map(|v| v.as_slice()).unwrap_or_default() {

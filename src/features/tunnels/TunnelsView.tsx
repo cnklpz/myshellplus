@@ -1,11 +1,13 @@
 // Tunnel (port forwarding) management page.
-import { listen } from "@tauri-apps/api/event";
 import { Copy, CopyPlus, Network, Pencil, Play, Plus, Power, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Select } from "../../components/Select";
 import { Confirm, Dialog, Empty, Field, Toggle, toast } from "../../components/ui";
 import { api, errMsg, type TunnelDef, type TunnelStatus } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
+import { useTauriEvent } from "../../lib/events";
 import { fmtBytes } from "../../lib/format";
+import { usePrivacy } from "../../lib/privacy";
 import { useApp } from "../../store";
 import { type MenuItem, useContextMenu } from "../terminal/ContextMenu";
 import "./tunnels.css";
@@ -14,10 +16,13 @@ type Kind = TunnelDef["kind"];
 
 const KIND_LABEL: Record<Kind, string> = { local: "本地 -L", remote: "远程 -R", dynamic: "动态 -D" };
 
-function mapping(t: TunnelDef): string {
-  const bind = `${t.bindAddr}:${t.bindPort}`;
+/** `addr` masks the target host in privacy mode. */
+function mapping(t: TunnelDef, addr: (a: string) => string = (a) => a, st?: TunnelStatus): string {
+  // -R on port 0: the server picks the port; show it once the tunnel reports it.
+  const port = t.kind === "remote" && t.bindPort === 0 && st?.remotePort ? st.remotePort : t.bindPort;
+  const bind = `${t.bindAddr}:${port}`;
   if (t.kind === "dynamic") return `SOCKS5 ${bind}`;
-  return `${bind} → ${t.targetHost}:${t.targetPort}`;
+  return `${bind} → ${addr(t.targetHost)}:${t.targetPort}`;
 }
 
 export function TunnelsView() {
@@ -50,14 +55,15 @@ export function TunnelsView() {
   useEffect(() => {
     refresh();
     const timer = setInterval(refreshStatus, 2000);
-    const un = listen("tunnels-changed", () => refresh());
-    return () => {
-      clearInterval(timer);
-      un.then((f) => f());
-    };
+    return () => clearInterval(timer);
   }, [refresh, refreshStatus]);
+  useTauriEvent("tunnels-changed", () => void refresh());
 
-  const hostName = (id: string) => hosts.find((h) => h.id === id)?.name ?? "（已删除）";
+  const priv = usePrivacy();
+  const hostName = (id: string) => {
+    const h = hosts.find((x) => x.id === id);
+    return h ? priv.text(h.name, h.host) : "（已删除）";
+  };
 
   const toggleRun = async (t: TunnelDef) => {
     setBusy((b) => ({ ...b, [t.id]: true }));
@@ -82,21 +88,17 @@ export function TunnelsView() {
   };
 
   const menu = useContextMenu();
-  const copy = (text: string) =>
-    navigator.clipboard.writeText(text).then(
-      () => toast("已复制", "success"),
-      () => toast("复制失败", "error"),
-    );
   const rowMenu = (t: TunnelDef): MenuItem[] => {
     const running = !!status[t.id]?.running;
-    const bind = `${t.bindAddr}:${t.bindPort}`;
+    const port = t.kind === "remote" && t.bindPort === 0 && status[t.id]?.remotePort ? status[t.id]!.remotePort : t.bindPort;
+    const bind = `${t.bindAddr}:${port}`;
     return [
       { label: running ? "停止" : "启动", icon: running ? <Square /> : <Play />, disabled: busy[t.id], onSelect: () => toggleRun(t) },
       { label: "编辑…", icon: <Pencil />, onSelect: () => setEditing({ ...t }) },
       { label: "复制隧道", icon: <CopyPlus />, onSelect: () => setEditing({ ...t, id: undefined, name: t.name ? `${t.name} 副本` : "", autoStart: false }) },
       "sep",
-      { label: t.kind === "remote" ? "复制远程地址" : "复制本地地址", icon: <Copy />, onSelect: () => copy(bind) },
-      t.kind !== "dynamic" && { label: "复制目标地址", icon: <Copy />, onSelect: () => copy(`${t.targetHost}:${t.targetPort}`) },
+      { label: t.kind === "remote" ? "复制远程地址" : "复制本地地址", icon: <Copy />, onSelect: () => void copyText(bind, "地址") },
+      t.kind !== "dynamic" && { label: "复制目标地址", icon: <Copy />, onSelect: () => void copyText(`${t.targetHost}:${t.targetPort}`, "地址") },
       { label: t.autoStart ? "关闭自启" : "打开自启", icon: <Power />, onSelect: () => setAuto(t, !t.autoStart) },
       "sep",
       { label: "删除…", icon: <Trash2 />, danger: true, onSelect: () => setDeleting(t) },
@@ -145,12 +147,12 @@ export function TunnelsView() {
               const running = !!st?.running;
               const dot = st?.error ? "err" : running ? "ok" : "";
               return (
-                <div key={t.id} className="tn-item" onContextMenu={(e) => menu.open(e, rowMenu(t))} onDoubleClick={(e) => !(e.target as Element).closest("button, input") && setEditing({ ...t })}>
+                <div key={t.id} className="tn-item hover-host" onContextMenu={(e) => menu.open(e, rowMenu(t))} onDoubleClick={(e) => !(e.target as Element).closest("button, input") && setEditing({ ...t })}>
                   <div className="tn-grid tn-row">
                     <span className={"dot " + dot} title={st?.error ? "出错" : running ? "运行中" : "已停止"} />
                     <div className="tn-main">
                       <span className="ellipsis tn-name" title={t.name}>{t.name || "未命名"}</span>
-                      <span className="mono ellipsis selectable tn-map" title={mapping(t)}>{mapping(t)}</span>
+                      <span className="mono ellipsis selectable tn-map" title={mapping(t, priv.addr, st)}>{mapping(t, priv.addr, st)}</span>
                     </div>
                     <span className="tn-quiet">{KIND_LABEL[t.kind]}</span>
                     <span className="ellipsis tn-quiet" title={hostName(t.hostId)}>{hostName(t.hostId)}</span>
@@ -164,10 +166,10 @@ export function TunnelsView() {
                         {running ? <Square /> : <Play />}
                         {running ? "停止" : "启动"}
                       </button>
-                      <button className="icon-btn tn-hover" title="编辑" onClick={() => setEditing({ ...t })}>
+                      <button className="icon-btn hover-reveal" title="编辑" onClick={() => setEditing({ ...t })}>
                         <Pencil />
                       </button>
-                      <button className="icon-btn tn-hover" title="删除" onClick={() => setDeleting(t)}>
+                      <button className="icon-btn danger hover-reveal" title="删除" onClick={() => setDeleting(t)}>
                         <Trash2 />
                       </button>
                     </div>
@@ -194,7 +196,7 @@ export function TunnelsView() {
       {deleting && (
         <Confirm
           title="删除隧道"
-          message={`删除「${deleting.name || mapping(deleting)}」？运行中会先停止。`}
+          message={`删除「${deleting.name || mapping(deleting, priv.addr)}」？运行中会先停止。`}
           confirmText="删除"
           danger
           onCancel={() => setDeleting(null)}
@@ -214,10 +216,9 @@ export function TunnelsView() {
   );
 }
 
-const KIND_DESC: Record<Kind, string> = {
-  local: "本机端口转发到服务器可访问的地址，如内网数据库",
-  remote: "服务器端口转发回本机或本机网络；外部访问需开启 GatewayPorts",
-  dynamic: "本机开 SOCKS5 代理，经服务器访问任意地址",
+/** Only where the user is likely to get it wrong; the flow line below explains the rest. */
+const KIND_RISK: Partial<Record<Kind, string>> = {
+  remote: "外部访问需开启 GatewayPorts",
 };
 
 const validPort = (s: string) => /^\d+$/.test(s) && +s >= 1 && +s <= 65535;
@@ -304,7 +305,7 @@ function TunnelEditor(props: { initial: Partial<TunnelDef>; onClose: () => void;
           label="类型"
           hint={
             <div className="tn-kind-hint">
-              <span>{KIND_DESC[kind]}</span>
+              {KIND_RISK[kind] && <span>{KIND_RISK[kind]}</span>}
               <span className="tn-flow mono">
                 {flow.map((x, i) => (
                   <span key={i}>

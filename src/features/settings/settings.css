@@ -1,16 +1,21 @@
 /* Settings page (shown inside PageModal): full-height bg-1 nav column + content column.
-   The nav carries the page title on the 64px header line; h1 and item text share one x
+   The nav carries the page title on the --h-page-head line; h1 and item text share one x
    (nav padding --sp-3 + item padding --sp-3). Each section's title (.set-title) sits on the
-   same 64px line as the h1 and the modal close button. The content column fills the modal
+   same --h-page-head line as the h1 and the modal close button. The content column fills the modal
    (equal left/right padding); only the title row keeps extra right room for the close button.
-   Rows: label on the left, control flush right, so every row ends on the same right edge. */
-.set-layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
+   Rows: label on the left, control flush right, so every row ends on the same right edge.
+   Row heights: a --h-md control plus --sp-2 (default) or --sp-1 (dense lists) above and below. */
+.set-layout {
+  --set-row-h: calc(var(--h-md) + 2 * var(--sp-2));
+  --set-row-h-dense: calc(var(--h-md) + 2 * var(--sp-1));
+  display: grid; grid-template-columns: 216px minmax(0, 1fr); flex: 1 1 auto; min-height: 0;
+}
 .set-nav {
-  display: flex; flex-direction: column; gap: 2px; min-height: 0;
+  display: flex; flex-direction: column; gap: var(--sp-half); min-height: 0;
   padding: 0 var(--sp-3) var(--sp-4); overflow: auto; background: var(--bg-1);
 }
-.set-nav-head { display: flex; align-items: center; height: 64px; padding: 0 var(--sp-3); flex: none; }
-.set-nav-head h1 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02em; }
+.set-nav-head { display: flex; align-items: center; height: var(--h-page-head); padding: 0 var(--sp-3); flex: none; }
+.set-nav-head h1 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.02em; }
 .set-nav > button {
   display: flex; align-items: center; height: var(--h-md); padding: 0 var(--sp-3); flex: none;
   border: none; border-radius: var(--radius-md); background: transparent; cursor: pointer; text-align: left;
@@ -24,20 +29,20 @@
 
 /* Right padding keeps title actions clear of the modal close button. */
 .set-title {
-  display: flex; align-items: center; gap: var(--sp-3); height: 64px; flex: none; padding-right: var(--sp-6);
+  display: flex; align-items: center; gap: var(--sp-3); height: var(--h-page-head); flex: none; padding-right: var(--sp-6);
   position: sticky; top: 0; z-index: 2; background: var(--bg-0);
 }
 .set-title h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
 
-/* A block = optional small heading + one group card. */
+/* A block = optional .section-title + one group card. */
 .set-block { display: flex; flex-direction: column; gap: var(--sp-2); }
-.set-block-head { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-sm); font-size: var(--fs-sm); font-weight: 600; color: var(--fg-1); }
 .set-stack { display: flex; flex-direction: column; gap: var(--sp-3); }
 
 /* Group card: .field rows separated by an inset line. */
 .set-group { background: var(--bg-1); border-radius: var(--radius-lg); box-shadow: inset 0 0 0 1px var(--line); }
-.set-group > .field { grid-template-columns: 136px minmax(0, 1fr); min-height: 52px; padding: var(--sp-2) var(--sp-4); }
+.set-group > .field { grid-template-columns: 136px minmax(0, 1fr); min-height: var(--set-row-h); padding: var(--sp-2) var(--sp-4); }
 .set-group > .field > label { color: var(--fg-1); font-size: var(--fs-md); }
+.set-group > .empty { align-items: flex-start; padding: var(--sp-4); }
 /* Controls sit flush right; full-width inputs/selects still fill the column. A note in the row
    moves next to the label so the control keeps the right edge. */
 .set-group > .field > .row { justify-content: flex-end; }
@@ -45,9 +50,10 @@
 .set-group > .field + .field { box-shadow: inset 0 1px 0 var(--line); }
 /* Hint row from <Field hint>: sits tight under its field, no separator. */
 .set-group > .field:has(> .field-hint) { min-height: 0; padding-top: 0; margin-top: calc(-1 * var(--sp-1)); box-shadow: none; }
-.set-empty { display: flex; align-items: center; min-height: 52px; padding: 0 var(--sp-4); color: var(--fg-2); }
 
 .set-note { font-size: var(--fs-sm); color: var(--fg-2); }
+.set-upd { font-variant-numeric: tabular-nums; }
+.set-notes { width: 100%; max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: var(--fs-sm); color: var(--fg-1); line-height: 1.6; }
 .set-path { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--fg-1); user-select: text; word-break: break-all; text-align: right; }
 
 /* Theme picker */
@@ -62,7 +68,11 @@
 .theme-preview { display: flex; gap: var(--sp-1); height: 72px; padding: var(--sp-1); border-radius: var(--radius-md); }
 .tp-side { width: 22%; }
 .tp-main { flex: 1; border-radius: var(--radius-sm); padding: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-1); }
-.tp-main > span { display: block; height: 4px; border-radius: 2px; }
+.tp-main > span { display: block; height: var(--sp-1); border-radius: var(--sp-half); }
+.tp-main > span:nth-child(1) { width: 38%; }
+.tp-main > span:nth-child(2) { width: 62%; }
+.tp-main > span:nth-child(3) { width: 48%; }
+.tp-main > span:nth-child(4) { width: 22%; }
 .theme-name { display: flex; align-items: center; justify-content: space-between; height: var(--h-sm); padding: 0 var(--sp-1); font-size: var(--fs-sm); font-weight: 500; color: var(--fg-0); }
 .theme-tile:not(.on) .theme-name { color: var(--fg-1); }
 .theme-dots { display: flex; gap: var(--sp-1); }
@@ -72,15 +82,25 @@
 /* Highlight rules: toggle | pattern | text/regex | color | delete — same columns on every row. */
 .hl-rule {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto 96px auto; align-items: center;
-  gap: var(--sp-3); min-height: 52px; padding: var(--sp-2) var(--sp-4); box-shadow: inset 0 1px 0 var(--line);
+  gap: var(--sp-3); min-height: var(--set-row-h); padding: var(--sp-2) var(--sp-4); box-shadow: inset 0 1px 0 var(--line);
 }
 .hl-color { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .hl-color > i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
+/* Known hosts: host | algo | fingerprint | delete — same columns on every row. */
+.kh-row {
+  display: grid; grid-template-columns: 200px 120px minmax(0, 1fr) auto; align-items: center;
+  gap: var(--sp-3); min-height: var(--set-row-h-dense); padding: var(--sp-1) var(--sp-4);
+}
+.kh-row + .kh-row { box-shadow: inset 0 1px 0 var(--line); }
+.kh-algo { font-size: var(--fs-sm); color: var(--fg-2); }
+.kh-fp { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--fg-1); }
+
 /* Shortcuts: denser rows than other settings; key caps right-aligned on one line. */
-.set-keys-group > .field { min-height: 44px; padding-top: var(--sp-1); padding-bottom: var(--sp-1); }
+.set-keys-group > .field { min-height: var(--set-row-h-dense); padding-top: var(--sp-1); padding-bottom: var(--sp-1); }
 .set-keys { display: inline-flex; align-items: center; gap: var(--sp-1); }
-.set-keys > kbd { min-width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0 var(--sp-2); font-size: var(--fs-xs); border: 0; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px var(--line-strong); }
+/* Key caps keep the base kbd look, sized to one --h-xs square. */
+.set-keys > kbd { min-width: var(--h-xs); height: var(--h-xs); display: inline-flex; align-items: center; justify-content: center; padding: 0 var(--sp-2); }
 /* Classic scheme option: name left, palette dots right (first dot = background, ringed so it shows on any menu). */
 .theme-opt { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-width: 0; }
 .theme-opt > .ellipsis { flex: 1; }
@@ -88,4 +108,7 @@
 
 .hotkey-input { min-width: 160px; justify-content: flex-start; }
 .hotkey-input.rec { box-shadow: inset 0 0 0 1px var(--accent); }
-.set-err { color: var(--err); }
+
+/* Startup update dialog */
+.upd-notes { max-height: 360px; overflow: auto; }
+.upd-note { font-size: var(--fs-sm); color: var(--fg-2); font-variant-numeric: tabular-nums; }

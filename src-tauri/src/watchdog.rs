@@ -27,7 +27,7 @@ pub fn spawn(app: AppHandle) {
         let Some(w) = app.get_webview_window("main") else { continue };
         let visible = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(true);
         if visible {
-            log::warn!("UI heartbeat stale for {}s, reloading webview", (now_ms() - last) / 1000);
+            log::error!(target: "crash", "界面无响应 {}s，已自动重载", (now_ms() - last) / 1000);
             let _ = w.reload();
             LAST_BEAT.store(now_ms(), Ordering::Relaxed); // grace period for the reload
         }

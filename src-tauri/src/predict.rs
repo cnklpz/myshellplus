@@ -132,6 +132,9 @@ pub fn local(ctx: &Ctx, host_id: &str, input: &str, limit: usize) -> Result<Vec<
     }
     let lower = input_trim.to_lowercase();
     for s in ctx.db.list_snippets()? {
+        if s.host_id.as_deref().is_some_and(|h| h != host_id) {
+            continue;
+        }
         if s.command.starts_with(input_trim) || s.name.to_lowercase().contains(&lower) {
             push(Suggestion { command: s.command, source: "snippet".into(), description: s.name }, &mut out);
         }
@@ -242,4 +245,41 @@ const EXPLAIN_SYSTEM: &str = "你是资深 Linux 运维。用简洁的中文解�
 pub async fn explain(ctx: Arc<Ctx>, host_id: String, text: String) -> Result<String> {
     let user = format!("{}\n内容:\n{}", host_context(&ctx, &host_id), text);
     ai::complete(&ctx.db, &ctx.vault, None, Request { system: EXPLAIN_SYSTEM, user, max_tokens: 8000, effort: "medium", think: ai::settings(&ctx.db).thinking, model: None }).await
+}
+
+const DIAGNOSE_SYSTEM: &str = "你是 SSH 连接故障诊断专家。根据用户提供的连接日志（地址和用户名已脱敏）判断连接失败的原因。用简洁的中文 Markdown 回答，依次给出：**原因**（一句话）、**依据**（引用日志中的关键行）、**解决办法**（客户端设置或服务器端命令，按可能性排序）。不要编造日志中没有的信息，原因不确定时说明需要补充什么。控制在 400 字内。";
+
+/// AI reading of the host's last connect attempt. The log is redacted before it leaves the machine.
+pub async fn diagnose_conn(ctx: Arc<Ctx>, host_id: String) -> Result<String> {
+    let log = crate::applog::export_conn(&ctx.db, &host_id, true);
+    let user = format!("客户端: MyShell+（Rust russh 实现的 SSH 客户端，Windows）\n\n{log}");
+    ai::complete(&ctx.db, &ctx.vault, None, Request { system: DIAGNOSE_SYSTEM, user, max_tokens: 8000, effort: "medium", think: ai::settings(&ctx.db).thinking, model: None }).await
+}
+
+const CHAT_SYSTEM: &str = "你是资深 Linux 运维助手，在 SSH 客户端的侧边栏里和用户对话。用简洁的中文 Markdown 回答。需要执行的命令放在 ```bash 代码块里，一个代码块只放一条可直接执行的命令；会修改系统、删除数据或可能断开连接的命令，在代码块前用一句话说明风险。不确定服务器环境时先给出查看命令。";
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ChatMsg {
+    pub role: String,
+    pub content: String,
+}
+
+/// Multi-turn chat about a host. Earlier turns are folded into the prompt (the AI layer is single-turn).
+pub async fn chat(ctx: Arc<Ctx>, host_id: String, messages: Vec<ChatMsg>, screen: Option<String>) -> Result<String> {
+    let Some((last, earlier)) = messages.split_last() else { anyhow::bail!("没有内容") };
+    let mut user = host_context(&ctx, &host_id);
+    if let Some(s) = screen.filter(|s| !s.trim().is_empty()) {
+        user.push_str(&format!("\n终端最近输出:\n```\n{}\n```\n", s.trim_end()));
+    }
+    // Keep the prompt bounded: the most recent turns matter most.
+    let start = earlier.len().saturating_sub(16);
+    if start < earlier.len() {
+        user.push_str("\n之前的对话:\n");
+        for m in &earlier[start..] {
+            let who = if m.role == "assistant" { "助手" } else { "用户" };
+            user.push_str(&format!("{who}: {}\n\n", m.content.trim()));
+        }
+    }
+    user.push_str(&format!("\n用户: {}", last.content.trim()));
+    ai::complete(&ctx.db, &ctx.vault, None, Request { system: CHAT_SYSTEM, user, max_tokens: 8000, effort: "medium", think: ai::settings(&ctx.db).thinking, model: None }).await
 }

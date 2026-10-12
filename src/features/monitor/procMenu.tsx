@@ -4,7 +4,9 @@ import { ClipboardCopy, Copy, FolderOpen, Info, Pause, Play, RefreshCw, Skull, X
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Confirm, Dialog, toast } from "../../components/ui";
 import { api, errMsg } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 import { fmtBytes } from "../../lib/format";
+import { usePrivacy } from "../../lib/privacy";
 import { useApp } from "../../store";
 import type { MenuItem } from "../terminal/ContextMenu";
 
@@ -18,12 +20,6 @@ export interface ProcRef {
 
 const SIGNALS = { TERM: "结束", KILL: "强制结束", STOP: "暂停", CONT: "继续" } as const;
 type Sig = keyof typeof SIGNALS;
-
-export const copyText = (text: string, what: string) =>
-  navigator.clipboard.writeText(text).then(
-    () => toast(`已复制${what}`, "success"),
-    () => toast("复制失败", "error"),
-  );
 
 /**
  * `items(p)` builds the menu for one process; render `node` once next to the table.
@@ -84,7 +80,15 @@ export function useProcActions(hostId: string, onDone?: (pid: number, sig: Sig) 
           onCancel={() => setConfirm(null)}
         />
       )}
-      {detail && <ProcDetail hostId={hostId} p={detail} onClose={() => setDetail(null)} onKill={(sig) => setConfirm({ p: detail, sig })} />}
+      {detail && (
+        <ProcDetail
+          hostId={hostId}
+          p={detail}
+          onClose={() => setDetail(null)}
+          onKill={(sig) => setConfirm({ p: detail, sig })}
+          onSignal={(sig) => send(detail, sig)}
+        />
+      )}
     </>
   );
 
@@ -137,7 +141,14 @@ function parseDetail(out: string): Facts | null {
   return { kv, cwd: cwd ?? "", cmdline: cmdline ?? "", conns: (ss ?? "").split("\n").filter((l) => l.trim()) };
 }
 
-function ProcDetail(props: { hostId: string; p: ProcRef; onClose: () => void; onKill: (sig: "TERM" | "KILL") => void }) {
+function ProcDetail(props: {
+  hostId: string;
+  p: ProcRef;
+  onClose: () => void;
+  onKill: (sig: "TERM" | "KILL") => void;
+  onSignal: (sig: "STOP" | "CONT") => Promise<unknown>;
+}) {
+  const priv = usePrivacy();
   const [facts, setFacts] = useState<Facts | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -160,6 +171,8 @@ function ProcDetail(props: { hostId: string; p: ProcRef; onClose: () => void; on
     };
   }, [props.hostId, props.p.pid, tick]);
 
+  const stopped = !!facts?.kv.find(([k]) => k === "状态")?.[1].includes("T");
+
   return (
     <Dialog
       width={640}
@@ -168,7 +181,7 @@ function ProcDetail(props: { hostId: string; p: ProcRef; onClose: () => void; on
         <span className="mon-d-title">
           <span className="ellipsis">进程 {props.p.pid}</span>
           <button className="icon-btn" title="刷新" onClick={() => setTick((t) => t + 1)}>
-            <RefreshCw className={busy ? "mon-spin" : undefined} />
+            <RefreshCw className={busy ? "spin" : undefined} />
           </button>
         </span>
       }
@@ -180,6 +193,14 @@ function ProcDetail(props: { hostId: string; p: ProcRef; onClose: () => void; on
             </button>
           )}
           <span className="grow" />
+          {facts && (
+            <button
+              className="btn"
+              onClick={() => void props.onSignal(stopped ? "CONT" : "STOP").then(() => setTick((t) => t + 1))}
+            >
+              {stopped ? <Play /> : <Pause />} {stopped ? "继续" : "暂停"}
+            </button>
+          )}
           <button className="btn danger" disabled={!facts} onClick={() => props.onKill("KILL")}>强制结束</button>
           <button className="btn danger solid" disabled={!facts} onClick={() => props.onKill("TERM")}>结束</button>
         </>
@@ -205,7 +226,7 @@ function ProcDetail(props: { hostId: string; p: ProcRef; onClose: () => void; on
             <div className="section-title">
               网络连接 <span className="meta">{facts.conns.length}</span>
             </div>
-            {facts.conns.length ? <pre className="mon-d-pre mono">{facts.conns.join("\n")}</pre> : <div className="mon-muted">无</div>}
+            {facts.conns.length ? <pre className="mon-d-pre mono">{priv.text(facts.conns.join("\n"))}</pre> : <div className="mon-muted">无</div>}
           </>
         )}
       </div>

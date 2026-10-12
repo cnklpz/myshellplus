@@ -225,6 +225,12 @@ export const THEMES: Theme[] = [
   },
 ];
 
+/**
+ * Host label colors. Stored per host as literal values (user data), so they are the same in every
+ * theme; they are only ever used as a tint or marker, never as a text-on-fill background.
+ */
+export const LABEL_COLORS = ["#ef6b6b", "#e5a54b", "#4cc38a", "#3fb6a8", "#5fa8f5", "#c58af0"] as const;
+
 const DEFAULT = "graphite";
 const listeners = new Set<(t: Theme) => void>();
 
@@ -266,6 +272,11 @@ export function applyTheme(id: string) {
   set("--fg-2", p.fg2);
   set("--accent", p.accent);
   set("--accent-fg", p.accentFg);
+  set("--on-accent", p.accentFg); // text/icons on a solid --accent fill
+  // Solid danger fill (destructive confirm, window close): pastel dark-theme reds are darkened so
+  // white text on them stays readable.
+  set("--danger-solid", t.dark ? `color-mix(in srgb, ${p.err} 72%, #000)` : p.err);
+  set("--on-danger", "#ffffff");
   set("--accent-soft", `color-mix(in srgb, ${p.accent} ${t.dark ? 14 : 11}%, transparent)`);
   set("--info", p.accent);
   set("--ok", p.ok);
@@ -275,6 +286,9 @@ export function applyTheme(id: string) {
   const ink = t.dark ? "255, 255, 255" : "15, 20, 30";
   set("--line", `rgba(${ink}, ${t.dark ? 0.055 : 0.07})`);
   set("--line-strong", `rgba(${ink}, ${t.dark ? 0.1 : 0.13})`);
+  // Dim layer behind dialogs; always darkens, also on light themes.
+  set("--scrim", t.dark ? "rgba(4, 6, 8, 0.6)" : "rgba(15, 20, 30, 0.32)");
+  set("--shadow-sm", t.dark ? "0 1px 2px rgba(0, 0, 0, 0.3)" : "0 1px 2px rgba(15, 20, 30, 0.08)");
   set(
     "--shadow",
     t.dark
