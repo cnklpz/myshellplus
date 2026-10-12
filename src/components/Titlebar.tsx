@@ -1,7 +1,6 @@
 // Custom window chrome: app mark, view switcher, window controls. The bar itself is the drag region.
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Lock, RotateCw } from "lucide-react";
-import { reloadUi } from "./ErrorBoundary";
+import { Lock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useApp } from "../store";
@@ -42,9 +41,6 @@ export function Titlebar() {
       </div>
 
       <div className="spacer" data-tauri-drag-region />
-      <button className="tb-btn" title="重新加载界面 (Ctrl+Shift+R)" onClick={reloadUi}>
-        <RotateCw />
-      </button>
 
       {passwordOn && (
         <>
