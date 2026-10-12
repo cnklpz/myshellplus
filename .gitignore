@@ -30,3 +30,8 @@ src-tauri/gen/schemas
 # e2e
 e2e/node_modules
 e2e/shots
+
+# tsc -b outputs
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
