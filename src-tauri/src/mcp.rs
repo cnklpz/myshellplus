@@ -68,7 +68,7 @@ pub async fn restart(ctx: Arc<Ctx>, server: Arc<McpServer>) -> Result<()> {
     *server.stop.lock() = Some(tx);
     *server.running_port.lock() = Some(s.port);
     let app = Router::new().route("/mcp", post(handle).get(|| async { StatusCode::METHOD_NOT_ALLOWED })).with_state(ctx);
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let _ = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = rx.await;
@@ -241,7 +241,7 @@ async fn call_tool(ctx: &Arc<Ctx>, name: &str, args: &Value) -> Result<Value> {
                     }
                 }
                 let (c2, id2) = (ctx.clone(), h.id.clone());
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(60)).await;
                     monitor::unsubscribe(&c2, &id2);
                 });

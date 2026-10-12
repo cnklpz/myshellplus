@@ -566,9 +566,10 @@ async fn export_backup(ctx: S<'_>, path: String, password: Option<String>) -> Cm
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let selftest = std::env::var("MYSHELL_SELFTEST").is_ok();
+    // Self test / UI test instances run next to the user's window.
+    let isolated = std::env::var("MYSHELL_SELFTEST").is_ok() || std::env::var("MYSHELL_TEST_INSTANCE").is_ok();
     let mut builder = tauri::Builder::default();
-    if !selftest {
+    if !isolated {
         // One window only: launching again brings the existing window to the front.
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
@@ -606,6 +607,13 @@ pub fn run() {
             watchdog::spawn(app.handle().clone());
             app.manage(ctx.clone());
             app.manage(server.clone());
+            if std::env::var("MYSHELL_TEST_INSTANCE").is_ok() {
+                // UI test instance: keep rendering (CDP screenshots need it) but stay off the user's screen.
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.set_position(tauri::PhysicalPosition::new(-20000, -20000));
+                    let _ = w.set_size(tauri::PhysicalSize::new(1440, 900));
+                }
+            }
             if let Ok(spec) = std::env::var("MYSHELL_SELFTEST") {
                 // Headless: never put a window on the user's screen.
                 if let Some(w) = app.get_webview_window("main") {

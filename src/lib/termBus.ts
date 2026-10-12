@@ -31,3 +31,6 @@ export const termBus = {
     return id ? handles.get(id) : undefined;
   },
 };
+
+// Dev builds: let the E2E tests (e2e/) read terminal contents. Not present in release bundles.
+if (import.meta.env.DEV) (window as unknown as { __termBus: typeof termBus }).__termBus = termBus;

@@ -163,7 +163,7 @@ pub fn subscribe(ctx: Arc<Ctx>, host_id: String) {
         );
         stop
     };
-    tokio::spawn(run_loop(ctx, host_id, stop));
+    tauri::async_runtime::spawn(run_loop(ctx, host_id, stop));
 }
 
 pub fn unsubscribe(ctx: &Ctx, host_id: &str) {

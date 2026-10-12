@@ -147,7 +147,7 @@ pub async fn open(ctx: Arc<Ctx>, host_id: String, cols: u32, rows: u32) -> Resul
     // Reader: SSH -> ring buffer + pending.
     let rs = s.clone();
     let rctx = ctx.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         while let Some(msg) = reader.wait().await {
             match msg {
                 ChannelMsg::Data { data } => rs.push(&data),
@@ -163,7 +163,7 @@ pub async fn open(ctx: Arc<Ctx>, host_id: String, cols: u32, rows: u32) -> Resul
 
     // Flusher: coalesce output into ~60fps batches so heavy output can't flood the webview.
     let fs = s.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         loop {
             fs.notify.notified().await;
             tokio::time::sleep(Duration::from_millis(12)).await;

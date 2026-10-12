@@ -1,11 +1,12 @@
 // Left sidebar: grouped host list, search, context menu, drag to regroup.
-import { ChevronDown, ChevronRight, Copy, Download, Link, Pencil, Plug, Plus, Search, SquareTerminal, Trash2, Unplug } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Download, Link, Pencil, Plug, Plus, SquareTerminal, Trash2, Unplug } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Confirm, Empty, toast } from "../../components/ui";
 import { api, errMsg, type Host } from "../../lib/api";
 import { useApp } from "../../store";
 import { openTerminal } from "../terminal/open";
 import "./hosts.css";
+import { GlobalSearch } from "../../components/GlobalSearch";
 
 const UNGROUPED = "未分组";
 const COLLAPSE_KEY = "hostGroupsCollapsed";
@@ -67,23 +68,8 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
   const [menu, setMenu] = useState<Menu | null>(null);
   const [deleting, setDeleting] = useState<Host | null>(null);
   const [drag, setDrag] = useState<{ id: string; over: string | null } | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Ctrl+P / Ctrl+Shift+F focus search (capture phase so the terminal doesn't eat it).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      if (e.ctrlKey && !e.altKey && ((k === "p" && !e.shiftKey) || (k === "f" && e.shiftKey))) {
-        e.preventDefault();
-        e.stopPropagation();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, []);
 
   const q = query.trim().toLowerCase();
   const groups = useMemo(() => {
@@ -132,19 +118,6 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
     }
   };
 
-  const onSearchKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      setQuery("");
-      (e.target as HTMLInputElement).blur();
-    } else if (e.key === "Enter" && visible[0]) {
-      e.preventDefault();
-      openTerm((visible.find((h) => h.id === selected) ?? visible[0]).id);
-    } else if (e.key === "ArrowDown" && visible[0]) {
-      e.preventDefault();
-      select(visible[0].id);
-      listRef.current?.focus();
-    }
-  };
 
   // Pointer-based drag (HTML5 DnD is swallowed by the webview's file-drop handler on Windows).
   const startDrag = (e: React.MouseEvent, host: Host) => {
@@ -178,19 +151,7 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
   return (
     <div className="hs">
       <div className="hs-bar">
-        <div className="hs-search-box">
-          <Search />
-          <input
-            ref={searchRef}
-            className="input"
-            placeholder="搜索  Ctrl+P"
-            value={query}
-            disabled={hosts.length === 0}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onSearchKey}
-            spellCheck={false}
-          />
-        </div>
+        <GlobalSearch value={query} onChange={setQuery} />
         <button className="icon-btn md" title="新建服务器" onClick={() => openEditor("")}>
           <Plus />
         </button>

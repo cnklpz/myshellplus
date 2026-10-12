@@ -82,7 +82,7 @@ impl client::Handler for ClientHandler {
             return Ok(()); // dropping `reply` rejects
         };
         reply.accept().await;
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             if let Ok(mut tcp) = tokio::net::TcpStream::connect((th.as_str(), tp)).await {
                 let mut stream = channel.into_stream();
                 let _ = tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
@@ -212,7 +212,7 @@ pub struct Latency {
 
 /// Remember the remote OS name (shown on the home cards) after each connect.
 fn spawn_os_probe(ctx: Arc<Ctx>, c: Arc<Conn>) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let cmd = ". /etc/os-release 2>/dev/null && echo \"$PRETTY_NAME\" || uname -sr";
         let Ok(r) = exec::run(&c, cmd, Duration::from_secs(10)).await else { return };
         let os = r.stdout.lines().next().unwrap_or("").trim().to_string();
@@ -232,7 +232,7 @@ fn spawn_os_probe(ctx: Arc<Ctx>, c: Arc<Conn>) {
 fn spawn_watch(ctx: Arc<Ctx>, c: Arc<Conn>) {
     let weak = Arc::downgrade(&c);
     drop(c);
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut tick: u32 = 0;
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;

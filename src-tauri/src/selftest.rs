@@ -20,7 +20,7 @@ use crate::{importer, mcp, monitor, term, transfer, tunnel};
 pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
     // Auto-accept prompts (host key, agent approvals) like a user clicking "allow".
     let pc = ctx.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         loop {
             for p in pc.prompts.list() {
                 let v = if p.kind == "hostkey" { json!(true) } else { json!({ "approve": true }) };

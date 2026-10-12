@@ -187,7 +187,7 @@ pub fn start(ctx: Arc<Ctx>, host_id: String, direction: String, local: String, r
         error: None,
     };
     ctx.transfers.map.lock().insert(id.clone(), (info.clone(), cancel.clone()));
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut t = info;
         let res = run_transfer(&ctx, &mut t, &cancel).await;
         match res {

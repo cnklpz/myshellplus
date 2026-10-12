@@ -26,3 +26,7 @@ dist-ssr
 # Rust
 src-tauri/target
 src-tauri/gen/schemas
+
+# e2e
+e2e/node_modules
+e2e/shots

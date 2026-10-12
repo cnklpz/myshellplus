@@ -486,7 +486,7 @@ impl Db {
         let mut st = c.prepare(
             "SELECT command, SUM(count) AS cnt, MAX(last_used) AS lu,
                     MAX(CASE WHEN host_id=?1 THEN 1 ELSE 0 END) AS local
-             FROM history WHERE command LIKE ?2 ESCAPE '\' AND command <> ?3
+             FROM history WHERE command LIKE ?2 ESCAPE '\\' AND command <> ?3
              GROUP BY command
              ORDER BY local DESC, cnt * 1.0 / (1 + (?4 - lu) / 86400000.0) DESC
              LIMIT ?5",
@@ -505,7 +505,7 @@ impl Db {
         let like = format!("%{}%", query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
         let mut st = c.prepare(
             "SELECT command, SUM(count), MAX(last_used) FROM history
-             WHERE (?1 = '' OR host_id = ?1) AND command LIKE ?2 ESCAPE '\'
+             WHERE (?1 = '' OR host_id = ?1) AND command LIKE ?2 ESCAPE '\\'
              GROUP BY command ORDER BY MAX(last_used) DESC LIMIT ?3",
         )?;
         let rows = st
@@ -601,5 +601,28 @@ impl Db {
             params![key, serde_json::to_string(value)?],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_search_and_list() {
+        let path = std::env::temp_dir().join(format!("msp-db-test-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let db = Db::open(&path).unwrap();
+        db.record_history("h1", "echo hello").unwrap();
+        db.record_history("h1", "echo 100%_done").unwrap();
+        db.record_history("h2", "ls -la").unwrap();
+        let hits = db.search_history("h1", "ech", 10).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(db.search_history("h1", "echo 100%", 10).unwrap().len(), 1);
+        assert_eq!(db.list_history("h1", "", 10).unwrap().len(), 2);
+        assert_eq!(db.list_history("", "ls", 10).unwrap().len(), 1);
+        db.delete_history("h1", "echo hello").unwrap();
+        assert_eq!(db.list_history("h1", "", 10).unwrap().len(), 1);
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -78,7 +78,7 @@ pub fn start(ctx: Arc<Ctx>, host_ids: Vec<String>, command: String, timeout_secs
     let id = new_id();
     let bid = id.clone();
     let _ = ctx.db.audit("user", None, "batch", &format!("{} 台: {}", host_ids.len(), command), "started");
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         run_many(ctx, bid, host_ids, command, Duration::from_secs(timeout_secs.clamp(1, 3600))).await;
     });
     id

@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::Emitter;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::task::JoinHandle;
+use tauri::async_runtime::JoinHandle;
 
 use crate::db::TunnelDef;
 use crate::ssh::{Conn, get_conn};
@@ -109,7 +109,7 @@ async fn start_inner(ctx: Arc<Ctx>, def: TunnelDef) -> Result<()> {
             let (c, s, d) = (conn.clone(), stats.clone(), def.clone());
             let id = def.id.clone();
             let ctx2 = ctx.clone();
-            Some(tokio::spawn(async move {
+            Some(tauri::async_runtime::spawn(async move {
                 loop {
                     let Ok((sock, peer)) = listener.accept().await else { break };
                     if c.is_closed() {
@@ -118,7 +118,7 @@ async fn start_inner(ctx: Arc<Ctx>, def: TunnelDef) -> Result<()> {
                         break;
                     }
                     let (c, s, d) = (c.clone(), s.clone(), d.clone());
-                    tokio::spawn(async move {
+                    tauri::async_runtime::spawn(async move {
                         let _ = if d.kind == "dynamic" {
                             handle_socks(sock, peer, &c, &s).await
                         } else {
@@ -228,7 +228,7 @@ async fn handle_socks(mut sock: TcpStream, peer: SocketAddr, c: &Conn, s: &Stats
 
 /// Start tunnels flagged auto_start (called once the vault is unlocked).
 pub fn auto_start(ctx: Arc<Ctx>) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let Ok(list) = ctx.db.list_tunnels() else { return };
         for t in list.into_iter().filter(|t| t.auto_start) {
             let _ = start(ctx.clone(), &t.id).await;
