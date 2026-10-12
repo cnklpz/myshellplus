@@ -66,28 +66,24 @@ export function EditorDialog(props: { hostId: string; path: string; name: string
         width={900}
         onClose={askClose ? () => {} : close}
         title={
-          <span className="row">
+          <span className="fp-ed-title">
+            {dirty && <span className="dot warn" title="未保存" />}
             <span className="ellipsis">{props.name}</span>
-            {dirty && <span className="badge warn">未保存</span>}
-            <span className="faint ellipsis mono" style={{ fontWeight: 400, fontSize: "var(--fs-xs)" }} title={props.path}>
-              {props.path}
-            </span>
+            <span className="path ellipsis" title={props.path}>{props.path}</span>
           </span>
         }
         footer={
           <>
-            <span className="faint" style={{ fontSize: "var(--fs-xs)", marginRight: "auto" }}>
-              <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存
-            </span>
+            <span className="fp-ed-status">{dirty ? "未保存" : ""}</span>
             <button className="btn" onClick={close}>关闭</button>
-            <button className="btn primary" disabled={text === null || !dirty || saving} onClick={save}>
+            <button className="btn primary" title="Ctrl+S" disabled={text === null || !dirty || saving} onClick={save}>
               {saving ? "保存中…" : "保存"}
             </button>
           </>
         }
       >
         {error ? (
-          <div className="selectable" style={{ color: "var(--err)" }}>{error}</div>
+          <div className="selectable fp-ed-error">{error}</div>
         ) : text === null ? (
           <div className="faint">加载中…</div>
         ) : (
@@ -104,8 +100,8 @@ export function EditorDialog(props: { hostId: string; path: string; name: string
       {askClose && (
         <Confirm
           title="放弃修改？"
-          message="文件有未保存的修改，关闭后将丢失。"
-          confirmText="放弃修改"
+          message="未保存的修改将丢失。"
+          confirmText="放弃"
           danger
           onCancel={() => setAskClose(false)}
           onConfirm={props.onClose}
@@ -150,7 +146,7 @@ export function ChmodDialog(props: { hostId: string; entries: FileEntry[]; onClo
 
   return (
     <Dialog
-      title={props.entries.length > 1 ? `修改权限 · ${props.entries.length} 项` : `修改权限 · ${first.name}`}
+      title={props.entries.length > 1 ? `权限 · ${props.entries.length} 项` : `权限 · ${first.name}`}
       width={400}
       onClose={props.onClose}
       footer={
@@ -181,7 +177,7 @@ export function ChmodDialog(props: { hostId: string; entries: FileEntry[]; onClo
           ))}
         </div>
         <Field label="八进制">
-          <input className="input mono" style={{ width: 96 }} value={octal} onChange={(e) => onOctal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && apply()} />
+          <input className="input mono fp-octal" value={octal} onChange={(e) => onOctal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && apply()} />
           <span className="faint mono">{fmtPerms(mode, first.isDir)}</span>
         </Field>
         {props.entries.length === 1 && (

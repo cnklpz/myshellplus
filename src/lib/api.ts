@@ -66,6 +66,7 @@ export interface PromptEvent<T = any> { id: string; kind: "hostkey" | "agent"; d
 export interface HostKeyPrompt { host: string; port: number; algo: string; fingerprint: string; changed: boolean; oldFingerprint?: string | null }
 export interface AgentPrompt { hostId: string; hostName: string; host: string; action: string; detail: string; reason: string; dangerous: boolean }
 export interface AuditEntry { id: number; ts: number; source: string; hostId?: string | null; action: string; detail: string; result: string }
+export interface Latency { hostId: string; ms: number | null }
 export interface ConnState { hostId: string; state: "connecting" | "connected" | "error" | "disconnected"; error?: string | null }
 
 export type ImportSource = "openssh" | "putty" | "xshell" | "mobaxterm" | "finalshell" | "csv" | "backup";
@@ -101,6 +102,7 @@ export const api = {
   connConnect: (hostId: string) => invoke<void>("conn_connect", { hostId }),
   connDisconnect: (hostId: string) => invoke<void>("conn_disconnect", { hostId }),
   connList: () => invoke<string[]>("conn_list"),
+  connLatency: () => invoke<Latency[]>("conn_latency"),
   termOpen: (hostId: string, cols: number, rows: number) => invoke<TermInfo>("term_open", { hostId, cols, rows }),
   /** Output arrives on the channel as ArrayBuffer chunks (buffered output is replayed first). */
   termAttach: (id: string, onData: (data: ArrayBuffer) => void) => {

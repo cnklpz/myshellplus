@@ -178,8 +178,20 @@ export function HostSidebar() {
 
   return (
     <div className="hs">
-      <div className="panel-header">
-        <span className="grow">服务器</span>
+      <div className="hs-bar">
+        <div className="hs-search-box">
+          <Search />
+          <input
+            ref={searchRef}
+            className="input sm"
+            placeholder="搜索  Ctrl+P"
+            value={query}
+            disabled={hosts.length === 0}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onSearchKey}
+            spellCheck={false}
+          />
+        </div>
         <button className="icon-btn" title="新建服务器" onClick={() => openEditor("")}>
           <Plus />
         </button>
@@ -192,35 +204,15 @@ export function HostSidebar() {
         <Empty
           text="还没有服务器"
           action={
-            <div className="row">
-              <button className="btn sm primary" onClick={() => openEditor("")}>
-                <Plus /> 新建服务器
-              </button>
-              <button className="btn sm" onClick={() => setImportOpen(true)}>
-                <Download /> 导入
-              </button>
-            </div>
+            <button className="btn sm primary" onClick={() => openEditor("")}>
+              <Plus /> 新建服务器
+            </button>
           }
         />
       ) : (
         <>
-          <div className="hs-search">
-            <div className="hs-search-box">
-              <Search />
-              <input
-                ref={searchRef}
-                className="input sm"
-                placeholder="搜索  Ctrl+P"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={onSearchKey}
-                spellCheck={false}
-              />
-            </div>
-          </div>
-
           <div className="hs-list" ref={listRef} tabIndex={0} onKeyDown={onListKey}>
-            {groups.length === 0 && <div className="empty">没有匹配的服务器</div>}
+            {groups.length === 0 && <div className="empty">无匹配结果</div>}
             {groups.map((g) => {
               const isCollapsed = !q && !!collapsed[g.name];
               return (
@@ -258,12 +250,12 @@ export function HostSidebar() {
                           setMenu({ x: e.clientX, y: e.clientY, host: h });
                         }}
                       >
-                        {h.color && <span className="stripe" style={{ background: h.color }} />}
+                        {h.color && <span className="marker" style={{ background: h.color }} />}
                         <span className="hs-icon">
                           <span className={connDot(conn[h.id]?.state)} />
                         </span>
                         <span className="name ellipsis">{h.name}</span>
-                        <span className="meta">{h.host}</span>
+                        <span className="meta mono">{h.host}</span>
                       </div>
                     ))}
                 </div>
@@ -272,7 +264,7 @@ export function HostSidebar() {
           </div>
 
           <div className="hs-footer">
-            {hosts.length} 台服务器 · {connected} 已连接
+            {hosts.length} 台 · {connected} 已连接
           </div>
         </>
       )}
@@ -289,7 +281,7 @@ export function HostSidebar() {
       {deleting && (
         <Confirm
           title="删除服务器"
-          message={`确定删除「${deleting.name}」？保存的密码会一并删除，已打开的连接会断开。`}
+          message={`删除「${deleting.name}」及其保存的密码，并断开连接。`}
           confirmText="删除"
           danger
           onCancel={() => setDeleting(null)}
@@ -374,7 +366,7 @@ function HostMenu(props: { menu: Menu; state?: string; onClose: () => void; onDe
       <button
         onClick={run(async () => {
           await saveHost({ ...h, id: "", name: h.name + " 副本", passwordSecret: null, updatedAt: 0 });
-          toast(h.passwordSecret ? "已复制（密码未复制，请编辑后填写）" : "已复制", "success");
+          toast(h.passwordSecret ? "已复制，密码需重新填写" : "已复制", "success");
         })}
       >
         <Copy /> 复制

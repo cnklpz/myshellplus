@@ -103,7 +103,7 @@ function HostKeyDialog(props: { ev: PromptEvent<HostKeyPrompt>; more: number; on
   const addr = `${d.host}:${d.port}`;
   return (
     <Dialog
-      title={d.changed ? `服务器指纹已改变 ${addr}` : `首次连接 ${addr}`}
+      title={d.changed ? `主机密钥已改变 · ${addr}` : `首次连接 · ${addr}`}
       width={520}
       onClose={() => props.onAnswer(false)}
       footer={
@@ -126,13 +126,11 @@ function HostKeyDialog(props: { ev: PromptEvent<HostKeyPrompt>; more: number; on
       }
     >
       <div className="stack gap-3">
-        {d.changed ? (
+        {d.changed && (
           <div className="pc-alert">
             <ShieldAlert />
-            <span>服务器指纹已改变，可能存在中间人攻击。除非你确认服务器重装过或更换了密钥，否则请拒绝。</span>
+            <span>可能遭到中间人攻击，未确认请拒绝</span>
           </div>
-        ) : (
-          <div className="muted">尚未信任此服务器的主机密钥。请核对指纹后再继续。</div>
         )}
         <div className="pc-kv">
           <span>算法</span>
@@ -140,11 +138,11 @@ function HostKeyDialog(props: { ev: PromptEvent<HostKeyPrompt>; more: number; on
           {d.changed && (
             <>
               <span>原指纹</span>
-              <span className="mono selectable pc-fp pc-old">{d.oldFingerprint ?? "—"}</span>
+              <code className="pc-code selectable pc-old">{d.oldFingerprint ?? "—"}</code>
             </>
           )}
           <span>{d.changed ? "新指纹" : "指纹"}</span>
-          <span className="mono selectable pc-fp">{d.fingerprint}</span>
+          <code className="pc-code selectable">{d.fingerprint}</code>
         </div>
       </div>
     </Dialog>
@@ -158,8 +156,8 @@ function AgentDialog(props: { ev: PromptEvent<AgentPrompt>; more: number; onAnsw
     <Dialog
       title={
         <span className="row">
-          Agent 请求执行操作
-          {d.dangerous && <span className="badge err">高风险</span>}
+          Agent 请求
+          {d.dangerous && <span className="pc-danger">高风险</span>}
         </span>
       }
       width={560}
@@ -195,7 +193,7 @@ function AgentDialog(props: { ev: PromptEvent<AgentPrompt>; more: number; onAnsw
             </>
           )}
         </div>
-        <pre className={"pc-detail mono selectable" + (d.dangerous ? " danger" : "")}>{d.detail}</pre>
+        <pre className={"pc-code pc-detail selectable" + (d.dangerous ? " danger" : "")}>{d.detail}</pre>
       </div>
     </Dialog>
   );

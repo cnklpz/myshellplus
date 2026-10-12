@@ -7,13 +7,14 @@ import { useApp } from "../../store";
 import { KeyManager } from "./KeyManager";
 import "./hosts.css";
 
+// Host label colors are stored per host (user data), so they are literal values, not theme tokens.
 const COLORS = ["#ef6b6b", "#e5a54b", "#4cc38a", "#3fb6a8", "#5fa8f5", "#c58af0"];
 
 const POLICIES: { id: AgentPolicy; label: string; desc: string }[] = [
-  { id: "deny", label: "禁止", desc: "Agent 看不到此服务器" },
-  { id: "readonly", label: "只读", desc: "只允许查看类命令" },
-  { id: "ask", label: "每次询问", desc: "每个操作都要你确认" },
-  { id: "auto", label: "自动", desc: "高风险命令才询问" },
+  { id: "deny", label: "禁止", desc: "Agent 不可见" },
+  { id: "readonly", label: "只读", desc: "仅允许查看类命令" },
+  { id: "ask", label: "询问", desc: "每次操作需确认" },
+  { id: "auto", label: "自动", desc: "仅危险命令需确认" },
 ];
 
 function blankHost(): Host {
@@ -114,7 +115,7 @@ export function HostEditor() {
     }
   };
 
-  const pwPlaceholder = hasSavedPw && password === undefined ? "已保存，留空不修改" : password === "" && hasSavedPw ? "将清除已保存的密码" : "";
+  const pwPlaceholder = hasSavedPw && password === undefined ? "已保存" : password === "" && hasSavedPw ? "将清除" : "";
 
   return (
     <>
@@ -143,10 +144,10 @@ export function HostEditor() {
           }}
         >
           <Field label="名称">
-            <input className="input" autoFocus value={h.name} onChange={(e) => set("name", e.target.value)} placeholder="留空使用地址" />
+            <input className="input" autoFocus value={h.name} onChange={(e) => set("name", e.target.value)} placeholder="web-01" />
           </Field>
           <Field label="分组">
-            <input className="input" list="he-groups" value={h.groupName} onChange={(e) => set("groupName", e.target.value)} placeholder="未分组" />
+            <input className="input" list="he-groups" value={h.groupName} onChange={(e) => set("groupName", e.target.value)} placeholder="生产" />
             <datalist id="he-groups">
               {groups.map((g) => (
                 <option key={g} value={g} />
@@ -158,20 +159,19 @@ export function HostEditor() {
               className="input mono"
               value={h.host}
               onChange={(e) => set("host", e.target.value)}
-              placeholder="192.168.1.10 或 example.com"
+              placeholder="192.168.1.10"
               spellCheck={false}
             />
-            <span className="faint" style={{ whiteSpace: "nowrap", flex: "none" }}>端口</span>
+            <span className="he-port">端口</span>
             <input
-              className="input num"
-              style={{ width: 80, flex: "none" }}
+              className="input num he-port-input"
               value={port}
               inputMode="numeric"
               onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))}
             />
           </Field>
           <Field label="用户名" hint={errors.username && <span className="he-err">{errors.username}</span>}>
-            <input className="input" value={h.username} onChange={(e) => set("username", e.target.value)} spellCheck={false} />
+            <input className="input" value={h.username} onChange={(e) => set("username", e.target.value)} placeholder="root" spellCheck={false} />
           </Field>
           <Field label="认证方式">
             <div className="seg">
@@ -208,13 +208,13 @@ export function HostEditor() {
           ) : (
             <Field label="密钥" hint={errors.key && <span className="he-err">{errors.key}</span>}>
               <select className="select" value={h.keyId ?? ""} onChange={(e) => set("keyId", e.target.value || null)}>
-                <option value="">{keys.length ? "选择密钥" : "还没有密钥"}</option>
+                <option value="">{keys.length ? "选择密钥" : "无密钥"}</option>
                 {keys.map((k) => (
                   <option key={k.id} value={k.id}>{k.name}</option>
                 ))}
               </select>
               <button type="button" className="btn" style={{ flex: "none" }} onClick={() => setKeyMgr(true)}>
-                <KeyRound /> 管理密钥
+                <KeyRound /> 管理
               </button>
             </Field>
           )}
@@ -229,21 +229,23 @@ export function HostEditor() {
             </select>
           </Field>
           <Field label="颜色">
-            <button type="button" className={"swatch none" + (!h.color ? " on" : "")} title="无" onClick={() => set("color", "")}>
-              <Ban />
-            </button>
-            {COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                className={"swatch" + (h.color === c ? " on" : "")}
-                style={{ background: c }}
-                onClick={() => set("color", c)}
-              />
-            ))}
+            <div className="he-swatches">
+              <button type="button" className={"swatch none" + (!h.color ? " on" : "")} title="无" onClick={() => set("color", "")}>
+                <Ban />
+              </button>
+              {COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={"swatch" + (h.color === c ? " on" : "")}
+                  style={{ background: c }}
+                  onClick={() => set("color", c)}
+                />
+              ))}
+            </div>
           </Field>
           <Field label="标签">
-            <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="逗号分隔，如 prod, web" />
+            <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="prod, web" />
           </Field>
           <Field label="备注" top>
             <textarea className="textarea" rows={2} value={h.notes} onChange={(e) => set("notes", e.target.value)} />

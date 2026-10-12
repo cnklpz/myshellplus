@@ -19,6 +19,8 @@ interface AppState {
   vault: VaultStatus | null;
   hosts: Host[];
   conn: Record<string, ConnState>;
+  /** SSH ping round trip per host (ms), null = no reply */
+  latency: Record<string, number | null>;
   tabs: TermTab[];
   activeTab: string | null;
   view: View;
@@ -33,6 +35,7 @@ interface AppState {
   refreshVault: () => Promise<void>;
   refreshHosts: () => Promise<void>;
   setConn: (s: ConnState) => void;
+  setLatency: (hostId: string, ms: number | null) => void;
   setView: (v: View) => void;
   setSidePanel: (p: SidePanel) => void;
   setPanelHost: (id: string | null) => void;
@@ -52,6 +55,7 @@ export const useApp = create<AppState>((set, get) => ({
   vault: null,
   hosts: [],
   conn: {},
+  latency: {},
   tabs: [],
   activeTab: null,
   view: "terminal",
@@ -64,6 +68,7 @@ export const useApp = create<AppState>((set, get) => ({
   refreshVault: async () => set({ vault: await api.vaultStatus() }),
   refreshHosts: async () => set({ hosts: await api.hostList() }),
   setConn: (s) => set({ conn: { ...get().conn, [s.hostId]: s } }),
+  setLatency: (hostId, ms) => set({ latency: { ...get().latency, [hostId]: ms } }),
   setView: (view) => set({ view }),
   setSidePanel: (sidePanel) => set({ sidePanel }),
   setPanelHost: (panelHostId) => set({ panelHostId }),

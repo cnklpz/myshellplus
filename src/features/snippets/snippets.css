@@ -8,21 +8,21 @@
 .sn-search > .input { padding-left: calc(var(--sp-2) + var(--icon-sm) + var(--sp-2)); }
 .sn-tags { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .sn-chip {
-  height: 20px; padding: 0 var(--sp-2); border-radius: 10px; border: 1px solid var(--line);
-  background: transparent; color: var(--fg-1); font-size: var(--fs-xs); cursor: pointer;
+  height: 20px; padding: 0 var(--sp-2); border-radius: var(--radius-sm); border: none;
+  background: transparent; color: var(--fg-2); font-size: var(--fs-xs); cursor: pointer;
 }
-.sn-chip:hover { background: var(--bg-3); }
-.sn-chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.sn-chip:hover { color: var(--fg-0); }
+.sn-chip.on { background: var(--bg-3); color: var(--fg-0); }
 
 .sn-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 var(--sp-3) var(--sp-3); }
 .sn-item {
-  display: flex; flex-direction: column; gap: var(--sp-1);
+  display: flex; flex-direction: column; gap: 2px;
   padding: var(--sp-2); border-radius: var(--radius-sm); cursor: pointer;
 }
 .sn-item:hover { background: var(--bg-3); }
 .sn-line { display: flex; align-items: center; gap: var(--sp-2); height: 20px; min-width: 0; }
 .sn-name { font-weight: 500; }
-.sn-tagline { display: flex; gap: var(--sp-1); flex: none; max-width: 50%; overflow: hidden; }
+.sn-tagline { flex: 0 1 auto; max-width: 50%; font-size: var(--fs-xs); color: var(--fg-2); }
 .sn-cmd { font-size: var(--fs-xs); }
 .sn-actions { display: none; align-items: center; gap: 0; flex: none; margin: calc(-1 * var(--sp-1)) 0; }
 .sn-actions .icon-btn { width: 24px; height: 24px; }
@@ -31,6 +31,6 @@
 .sn-item:hover .sn-tagline { display: none; }
 .sn-preview {
   flex: 1 1 auto; min-width: 0; margin: 0; padding: var(--sp-2) var(--sp-3);
-  background: var(--bg-0); border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--bg-0); border-radius: var(--radius-md);
   font-size: var(--fs-sm); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto;
 }

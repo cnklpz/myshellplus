@@ -109,26 +109,22 @@ export function SnippetsPanel({ hostId: _hostId }: { hostId: string | null }) {
         {list && list.length === 0 ? (
           <Empty
             icon={<ScrollText />}
-            text="保存常用命令，点击即可发送到终端"
+            text="还没有片段"
             action={
               <button className="btn sm" onClick={() => setEditing({ name: "", command: "", tags: [] })}>
                 <Plus />
-                新建片段
+                新建
               </button>
             }
           />
         ) : list && shown.length === 0 ? (
-          <Empty text="没有匹配的片段" />
+          <Empty text="无匹配" />
         ) : (
           shown.map((s) => (
-            <div key={s.id} className="sn-item" onClick={() => use(s, "paste")} title="点击插入到终端">
+            <div key={s.id} className="sn-item" onClick={() => use(s, "paste")} title="点击插入">
               <div className="sn-line">
                 <span className="grow ellipsis sn-name">{s.name || "未命名"}</span>
-                <div className="sn-tagline">
-                  {s.tags.map((t) => (
-                    <span key={t} className="badge">{t}</span>
-                  ))}
-                </div>
+                {s.tags.length > 0 && <span className="ellipsis sn-tagline">{s.tags.join(" · ")}</span>}
                 <div className="sn-actions" onClick={(e) => e.stopPropagation()}>
                   <button className="icon-btn" title="运行" onClick={() => use(s, "run")}>
                     <Play />
@@ -163,7 +159,7 @@ export function SnippetsPanel({ hostId: _hostId }: { hostId: string | null }) {
       {deleting && (
         <Confirm
           title="删除片段"
-          message={`确定删除片段「${deleting.name}」？`}
+          message={`删除「${deleting.name}」？`}
           confirmText="删除"
           danger
           onCancel={() => setDeleting(null)}
@@ -283,7 +279,7 @@ function SnippetEditor(props: { initial: Partial<Snippet>; onClose: () => void; 
           label="命令"
           top
           hint={
-            vars.length ? `变量：${vars.map((v) => v.name).join("、")}` : "可用 {{变量}} 或 {{变量:默认值}} 作为占位符，执行前填写"
+            vars.length ? `变量：${vars.map((v) => v.name).join("、")}` : "支持 {{变量:默认值}}"
           }
         >
           <textarea
@@ -300,8 +296,8 @@ function SnippetEditor(props: { initial: Partial<Snippet>; onClose: () => void; 
             }}
           />
         </Field>
-        <Field label="标签" hint="多个标签用逗号分隔">
-          <input className="input" value={tags} placeholder="如：docker, 日志" onChange={(e) => setTags(e.target.value)} />
+        <Field label="标签">
+          <input className="input" value={tags} placeholder="docker, 日志" onChange={(e) => setTags(e.target.value)} />
         </Field>
       </div>
     </Dialog>

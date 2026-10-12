@@ -1,30 +1,30 @@
 // Agent page: MCP server config + client setup snippets, tool list, host policies, audit log.
-import { BookOpen, Copy, Eye, EyeOff, RefreshCw, ScrollText, Search, Server, Shield, Wrench } from "lucide-react";
+import { Copy, Eye, EyeOff, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Field, Toggle, toast } from "../../components/ui";
+import { Toggle, toast } from "../../components/ui";
 import { type AgentPolicy, type AuditEntry, type McpSettings, api, errMsg } from "../../lib/api";
 import { fmtTime } from "../../lib/format";
 import { useApp } from "../../store";
 import "./agent.css";
 
 const TOOLS: { name: string; desc: string }[] = [
-  { name: "list_hosts", desc: "列出可用服务器（分组、地址、权限、连接状态）" },
-  { name: "run_command", desc: "在服务器上执行非交互命令，返回输出和退出码" },
-  { name: "batch_run", desc: "在多台服务器上并发执行同一命令" },
-  { name: "host_status", desc: "获取 CPU、内存、负载、网络、磁盘和进程" },
-  { name: "list_dir", desc: "列出远程目录" },
-  { name: "read_file", desc: "读取远程文本文件（≤5MB）" },
-  { name: "write_file", desc: "覆盖写入远程文本文件" },
-  { name: "list_terminals", desc: "列出当前打开的终端会话" },
-  { name: "read_terminal", desc: "读取终端最近的输出" },
-  { name: "send_terminal", desc: "向终端输入文本（用于交互式程序）" },
+  { name: "list_hosts", desc: "列出服务器" },
+  { name: "run_command", desc: "执行命令" },
+  { name: "batch_run", desc: "批量执行" },
+  { name: "host_status", desc: "主机状态" },
+  { name: "list_dir", desc: "列出目录" },
+  { name: "read_file", desc: "读取文件" },
+  { name: "write_file", desc: "写入文件" },
+  { name: "list_terminals", desc: "列出终端" },
+  { name: "read_terminal", desc: "读取终端输出" },
+  { name: "send_terminal", desc: "向终端输入" },
 ];
 
 const POLICY: Record<AgentPolicy, { label: string; cls: string }> = {
-  deny: { label: "禁止", cls: "" },
-  readonly: { label: "只读", cls: "ok" },
-  ask: { label: "每次询问", cls: "accent" },
-  auto: { label: "自动", cls: "warn" },
+  deny: { label: "禁止", cls: "t-faint" },
+  readonly: { label: "只读", cls: "t-ok" },
+  ask: { label: "每次询问", cls: "" },
+  auto: { label: "自动", cls: "t-warn" },
 };
 
 const RESULT_LABEL: Record<string, string> = {
@@ -36,9 +36,9 @@ const RESULT_LABEL: Record<string, string> = {
 };
 
 function resultCls(r: string) {
-  if (r.startsWith("allowed") || r.startsWith("approved") || r === "ok") return "ok";
-  if (r.startsWith("denied") || r.startsWith("error")) return "err";
-  return "";
+  if (r.startsWith("allowed") || r.startsWith("approved") || r === "ok") return "t-ok";
+  if (r.startsWith("denied") || r.startsWith("error")) return "t-err";
+  return "t-muted";
 }
 
 const mask = (t: string) => (t.length > 8 ? t.slice(0, 4) + "•".repeat(12) + t.slice(-2) : "•".repeat(12));
@@ -57,7 +57,6 @@ export function AgentView() {
     <div className="page">
       <div className="page-header">
         <h1>Agent</h1>
-        <span className="faint">通过 MCP 让 Claude Code 等 AI Agent 操作你的服务器</span>
       </div>
       <div className="page-body">
         <div className="agent-inner">
@@ -117,75 +116,71 @@ function McpCard() {
     JSON.stringify({ mcpServers: { myshellplus: { type: "http", url, headers: { Authorization: `Bearer ${t}` } } } }, null, 2);
   const shown = reveal ? saved.token : mask(saved.token);
 
+  const regen = async () => {
+    try {
+      await persist({ ...saved, token: await api.mcpNewToken() });
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+
   return (
     <>
-      <div className="card agent-card">
-        <div className="agent-card-head">
-          <Server />
-          <span className="grow">MCP 服务</span>
-          {running ? (
-            <span className="badge ok">
-              <span className="dot ok" />
-              运行中 · 127.0.0.1:{running}
-            </span>
-          ) : (
-            <span className="badge">
-              <span className="dot" />
-              未运行
-            </span>
-          )}
+      <section className="agent-sec">
+        <div className="agent-sec-head">
+          <h2 className="grow">MCP 服务</h2>
+          <span className="agent-status">
+            <span className={"dot" + (running ? " ok" : "")} />
+            {running ? `运行中 · 127.0.0.1:${running}` : "未运行"}
+          </span>
         </div>
-        <Field label="启用">
-          <Toggle on={draft.enabled} disabled={busy} onChange={(v) => persist({ ...saved, enabled: v })} />
-          <span className="agent-note">仅监听本机 127.0.0.1</span>
-        </Field>
-        <Field label="端口">
-          <input
-            className="input mono"
-            style={{ width: 120 }}
-            inputMode="numeric"
-            value={draft.port || ""}
-            onChange={(e) => setDraft({ ...draft, port: Number(e.target.value.replace(/\D/g, "")) || 0 })}
-          />
-          <button className="btn" disabled={!dirty || !portValid || busy} onClick={() => persist(draft)}>
-            保存
-          </button>
-        </Field>
-        <Field label="Token" hint="Agent 需在请求头携带此 Token。重新生成后旧配置立即失效。">
-          <input className="input mono" readOnly value={shown} />
-          <button className="icon-btn md" title={reveal ? "隐藏" : "显示"} onClick={() => setReveal(!reveal)}>
-            {reveal ? <EyeOff /> : <Eye />}
-          </button>
-          <button className="icon-btn md" title="复制" onClick={() => copy(saved.token)}>
-            <Copy />
-          </button>
-          <button
-            className="btn"
-            disabled={busy}
-            onClick={async () => {
-              try {
-                await persist({ ...saved, token: await api.mcpNewToken() });
-              } catch (e) {
-                toast(errMsg(e), "error");
-              }
-            }}
-          >
-            <RefreshCw />
-            重新生成
-          </button>
-        </Field>
-      </div>
+        <div className="agent-strip">
+          <div className="grp">
+            <Toggle on={draft.enabled} disabled={busy} onChange={(v) => persist({ ...saved, enabled: v })} />
+            <span className="lbl">启用</span>
+          </div>
+          <span className="agent-sep" />
+          <div className="grp">
+            <span className="lbl">端口</span>
+            <input
+              className="input mono num"
+              style={{ width: 88 }}
+              inputMode="numeric"
+              value={draft.port || ""}
+              onChange={(e) => setDraft({ ...draft, port: Number(e.target.value.replace(/\D/g, "")) || 0 })}
+            />
+            {dirty && (
+              <button className="btn" disabled={!portValid || busy} onClick={() => persist(draft)}>
+                保存
+              </button>
+            )}
+          </div>
+          <span className="agent-sep" />
+          <div className="grp grow">
+            <span className="lbl">Token</span>
+            <input className="input mono" readOnly value={shown} />
+            <button className="icon-btn md" title={reveal ? "隐藏" : "显示"} onClick={() => setReveal(!reveal)}>
+              {reveal ? <EyeOff /> : <Eye />}
+            </button>
+            <button className="icon-btn md" title="复制" onClick={() => copy(saved.token)}>
+              <Copy />
+            </button>
+            <button className="icon-btn md" disabled={busy} title="重新生成（旧 Token 立即失效）" onClick={regen}>
+              <RefreshCw />
+            </button>
+          </div>
+        </div>
+      </section>
 
-      <div className="card agent-card">
-        <div className="agent-card-head">
-          <BookOpen />
-          <span>接入指南</span>
+      <section className="agent-sec">
+        <div className="agent-sec-head">
+          <h2>接入</h2>
         </div>
-        <div className="code-label">Claude Code（在终端执行）</div>
+        <div className="code-label">Claude Code</div>
         <CodeBox display={cli(shown)} value={cli(saved.token)} />
-        <div className="code-label">其他支持 MCP 的客户端（JSON 配置）</div>
+        <div className="code-label">JSON 配置</div>
         <CodeBox display={json(shown)} value={json(saved.token)} />
-      </div>
+      </section>
     </>
   );
 }
@@ -205,28 +200,19 @@ function CodeBox(props: { display: string; value: string }) {
 
 function ToolsCard() {
   return (
-    <div className="card agent-card">
-      <div className="agent-card-head">
-        <Wrench />
-        <span>可用工具</span>
+    <section className="agent-sec">
+      <div className="agent-sec-head">
+        <h2>工具</h2>
       </div>
-      <div className="agent-table-wrap">
-        <table className="table">
-          <colgroup>
-            <col style={{ width: 160 }} />
-            <col />
-          </colgroup>
-          <tbody>
-            {TOOLS.map((t) => (
-              <tr key={t.name}>
-                <td className="mono">{t.name}</td>
-                <td className="muted">{t.desc}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="agent-tools">
+        {TOOLS.map((t) => (
+          <div key={t.name}>
+            <span className="mono ellipsis">{t.name}</span>
+            <span className="d ellipsis">{t.desc}</span>
+          </div>
+        ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -235,16 +221,12 @@ function ToolsCard() {
 function PolicyCard() {
   const hosts = useApp((s) => s.hosts);
   return (
-    <div className="card agent-card">
-      <div className="agent-card-head">
-        <Shield />
-        <span>权限</span>
-      </div>
-      <div className="agent-note">
-        每台服务器的 Agent 权限在服务器编辑器中设置：禁止（不可见）、只读（仅查看类命令和读文件）、每次询问（每个操作弹窗确认）、自动（仅危险命令需确认）。点击行可编辑。
+    <section className="agent-sec">
+      <div className="agent-sec-head">
+        <h2>权限</h2>
       </div>
       {hosts.length === 0 ? (
-        <div className="agent-note">暂无服务器</div>
+        <div className="agent-empty">暂无服务器</div>
       ) : (
         <div className="agent-table-wrap">
           <table className="table">
@@ -266,15 +248,13 @@ function PolicyCard() {
               {hosts.map((h) => {
                 const p = POLICY[h.agentPolicy] ?? POLICY.ask;
                 return (
-                  <tr key={h.id} className="click" onClick={() => useApp.getState().openEditor(h.id)}>
+                  <tr key={h.id} className="click" title="编辑权限" onClick={() => useApp.getState().openEditor(h.id)}>
                     <td title={h.name}>{h.name}</td>
                     <td className="muted">{h.groupName || "-"}</td>
                     <td className="mono muted" title={`${h.username}@${h.host}:${h.port}`}>
                       {h.username}@{h.host}:{h.port}
                     </td>
-                    <td>
-                      <span className={"badge " + p.cls}>{p.label}</span>
-                    </td>
+                    <td className={p.cls}>{p.label}</td>
                   </tr>
                 );
               })}
@@ -282,7 +262,7 @@ function PolicyCard() {
           </table>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -323,10 +303,9 @@ function AuditCard() {
   }, [entries, filter, q, hostName]);
 
   return (
-    <div className="card agent-card">
-      <div className="agent-card-head">
-        <ScrollText />
-        <span className="grow">审计日志</span>
+    <section className="agent-sec">
+      <div className="agent-sec-head">
+        <h2 className="grow">审计日志</h2>
         <div className="seg">
           {(
             [
@@ -340,8 +319,8 @@ function AuditCard() {
             </button>
           ))}
         </div>
-        <div className="row gap-1" style={{ width: 200 }}>
-          <Search style={{ width: "var(--icon-sm)", height: "var(--icon-sm)", flex: "none" }} className="faint" />
+        <div className="agent-search">
+          <Search />
           <input className="input sm" placeholder="搜索" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <button className="icon-btn" title="刷新" onClick={load}>
@@ -349,12 +328,12 @@ function AuditCard() {
         </button>
       </div>
       {rows.length === 0 ? (
-        <div className="agent-note">没有记录</div>
+        <div className="agent-empty">没有记录</div>
       ) : (
         <div className="agent-table-wrap tall">
           <table className="table">
             <colgroup>
-              <col style={{ width: 148 }} />
+              <col style={{ width: 168 }} />
               <col style={{ width: 72 }} />
               <col style={{ width: 128 }} />
               <col style={{ width: 112 }} />
@@ -376,23 +355,17 @@ function AuditCard() {
                 const hn = e.hostId ? hostName.get(e.hostId) ?? e.hostId : "-";
                 return (
                   <tr key={e.id}>
-                    <td className="mono muted" style={{ fontVariantNumeric: "tabular-nums" }}>
-                      {fmtTime(e.ts)}
-                    </td>
-                    <td>
-                      <span className={"badge " + (e.source === "agent" ? "accent" : "")}>{e.source === "agent" ? "Agent" : "用户"}</span>
-                    </td>
+                    <td className="agent-time">{fmtTime(e.ts)}</td>
+                    <td className={e.source === "agent" ? "" : "t-muted"}>{e.source === "agent" ? "Agent" : "用户"}</td>
                     <td title={hn}>{hn}</td>
-                    <td className="mono" title={e.action}>
+                    <td className="mono t-muted" title={e.action}>
                       {e.action}
                     </td>
                     <td className="mono selectable" title={e.detail}>
                       {e.detail}
                     </td>
-                    <td>
-                      <span className={"badge " + resultCls(e.result)} title={e.result}>
-                        {RESULT_LABEL[e.result] ?? e.result}
-                      </span>
+                    <td className={resultCls(e.result)} title={e.result}>
+                      {RESULT_LABEL[e.result] ?? e.result}
                     </td>
                   </tr>
                 );
@@ -401,6 +374,6 @@ function AuditCard() {
           </table>
         </div>
       )}
-    </div>
+    </section>
   );
 }

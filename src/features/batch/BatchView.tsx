@@ -164,7 +164,7 @@ export function BatchView() {
           <div className="bt-editor">
             <textarea
               className="textarea mono bt-cmd"
-              placeholder="输入要在所选服务器上执行的命令，Ctrl+Enter 执行"
+              placeholder="df -h"
               spellCheck={false}
               value={command}
               onChange={(e) => setCommand(e.target.value)}
@@ -184,7 +184,6 @@ export function BatchView() {
               </select>
               <SnippetMenu onPick={(s) => setCommand((c) => (c.trim() ? c.replace(/\s*$/, "\n") + s.command : s.command))} />
               <span className="spacer" />
-              <span className="faint bt-count">已选 {selectedIds.length} 台</span>
               <button className="btn primary sm" disabled={!canRun} onClick={execute} title="Ctrl+Enter">
                 <Play />
                 执行
@@ -203,7 +202,7 @@ export function BatchView() {
               onRetry={(ids) => request(ids, current.command, current.timeout)}
             />
           ) : (
-            <Empty icon={<Layers />} text="选择左侧服务器并输入命令后执行，结果将按服务器分别显示" />
+            <Empty icon={<Layers />} text="选择服务器并输入命令" />
           )}
         </div>
       </div>
@@ -215,7 +214,7 @@ export function BatchView() {
           confirmText={`在 ${pendingDanger.hostIds.length} 台上执行`}
           message={
             <div className="stack">
-              <div>该命令可能造成不可逆影响，将在 {pendingDanger.hostIds.length} 台服务器上执行：</div>
+              <div>该命令可能不可逆：</div>
               <pre className="mono bt-danger-cmd">{pendingDanger.command}</pre>
             </div>
           }
@@ -302,7 +301,7 @@ function HostPicker(props: {
         {hosts.length === 0 ? (
           <div className="empty">还没有服务器</div>
         ) : groups.length === 0 ? (
-          <div className="empty">没有匹配的服务器</div>
+          <div className="empty">无匹配</div>
         ) : (
           groups.map(([g, hs]) => {
             const n = hs.filter((h) => selected.has(h.id)).length;
@@ -370,7 +369,7 @@ function SnippetMenu(props: { onPick: (s: Snippet) => void }) {
     <div className="bt-pop-wrap" ref={ref}>
       <button className="btn sm" onClick={() => setOpen(!open)}>
         <ScrollText />
-        从片段插入
+        片段
         <ChevronDown />
       </button>
       {open && (
@@ -380,7 +379,7 @@ function SnippetMenu(props: { onPick: (s: Snippet) => void }) {
             {list === null ? (
               <div className="faint bt-pop-empty">加载中…</div>
             ) : shown.length === 0 ? (
-              <div className="faint bt-pop-empty">{list.length ? "没有匹配的片段" : "还没有片段"}</div>
+              <div className="faint bt-pop-empty">{list.length ? "无匹配" : "还没有片段"}</div>
             ) : (
               shown.map((s) => (
                 <div
@@ -450,9 +449,9 @@ function HistoryMenu(props: { runs: Run[]; currentId: string | null; onOpen: (r:
                     <span className="num">{fmtClock(r.started)}</span>
                     <span>{r.hostIds.length} 台</span>
                     <span className="spacer" />
-                    {c.running > 0 && <span className="badge warn">运行中 {c.running}</span>}
-                    <span className="badge ok">成功 {c.ok}</span>
-                    {c.fail > 0 && <span className="badge err">失败 {c.fail}</span>}
+                    {c.running > 0 && <span className="bt-warn">运行中 {c.running}</span>}
+                    <span className="bt-ok">成功 {c.ok}</span>
+                    {c.fail > 0 && <span className="bt-fail">失败 {c.fail}</span>}
                   </div>
                 </div>
               );
@@ -508,10 +507,10 @@ function Results(props: {
   return (
     <div className="bt-results">
       <div className="row bt-summary">
-        <span className="badge ok">成功 {c.ok}</span>
-        <span className="badge err">失败 {c.fail}</span>
-        <span className="badge warn">运行中 {c.running}</span>
-        <span className="faint num bt-elapsed">用时 {fmtDur(elapsed)}</span>
+        <span className="bt-ok">成功 {c.ok}</span>
+        <span className={c.fail ? "bt-fail" : "faint"}>失败 {c.fail}</span>
+        {c.running > 0 && <span className="bt-warn">运行中 {c.running}</span>}
+        <span className="faint num">用时 {fmtDur(elapsed)}</span>
         <span className="spacer" />
         <div className="seg">
           {(
@@ -526,21 +525,21 @@ function Results(props: {
             </button>
           ))}
         </div>
-        <button className="btn sm" onClick={() => props.setCollapsed(allCollapsed ? new Set() : new Set(shown.map((r) => r.hostId)))}>
-          {allCollapsed ? "全部展开" : "全部折叠"}
+        <button className="btn ghost sm" onClick={() => props.setCollapsed(allCollapsed ? new Set() : new Set(shown.map((r) => r.hostId)))}>
+          {allCollapsed ? "展开" : "折叠"}
         </button>
-        <button className="btn sm" onClick={copyAll} disabled={!items.length}>
+        <button className="btn ghost sm" onClick={copyAll} disabled={!items.length} title="复制全部输出">
           <Copy />
-          复制全部输出
+          复制
         </button>
-        <button className="btn sm" disabled={!failedIds.length || c.running > 0} onClick={() => props.onRetry(failedIds)}>
+        <button className="btn ghost sm" disabled={!failedIds.length || c.running > 0} onClick={() => props.onRetry(failedIds)}>
           <RotateCcw />
-          仅重试失败的
+          重试失败
         </button>
       </div>
 
       <div className="bt-cards">
-        {shown.length === 0 && <div className="empty">没有{filter === "ok" ? "成功" : "失败"}的结果</div>}
+        {shown.length === 0 && <div className="empty">无{filter === "ok" ? "成功" : "失败"}结果</div>}
         {shown.map((r) => {
           const o = outcome(r);
           const open = !collapsed.has(r.hostId);
@@ -552,11 +551,11 @@ function Results(props: {
                 <span className={"dot " + (o === "ok" ? "ok" : o === "fail" ? "err" : "warn")} />
                 <span className="ellipsis grow bt-card-name">{name(r.hostId)}</span>
                 {o === "running" ? (
-                  <span className="badge warn">运行中</span>
+                  <span className="bt-code bt-warn">运行中</span>
                 ) : r.state === "error" ? (
-                  <span className="badge err">错误</span>
+                  <span className="bt-code bt-fail">错误</span>
                 ) : (
-                  <span className={"badge num " + (r.exitCode === 0 ? "ok" : "err")}>exit {r.exitCode ?? "-"}</span>
+                  <span className={"bt-code mono " + (r.exitCode === 0 ? "bt-ok" : "bt-fail")}>exit {r.exitCode ?? "-"}</span>
                 )}
                 <span className="num faint bt-dur">{o === "running" ? "…" : fmtDur(r.durationMs)}</span>
               </div>

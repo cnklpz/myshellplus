@@ -1,6 +1,6 @@
 // Import wizard dialog (driven by store.importOpen): choose source -> preview/select -> result.
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { Archive, Download, FileCode, FolderOpen, Monitor, SquareTerminal, Table, Terminal, TriangleAlert } from "lucide-react";
+import { CircleX, Download, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Dialog, Field, Toggle, toast } from "../../components/ui";
 import { type ImportCandidate, type ImportPreview, type ImportResult, type ImportSource, api, errMsg } from "../../lib/api";
@@ -13,17 +13,16 @@ const SOURCES: {
   id: ImportSource;
   name: string;
   hint: string;
-  icon: typeof Terminal;
   kind: Kind;
   filters?: { name: string; extensions: string[] }[];
 }[] = [
-  { id: "openssh", name: "OpenSSH", hint: "~/.ssh/config", icon: Terminal, kind: "file" },
-  { id: "putty", name: "PuTTY", hint: "读取注册表中的会话", icon: Monitor, kind: "none" },
-  { id: "xshell", name: "Xshell", hint: "会话文件夹（.xsh）", icon: SquareTerminal, kind: "dir" },
-  { id: "mobaxterm", name: "MobaXterm", hint: "MobaXterm.ini", icon: FileCode, kind: "file", filters: [{ name: "MobaXterm 配置", extensions: ["ini"] }] },
-  { id: "finalshell", name: "FinalShell", hint: "安装目录下的 conn 文件夹", icon: FolderOpen, kind: "dir" },
-  { id: "csv", name: "CSV 表格", hint: "Excel 另存为 CSV", icon: Table, kind: "file", filters: [{ name: "CSV", extensions: ["csv"] }] },
-  { id: "backup", name: "MyShell+ 备份", hint: "导出的 .json 备份", icon: Archive, kind: "file", filters: [{ name: "MyShell+ 备份", extensions: ["json"] }] },
+  { id: "openssh", name: "OpenSSH", hint: "~/.ssh/config", kind: "file" },
+  { id: "putty", name: "PuTTY", hint: "注册表", kind: "none" },
+  { id: "xshell", name: "Xshell", hint: "*.xsh 文件夹", kind: "dir" },
+  { id: "mobaxterm", name: "MobaXterm", hint: "MobaXterm.ini", kind: "file", filters: [{ name: "MobaXterm 配置", extensions: ["ini"] }] },
+  { id: "finalshell", name: "FinalShell", hint: "conn 文件夹", kind: "dir" },
+  { id: "csv", name: "CSV", hint: "*.csv", kind: "file", filters: [{ name: "CSV", extensions: ["csv"] }] },
+  { id: "backup", name: "MyShell+ 备份", hint: "*.json", kind: "file", filters: [{ name: "MyShell+ 备份", extensions: ["json"] }] },
 ];
 
 const CSV_TEMPLATE = "name,group,host,port,username,password,key,notes,tags\nweb-01,生产,10.0.0.11,22,root,,C:\\Users\\me\\.ssh\\id_ed25519,Nginx,web;nginx\ndb-01,生产,10.0.0.21,22,admin,P@ssw0rd,,,db\n";
@@ -102,7 +101,7 @@ export function ImportDialog() {
       const m = errMsg(e);
       if (source === "backup" && (m.includes("NEED_PASSWORD") || m.includes("备份密码错误"))) {
         setNeedPw(true);
-        setError(m.includes("NEED_PASSWORD") ? "此备份包含加密的密码和密钥，请输入备份密码" : "备份密码错误");
+        setError(m.includes("NEED_PASSWORD") ? "备份已加密，请输入密码" : "备份密码错误");
       } else {
         setError(m);
       }
@@ -155,7 +154,7 @@ export function ImportDialog() {
           取消
         </button>
         <button className="btn primary" disabled={busy || (selected.size === 0 && !(withSnippets && preview?.snippets.length))} onClick={apply}>
-          {busy ? "导入中…" : `导入 ${selected.size} 台服务器`}
+          {busy ? "导入中…" : `导入 ${selected.size} 台`}
         </button>
       </>
     ) : (
@@ -170,10 +169,10 @@ export function ImportDialog() {
         <div className="row gap-3">
           <span>导入服务器</span>
           <div className="imp-steps">
-            <span className={step === "source" ? "on" : ""}>1 选择来源</span>
-            <span>›</span>
+            <span className={step === "source" ? "on" : ""}>1 来源</span>
+            <span>·</span>
             <span className={step === "preview" ? "on" : ""}>2 预览</span>
-            <span>›</span>
+            <span>·</span>
             <span className={step === "done" ? "on" : ""}>3 完成</span>
           </div>
         </div>
@@ -187,9 +186,8 @@ export function ImportDialog() {
           <div className="imp-tiles">
             {SOURCES.map((s) => (
               <button key={s.id} type="button" className={"imp-tile" + (source === s.id ? " on" : "")} onClick={() => pick(s.id)}>
-                <s.icon />
                 <span className="name">{s.name}</span>
-                <span className="hint">{s.hint}</span>
+                <span className="hint ellipsis">{s.hint}</span>
               </button>
             ))}
           </div>
@@ -201,8 +199,8 @@ export function ImportDialog() {
                   <span className="mono muted selectable">{path || "注册表"}</span>
                 </Field>
               ) : (
-                <Field label={src.kind === "dir" ? "文件夹" : "文件"} hint={path ? undefined : "未找到默认位置，请手动选择"}>
-                  <input className="input mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder="路径" />
+                <Field label={src.kind === "dir" ? "文件夹" : "文件"} hint={path ? undefined : "未找到默认位置"}>
+                  <input className="input mono" value={path} onChange={(e) => setPath(e.target.value)} />
                   <button className="btn" onClick={browse}>
                     浏览
                   </button>
@@ -226,14 +224,14 @@ export function ImportDialog() {
                 <Field
                   label="格式"
                   top
-                  hint="首行必须是表头。列：name, group, host, port, username, password, key（私钥文件路径）, notes, tags（用 ; 分隔）。也可用中文表头：名称、分组、主机、端口、用户名、密码。只有 host 列必填。"
+                  hint="首行为表头，仅 host 必填"
                 >
                   <div className="stack grow">
                     <pre className="imp-template">{CSV_TEMPLATE}</pre>
                     <div className="row">
                       <button className="btn sm" onClick={saveTemplate}>
                         <Download />
-                        下载模板
+                        模板
                       </button>
                     </div>
                   </div>
@@ -242,9 +240,9 @@ export function ImportDialog() {
 
               {error && (
                 <Field label="">
-                  <TriangleAlert style={{ width: "var(--icon-md)", height: "var(--icon-md)", color: "var(--err)", flex: "none" }} />
-                  <span className="selectable" style={{ color: "var(--err)", fontSize: "var(--fs-sm)" }}>
-                    {error}
+                  <span className="imp-error">
+                    <CircleX />
+                    <span className="selectable">{error}</span>
                   </span>
                 </Field>
               )}
@@ -310,47 +308,43 @@ function PreviewStep(props: {
   return (
     <div className="stack gap-3">
       {preview.warnings.length > 0 && (
-        <div className="imp-warnings">
+        <div className="imp-msgs">
           {preview.warnings.map((w, i) => (
-            <div key={i} className="row">
-              <span className="badge warn">注意</span>
-              <span className="selectable">{w}</span>
+            <div key={i}>
+              <TriangleAlert />
+              <span className="selectable ellipsis" title={w}>
+                {w}
+              </span>
             </div>
           ))}
         </div>
       )}
 
-      <div className="row gap-4">
+      <div className="imp-bar">
         <div className="row">
-          <span className="muted" style={{ fontSize: "var(--fs-sm)" }}>
-            导入到分组
-          </span>
-          <input className="input sm" style={{ width: 180 }} placeholder="保留原分组" value={props.group} onChange={(e) => props.setGroup(e.target.value)} />
+          <span className="lbl">分组</span>
+          <input className="input sm" style={{ width: 160 }} placeholder="保留原分组" value={props.group} onChange={(e) => props.setGroup(e.target.value)} />
         </div>
         {dupCount > 0 && (
           <div className="row">
             <Toggle on={skipDup} onChange={setSkip} />
-            <span className="muted" style={{ fontSize: "var(--fs-sm)" }}>
-              跳过已存在（{dupCount}）
-            </span>
+            <span className="lbl">跳过已存在 {dupCount}</span>
           </div>
         )}
         {preview.snippets.length > 0 && (
           <div className="row">
             <Toggle on={props.withSnippets} onChange={props.setWithSnippets} />
-            <span className="muted" style={{ fontSize: "var(--fs-sm)" }}>
-              导入 {preview.snippets.length} 个片段
-            </span>
+            <span className="lbl">片段 {preview.snippets.length}</span>
           </div>
         )}
         <span className="spacer" />
-        <span className="faint num" style={{ fontSize: "var(--fs-sm)" }}>
-          已选 {selected.size} / {hosts.length}
+        <span className="count">
+          {selected.size} / {hosts.length}
         </span>
       </div>
 
       {hosts.length === 0 ? (
-        <div className="empty">没有找到可导入的服务器</div>
+        <div className="empty">未找到服务器</div>
       ) : (
         <div className="imp-table">
           <table className="table">
@@ -383,7 +377,7 @@ function PreviewStep(props: {
                 const addr = `${h.username || "root"}@${h.host}:${h.port || 22}`;
                 const jump = h.jumpAlias ? aliasName.get(h.jumpAlias) ?? h.jumpAlias : "";
                 return (
-                  <tr key={i} style={disabled ? { opacity: 0.5 } : undefined} onClick={() => !disabled && toggle(i)}>
+                  <tr key={i} className={disabled ? "off" : undefined} onClick={() => !disabled && toggle(i)}>
                     <td>
                       <input type="checkbox" disabled={disabled} checked={selected.has(i)} onChange={() => toggle(i)} onClick={(e) => e.stopPropagation()} />
                     </td>
@@ -398,7 +392,7 @@ function PreviewStep(props: {
                     <td className="muted" title={jump}>
                       {jump || "-"}
                     </td>
-                    <td>{h.duplicate ? <span className="badge warn">已存在</span> : <span className="badge ok">新</span>}</td>
+                    <td className={h.duplicate ? "st-dup" : "st-new"}>{h.duplicate ? "已存在" : "新"}</td>
                   </tr>
                 );
               })}
@@ -431,11 +425,13 @@ function DoneStep(props: { result: ImportResult }) {
       {r.errors.length > 0 && (
         <div className="stack gap-1">
           <div className="section-title">失败 {r.errors.length} 项</div>
-          <div className="imp-warnings" style={{ maxHeight: 200 }}>
+          <div className="imp-msgs err tall">
             {r.errors.map((e, i) => (
-              <div key={i} className="row">
-                <span className="badge err">错误</span>
-                <span className="selectable">{e}</span>
+              <div key={i}>
+                <CircleX />
+                <span className="selectable ellipsis" title={e}>
+                  {e}
+                </span>
               </div>
             ))}
           </div>

@@ -49,13 +49,14 @@ export function SearchBox(props: { search: SearchAddon; onClose: () => void }) {
     >
       <input
         ref={inputRef}
-        className="input sm"
+        className="term-search-input"
+        spellCheck={false}
         placeholder="搜索"
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
       <span className="term-search-count num faint">
-        {q ? (res ? (res.count === 0 ? "无结果" : `${res.index >= 0 ? res.index + 1 : "?"}/${res.count}`) : "") : ""}
+        {q ? (res ? (res.count === 0 ? "0/0" : `${res.index >= 0 ? res.index + 1 : "?"}/${res.count}`) : "") : ""}
       </span>
       <button className={"icon-btn term-search-case" + (caseSensitive ? " active" : "")} title="区分大小写" onClick={() => setCase(!caseSensitive)}>
         Aa

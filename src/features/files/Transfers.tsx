@@ -64,10 +64,10 @@ export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo
   return (
     <div className="fp-tx">
       <div className="section-title">
-        传输 {running > 0 && <span className="badge accent">{running} 进行中</span>}
+        传输 {running > 0 && <span className="count">{running}/{list.length}</span>}
         <span className="spacer" />
         {running < list.length && (
-          <button className="btn ghost sm" onClick={clear}>清除已完成</button>
+          <button className="btn ghost sm" onClick={clear}>清除</button>
         )}
       </div>
       {list.map((t) => {
@@ -78,17 +78,17 @@ export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo
           <div className="fp-tx-item" key={t.id} title={`${t.local}\n${t.remote}`}>
             <Icon />
             <span className="ellipsis">{name}</span>
-            <span className="faint num" style={{ fontSize: "var(--fs-xs)" }}>
-              {t.state === "running" ? fmtBytes(t.total) : t.state === "done" ? fmtBytes(t.total) : t.state === "cancelled" ? "已取消" : ""}
+            <span className="meta num">
+              {t.state === "running" || t.state === "done" ? fmtBytes(t.total) : t.state === "cancelled" ? "已取消" : ""}
             </span>
             {t.state === "running" ? (
               <button className="icon-btn" title="取消" onClick={() => api.transferCancel(t.id).catch((e) => toast(errMsg(e), "error"))}>
                 <X />
               </button>
             ) : t.state === "done" ? (
-              <Check style={{ color: "var(--ok)", justifySelf: "center", width: "var(--icon-sm)" }} />
+              <Check className="ok" />
             ) : (
-              <X style={{ color: t.state === "error" ? "var(--err)" : "var(--fg-2)", justifySelf: "center", width: "var(--icon-sm)" }} />
+              <X className={t.state === "error" ? "err" : ""} />
             )}
             {t.state === "running" && (
               <div className="prog">
@@ -98,8 +98,8 @@ export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo
               </div>
             )}
             {t.state === "error" && (
-              <div className="prog" style={{ gridTemplateColumns: "1fr" }}>
-                <span className="ellipsis selectable" style={{ color: "var(--err)" }} title={t.error ?? ""}>{t.error || "失败"}</span>
+              <div className="prog" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+                <span className="ellipsis selectable err" title={t.error ?? ""}>{t.error || "失败"}</span>
               </div>
             )}
           </div>

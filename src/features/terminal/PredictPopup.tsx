@@ -48,16 +48,9 @@ export function PredictPopup(props: { state: PopupState; onPick: (i: number) => 
       {aiLoading && (
         <div className="predict-row loading">
           <LoaderCircle className="predict-icon spin" />
-          <span className="predict-cmd faint">AI 预测中…</span>
+          <span className="predict-cmd faint">预测中…</span>
         </div>
       )}
-      <div className="predict-foot">
-        <span><kbd>↑↓</kbd> 选择</span>
-        <span><kbd>Tab</kbd> <kbd>→</kbd> 接受</span>
-        <span><kbd>Esc</kbd> 关闭</span>
-        <span className="spacer" />
-        <span><kbd>Ctrl+Space</kbd> AI</span>
-      </div>
     </div>
   );
 }

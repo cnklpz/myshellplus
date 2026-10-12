@@ -1,5 +1,5 @@
 // Terminal tabs + xterm sessions, command prediction, AI command bar.
-import { Plus, Search, Server, SquareTerminal, X } from "lucide-react";
+import { Plus, Search, Server, X } from "lucide-react";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { type TermTab, useApp } from "../../store";
 import { installAiPredictWatcher } from "./config";
@@ -49,7 +49,7 @@ export function TerminalArea() {
             onSwitch={switchTab}
           />
         ))}
-        {tabs.length === 0 && <EmptyState />}
+        {tabs.length === 0 && <EmptyState onNew={() => setPicker(true)} />}
       </div>
     </div>
   );
@@ -78,6 +78,7 @@ function TabItem(props: { tab: TermTab; active: boolean; onSelect: () => void; o
     >
       <span className={"dot " + (tab.alive ? "ok" : "err")} />
       <span className="ellipsis grow">{tab.title}</span>
+      {tab.alive && <LatencyTag hostId={tab.hostId} />}
       <button
         className="icon-btn term-tab-close"
         title="关闭 (Ctrl+W)"
@@ -90,6 +91,15 @@ function TabItem(props: { tab: TermTab; active: boolean; onSelect: () => void; o
       </button>
     </div>
   );
+}
+
+/** Network round trip, shown only when it is noticeable. */
+function LatencyTag({ hostId }: { hostId: string }) {
+  const ms = useApp((s) => s.latency[hostId]);
+  if (ms === undefined) return null;
+  if (ms === null) return <span className="term-latency err">超时</span>;
+  if (ms < 60) return null;
+  return <span className={"term-latency" + (ms >= 200 ? " err" : " warn")}>{ms}ms</span>;
 }
 
 function HostPicker(props: { onClose: () => void }) {
@@ -178,28 +188,14 @@ function HostPicker(props: { onClose: () => void }) {
   );
 }
 
-const HINTS: [string, string][] = [
-  ["Ctrl+K", "AI 生成命令"],
-  ["Ctrl+Space", "AI 预测"],
-  ["Tab / →", "接受补全建议"],
-  ["Ctrl+F", "搜索输出"],
-  ["Ctrl+Shift+C / V", "复制 / 粘贴"],
-  ["Ctrl+Tab", "切换标签"],
-];
-
-function EmptyState() {
+function EmptyState(props: { onNew: () => void }) {
   return (
     <div className="term-empty">
-      <SquareTerminal className="term-empty-icon" />
-      <div className="term-empty-title">选择左侧服务器开始连接</div>
-      <div className="term-empty-hints">
-        {HINTS.map(([k, v]) => (
-          <div key={k} className="term-empty-hint">
-            <kbd>{k}</kbd>
-            <span>{v}</span>
-          </div>
-        ))}
-      </div>
+      <span>双击左侧服务器开始</span>
+      <button className="btn sm" onClick={props.onNew}>
+        <Plus />
+        新建终端
+      </button>
     </div>
   );
 }

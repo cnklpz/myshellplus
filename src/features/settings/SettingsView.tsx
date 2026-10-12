@@ -2,23 +2,24 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { appDataDir } from "@tauri-apps/api/path";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Archive, Bot, Cloud, Info, Lock, Palette, Plus, Shield, Trash2, Zap } from "lucide-react";
+import { Lock, Plus, Trash2, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Dialog, Field, Toggle, toast } from "../../components/ui";
 import { type AiProvider, type AiSettings, api, errMsg } from "../../lib/api";
 import { useApp } from "../../store";
 import "./settings.css";
 import { applyTheme, currentTheme, THEMES } from "../../lib/themes";
+import { type EchoMode, echoSettings, saveEchoSettings } from "../terminal/localEcho";
 
 type Section = "ai" | "security" | "appearance" | "backup" | "sync" | "about";
 
-const SECTIONS: { id: Section; icon: typeof Bot; label: string }[] = [
-  { id: "ai", icon: Bot, label: "AI 服务" },
-  { id: "security", icon: Shield, label: "安全" },
-  { id: "appearance", icon: Palette, label: "外观" },
-  { id: "backup", icon: Archive, label: "备份与导入" },
-  { id: "sync", icon: Cloud, label: "云同步" },
-  { id: "about", icon: Info, label: "关于" },
+const SECTIONS: { id: Section; label: string }[] = [
+  { id: "ai", label: "AI 服务" },
+  { id: "security", label: "安全" },
+  { id: "appearance", label: "外观" },
+  { id: "backup", label: "备份" },
+  { id: "sync", label: "云同步" },
+  { id: "about", label: "关于" },
 ];
 
 export function SettingsView() {
@@ -31,10 +32,9 @@ export function SettingsView() {
       <div className="set-layout">
         <nav className="set-nav">
           {SECTIONS.map((s) => (
-            <div key={s.id} className={"list-row" + (section === s.id ? " selected" : "")} onClick={() => setSection(s.id)}>
-              <s.icon />
+            <button key={s.id} type="button" className={section === s.id ? "on" : ""} onClick={() => setSection(s.id)}>
               <span className="ellipsis">{s.label}</span>
-            </div>
+            </button>
           ))}
         </nav>
         <div className="set-content">
@@ -57,6 +57,21 @@ function Title(props: { text: string; children?: React.ReactNode }) {
     <div className="set-title">
       <h2>{props.text}</h2>
       <span className="spacer" />
+      {props.children}
+    </div>
+  );
+}
+
+/** Optional small heading + content (usually one .set-group card). */
+function Block(props: { title?: string; actions?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="set-block">
+      {(props.title || props.actions) && (
+        <div className="set-block-head">
+          <span className="grow">{props.title}</span>
+          {props.actions}
+        </div>
+      )}
       {props.children}
     </div>
   );
@@ -183,104 +198,114 @@ function AiSection() {
   return (
     <>
       <Title text="AI 服务">
-        {dirty && <span className="faint">有未保存的修改</span>}
+        {dirty && <span className="set-note">未保存</span>}
         <button className="btn primary" disabled={!dirty || busy !== null} onClick={saveAll}>
           保存
         </button>
       </Title>
 
-      <div className="card set-card">
-        <div className="set-card-head">
-          <Bot />
-          <span className="grow">服务</span>
-          <select className="select sm" style={{ width: 128 }} value={preset} onChange={(e) => setPreset(Number(e.target.value))}>
-            {PRESETS.map((p, i) => (
-              <option key={p.label} value={i}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-          <button className="btn sm" onClick={add}>
-            <Plus />
-            添加服务
-          </button>
-        </div>
-        {s.providers.length === 0 && <div className="set-note">尚未添加 AI 服务</div>}
-        {s.providers.map((p) => {
-          const k = keys[p.id];
-          const placeholder = k === "" ? "保存后清除" : p.apiKeySecret ? "已保存" : "未设置";
-          return (
-            <div key={p.id} className="set-sub">
-              <Field label="名称">
-                <input className="input" value={p.name} onChange={(e) => updateProvider(p.id, { name: e.target.value })} />
-                <button className="btn" disabled={busy !== null} onClick={() => test(p)} title="保存后用此服务生成一条命令">
-                  <Zap />
-                  {busy === p.id ? "测试中…" : "测试"}
-                </button>
-                <button className="btn danger" onClick={() => remove(p.id)} title="删除服务">
-                  <Trash2 />
-                </button>
-              </Field>
-              <Field label="类型">
-                <Seg
-                  value={p.kind}
-                  options={[
-                    { value: "anthropic", label: "Anthropic" },
-                    { value: "openai", label: "OpenAI 兼容" },
-                  ]}
-                  onChange={(kind) => updateProvider(p.id, { kind })}
-                />
-              </Field>
-              <Field label="Base URL">
-                <input className="input mono" value={p.baseUrl} onChange={(e) => updateProvider(p.id, { baseUrl: e.target.value })} />
-              </Field>
-              <Field label="模型">
-                <input className="input mono" value={p.model} onChange={(e) => updateProvider(p.id, { model: e.target.value })} />
-              </Field>
-              <Field label="API Key">
-                <input
-                  className="input mono"
-                  type="password"
-                  autoComplete="off"
-                  value={k ?? ""}
-                  placeholder={placeholder}
-                  onChange={(e) => setKey(p.id, e.target.value === "" ? null : e.target.value)}
-                />
-                <button className="btn" disabled={!p.apiKeySecret && !k} onClick={() => setKey(p.id, p.apiKeySecret ? "" : null)}>
-                  清除
-                </button>
-              </Field>
+      <Block
+        title="服务"
+        actions={
+          <>
+            <select className="select sm" style={{ width: 128 }} value={preset} onChange={(e) => setPreset(Number(e.target.value))}>
+              {PRESETS.map((p, i) => (
+                <option key={p.label} value={i}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            <button className="btn sm" onClick={add}>
+              <Plus />
+              添加
+            </button>
+          </>
+        }
+      >
+        <div className="set-stack">
+          {s.providers.length === 0 && (
+            <div className="set-group">
+              <div className="set-empty">未添加服务</div>
             </div>
-          );
-        })}
-      </div>
-
-      <div className="card set-card">
-        <div className="set-card-head">
-          <Zap />
-          <span>用途</span>
+          )}
+          {s.providers.map((p) => {
+            const k = keys[p.id];
+            const placeholder = k === "" ? "保存后清除" : p.apiKeySecret ? "已保存" : "未设置";
+            return (
+              <div key={p.id} className="set-group">
+                <Field label="名称">
+                  <input className="input" value={p.name} onChange={(e) => updateProvider(p.id, { name: e.target.value })} />
+                  <button className="btn" disabled={busy !== null} onClick={() => test(p)} title="保存并测试">
+                    <Zap />
+                    {busy === p.id ? "测试中…" : "测试"}
+                  </button>
+                  <button className="icon-btn md" onClick={() => remove(p.id)} title="删除">
+                    <Trash2 />
+                  </button>
+                </Field>
+                <Field label="类型">
+                  <Seg
+                    value={p.kind}
+                    options={[
+                      { value: "anthropic", label: "Anthropic" },
+                      { value: "openai", label: "OpenAI 兼容" },
+                    ]}
+                    onChange={(kind) => updateProvider(p.id, { kind })}
+                  />
+                </Field>
+                <Field label="Base URL">
+                  <input
+                    className="input mono"
+                    value={p.baseUrl}
+                    placeholder="https://api.example.com"
+                    onChange={(e) => updateProvider(p.id, { baseUrl: e.target.value })}
+                  />
+                </Field>
+                <Field label="模型">
+                  <input className="input mono" value={p.model} onChange={(e) => updateProvider(p.id, { model: e.target.value })} />
+                </Field>
+                <Field label="API Key">
+                  <input
+                    className="input mono"
+                    type="password"
+                    autoComplete="off"
+                    value={k ?? ""}
+                    placeholder={placeholder}
+                    onChange={(e) => setKey(p.id, e.target.value === "" ? null : e.target.value)}
+                  />
+                  <button className="btn" disabled={!p.apiKeySecret && !k} onClick={() => setKey(p.id, p.apiKeySecret ? "" : null)}>
+                    清除
+                  </button>
+                </Field>
+              </div>
+            );
+          })}
         </div>
-        <Field label="默认服务">
-          <select className="select" value={s.active ?? ""} onChange={(e) => update({ active: e.target.value || null })}>
-            <option value="">未选择</option>
-            {providerOptions}
-          </select>
-        </Field>
-        <Field label="预测服务" hint="命令预测建议选响应快的模型，例如 claude-haiku-5-5">
-          <select className="select" value={s.predictProvider ?? ""} onChange={(e) => update({ predictProvider: e.target.value || null })}>
-            <option value="">同默认服务</option>
-            {providerOptions}
-          </select>
-        </Field>
-        <Field label="本地命令预测">
-          <Toggle on={s.predictEnabled} onChange={(v) => update({ predictEnabled: v })} />
-          <span className="set-note">根据历史命令和片段补全</span>
-        </Field>
-        <Field label="AI 命令预测">
-          <Toggle on={s.aiPredictEnabled} onChange={(v) => update({ aiPredictEnabled: v })} />
-          <span className="set-note">会把当前输入和屏幕内容发送给预测服务</span>
-        </Field>
-      </div>
+      </Block>
+
+      <Block title="用途">
+        <div className="set-group">
+          <Field label="默认服务">
+            <select className="select" value={s.active ?? ""} onChange={(e) => update({ active: e.target.value || null })}>
+              <option value="">未选择</option>
+              {providerOptions}
+            </select>
+          </Field>
+          <Field label="预测服务">
+            <select className="select" value={s.predictProvider ?? ""} onChange={(e) => update({ predictProvider: e.target.value || null })}>
+              <option value="">同默认服务</option>
+              {providerOptions}
+            </select>
+          </Field>
+          <Field label="本地预测">
+            <Toggle on={s.predictEnabled} onChange={(v) => update({ predictEnabled: v })} />
+          </Field>
+          <Field label="AI 预测">
+            <Toggle on={s.aiPredictEnabled} onChange={(v) => update({ aiPredictEnabled: v })} />
+            <span className="set-note">会发送当前输入和屏幕内容</span>
+          </Field>
+        </div>
+      </Block>
     </>
   );
 }
@@ -311,26 +336,22 @@ function SecuritySection() {
   return (
     <>
       <Title text="安全" />
-      <div className="card set-card">
-        <div className="set-card-head">
-          <Lock />
-          <span>保险库</span>
-        </div>
-        <Field label="状态">
+      <div className="set-group">
+        <Field label="保险库">
           <span className={"dot " + (vault?.unlocked ? "ok" : "warn")} />
           <span>{vault?.unlocked ? "已解锁" : "已锁定"}</span>
+          <span className="spacer" />
+          <button className="btn" onClick={lock}>
+            <Lock />
+            锁定
+          </button>
         </Field>
-        <Field label="记住主密码" hint="开启后启动时自动解锁（密钥经 Windows DPAPI 加密保存，仅当前用户可用）">
+        <Field label="自动解锁">
           <Toggle on={!!vault?.remembered} onChange={remember} />
-          <span className="set-note">在此设备上记住主密码</span>
         </Field>
         <Field label="主密码">
           <button className="btn" onClick={() => setChanging(true)}>
-            修改主密码
-          </button>
-          <button className="btn" onClick={lock}>
-            <Lock />
-            立即锁定
+            修改
           </button>
         </Field>
       </div>
@@ -387,7 +408,7 @@ function ChangePasswordDialog(props: { onClose: () => void }) {
         <Field label="当前密码">
           <input className="input" type="password" autoFocus value={old} onChange={(e) => setOld(e.target.value)} />
         </Field>
-        <Field label="新密码">
+        <Field label="新密码" hint="主密码遗失后无法找回">
           <input className="input" type="password" value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
         <Field label="确认新密码" hint={mismatch ? "两次输入不一致" : undefined}>
@@ -420,6 +441,11 @@ function AppearanceSection() {
   const [themeId, setThemeId] = useState(currentTheme().id);
   const [fontSize, setFontSize] = useState(lsGet("termFontSize") ?? "14");
 
+  const [echo, setEchoState] = useState(echoSettings());
+  const setEcho = (v: { mode: EchoMode; threshold: number }) => {
+    setEchoState(v);
+    saveEchoSettings(v.mode, v.threshold);
+  };
   const pick = (id: string) => {
     setThemeId(id);
     applyTheme(id);
@@ -433,40 +459,71 @@ function AppearanceSection() {
   return (
     <>
       <Title text="外观" />
-      <div className="theme-grid">
-        {THEMES.map((t) => (
-          <button key={t.id} className={"theme-tile" + (t.id === themeId ? " on" : "")} onClick={() => pick(t.id)}>
-            <div className="theme-preview" style={{ background: t.ui.chrome }}>
-              <div className="tp-side" />
-              <div className="tp-main" style={{ background: t.ui.bg0 }}>
-                <span style={{ background: t.ansi[2], width: "38%" }} />
-                <span style={{ background: t.ui.fg2, width: "62%" }} />
-                <span style={{ background: t.ansi[4], width: "48%" }} />
-                <span style={{ background: t.ui.accent, width: "22%" }} />
+      <Block title="主题">
+        <div className="theme-grid">
+          {THEMES.map((t) => (
+            <button key={t.id} className={"theme-tile" + (t.id === themeId ? " on" : "")} onClick={() => pick(t.id)}>
+              <div className="theme-preview" style={{ background: t.ui.chrome }}>
+                <div className="tp-side" />
+                <div className="tp-main" style={{ background: t.ui.bg0 }}>
+                  <span style={{ background: t.ansi[2], width: "38%" }} />
+                  <span style={{ background: t.ui.fg2, width: "62%" }} />
+                  <span style={{ background: t.ansi[4], width: "48%" }} />
+                  <span style={{ background: t.ui.accent, width: "22%" }} />
+                </div>
               </div>
-            </div>
-            <div className="theme-name">
-              <span>{t.name}</span>
-              <span className="theme-dots">
-                {[t.ui.accent, t.ansi[1], t.ansi[2], t.ansi[3]].map((c) => (
-                  <i key={c} style={{ background: c }} />
+              <div className="theme-name">
+                <span>{t.name}</span>
+                <span className="theme-dots">
+                  {[t.ui.accent, t.ansi[1], t.ansi[2], t.ansi[3]].map((c) => (
+                    <i key={c} style={{ background: c }} />
+                  ))}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </Block>
+      <Block title="终端">
+        <div className="set-group">
+          <Field label="字号">
+            <select className="select" style={{ width: 120 }} value={fontSize} onChange={(e) => applyFont(e.target.value)}>
+              {["12", "13", "14", "15", "16", "18"].map((n) => (
+                <option key={n} value={n}>
+                  {n} px
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="本地回显">
+            <Seg
+              value={echo.mode}
+              options={[
+                { value: "off", label: "关闭" },
+                { value: "auto", label: "自动" },
+                { value: "on", label: "始终" },
+              ]}
+              onChange={(m) => setEcho({ ...echo, mode: m as EchoMode })}
+            />
+          </Field>
+          {echo.mode === "auto" && (
+            <Field label="延迟阈值">
+              <select
+                className="select"
+                style={{ width: 120 }}
+                value={echo.threshold}
+                onChange={(e) => setEcho({ ...echo, threshold: Number(e.target.value) })}
+              >
+                {[50, 80, 120, 200].map((n) => (
+                  <option key={n} value={n}>
+                    {n} ms
+                  </option>
                 ))}
-              </span>
-            </div>
-          </button>
-        ))}
-      </div>
-      <div className="card set-card" style={{ marginTop: "var(--sp-4)" }}>
-        <Field label="终端字号">
-          <select className="select" style={{ width: 120 }} value={fontSize} onChange={(e) => applyFont(e.target.value)}>
-            {["12", "13", "14", "15", "16", "18"].map((n) => (
-              <option key={n} value={n}>
-                {n} px
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
+              </select>
+            </Field>
+          )}
+        </div>
+      </Block>
     </>
   );
 }
@@ -477,16 +534,16 @@ function BackupSection() {
   const [exporting, setExporting] = useState(false);
   return (
     <>
-      <Title text="备份与导入" />
-      <div className="card set-card">
-        <Field label="导入服务器" hint="支持 OpenSSH、PuTTY、Xshell、MobaXterm、FinalShell、CSV 和 MyShell+ 备份">
+      <Title text="备份" />
+      <div className="set-group">
+        <Field label="导入服务器">
           <button className="btn" onClick={() => useApp.getState().setImportOpen(true)}>
-            导入服务器
+            导入
           </button>
         </Field>
-        <Field label="导出备份" hint="导出服务器、分组、片段和隧道，可选包含密码和密钥">
+        <Field label="导出备份">
           <button className="btn" onClick={() => setExporting(true)}>
-            导出备份
+            导出
           </button>
         </Field>
       </div>
@@ -529,28 +586,24 @@ function ExportDialog(props: { onClose: () => void }) {
             取消
           </button>
           <button className="btn primary" disabled={!ok} onClick={run}>
-            选择位置并导出
+            导出
           </button>
         </>
       }
     >
       <div className="stack gap-3">
-        <Field label="包含密码和密钥">
+        <Field label="含密码密钥">
           <Toggle on={secrets} onChange={setSecrets} />
         </Field>
-        {secrets ? (
+        {secrets && (
           <>
-            <Field label="备份密码" hint="密码和私钥会用此密码加密，导入时需要输入。请妥善保管，遗失无法恢复。">
+            <Field label="备份密码" hint="遗失后无法解密备份">
               <input className="input" type="password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} />
             </Field>
             <Field label="确认密码" hint={pw2 !== "" && pw !== pw2 ? "两次输入不一致" : undefined}>
               <input className="input" type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
             </Field>
           </>
-        ) : (
-          <Field label="">
-            <span className="set-note">不包含任何密码和私钥，导入后需要重新填写。</span>
-          </Field>
         )}
       </div>
     </Dialog>
@@ -563,14 +616,8 @@ function SyncSection() {
   return (
     <>
       <Title text="云同步" />
-      <div className="card set-card">
-        <div className="set-note">即将推出：使用自己的服务器进行端到端加密同步</div>
-        <Field label="服务器地址">
-          <input className="input" disabled placeholder="https://sync.example.com" />
-        </Field>
-        <Field label="启用">
-          <Toggle on={false} onChange={() => {}} disabled />
-        </Field>
+      <div className="set-group">
+        <div className="set-empty">即将推出</div>
       </div>
     </>
   );
@@ -588,11 +635,11 @@ function AboutSection() {
   return (
     <>
       <Title text="关于" />
-      <div className="card set-card">
+      <div className="set-group">
         <Field label="版本">
           <span className="mono selectable">MyShell+ {version}</span>
         </Field>
-        <Field label="数据目录" hint="数据库与加密保险库保存在这里，备份时可整体复制">
+        <Field label="数据目录">
           <span className="set-path">{dir || "-"}</span>
         </Field>
       </div>

@@ -71,15 +71,6 @@ export function AiBar(props: {
     >
       {result && (
         <div className="ai-result stack">
-          <div className="row">
-            <span className="section-title">命令</span>
-            {result.dangerous && (
-              <span className="badge err">
-                <TriangleAlert size={12} />
-                高风险
-              </span>
-            )}
-          </div>
           <textarea
             className="textarea mono ai-cmd"
             spellCheck={false}
@@ -98,9 +89,12 @@ export function AiBar(props: {
           />
           {result.explanation && <div className="ai-expl muted selectable">{result.explanation}</div>}
           <div className="row">
-            <span className="faint ai-hint">
-              <kbd>Ctrl+Enter</kbd> 执行
-            </span>
+            {result.dangerous && (
+              <span className="row gap-1 ai-risk">
+                <TriangleAlert />
+                高风险命令
+              </span>
+            )}
             <span className="spacer" />
             <button
               className="btn sm ghost"
@@ -113,7 +107,7 @@ export function AiBar(props: {
               <TextCursorInput />
               插入
             </button>
-            <button className={"btn sm " + (confirm ? "danger solid" : "primary")} onClick={run}>
+            <button className={"btn sm " + (confirm ? "danger solid" : "primary")} title="Ctrl+Enter" onClick={run}>
               <Play />
               {confirm ? "确认执行" : "执行"}
             </button>
@@ -122,7 +116,7 @@ export function AiBar(props: {
       )}
       {error && (
         <div className="ai-error row">
-          <TriangleAlert size={14} />
+          <TriangleAlert />
           <span className="grow selectable">{error}</span>
         </div>
       )}
@@ -131,7 +125,7 @@ export function AiBar(props: {
         <input
           ref={inputRef}
           className="grow"
-          placeholder="用自然语言描述要执行的操作…"
+          placeholder="描述要执行的操作"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -145,7 +139,7 @@ export function AiBar(props: {
         {loading ? (
           <LoaderCircle className="ai-input-icon spin" />
         ) : (
-          <button className="icon-btn" title="生成命令 (Enter)" onClick={ask} disabled={!text.trim()}>
+          <button className="icon-btn" title="生成 (Enter)" onClick={ask} disabled={!text.trim()}>
             <CornerDownLeft />
           </button>
         )}
@@ -183,7 +177,6 @@ export function ExplainCard(props: { hostId: string; text: string; onClose: () =
       }}
     >
       <div className="explain-head row">
-        <Sparkles className="ai-input-icon" />
         <span>AI 解释</span>
         <span className="grow ellipsis mono faint explain-src">{props.text.replace(/\s+/g, " ")}</span>
         <button className="icon-btn" title="关闭" onClick={props.onClose}>
@@ -193,7 +186,7 @@ export function ExplainCard(props: { hostId: string; text: string; onClose: () =
       <div className="explain-body selectable">
         {error ? (
           <div className="ai-error row">
-            <TriangleAlert size={14} />
+            <TriangleAlert />
             <span className="grow">{error}</span>
           </div>
         ) : out === null ? (

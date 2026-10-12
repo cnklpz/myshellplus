@@ -16,7 +16,7 @@ import { SnippetsPanel } from "./features/snippets/SnippetsPanel";
 import { TerminalArea } from "./features/terminal/TerminalArea";
 import { TunnelsView } from "./features/tunnels/TunnelsView";
 import { VaultGate } from "./features/vault/VaultGate";
-import { api, type ConnState } from "./lib/api";
+import { api, type ConnState, type Latency } from "./lib/api";
 import { type SidePanel, useApp } from "./store";
 import "./App.css";
 
@@ -32,6 +32,7 @@ async function bootstrap() {
   await s.refreshVault();
   await s.refreshHosts();
   for (const id of await api.connList()) s.setConn({ hostId: id, state: "connected" });
+  for (const l of await api.connLatency()) s.setLatency(l.hostId, l.ms);
   const hosts = useApp.getState().hosts;
   const sessions = await api.termList();
   for (const t of sessions) {
@@ -58,6 +59,7 @@ export default function App() {
     const beat = setInterval(() => api.uiHeartbeat().catch(() => {}), 5000);
     const un = [
       listen<ConnState>("conn-state", (e) => useApp.getState().setConn(e.payload)),
+      listen<Latency>("latency", (e) => useApp.getState().setLatency(e.payload.hostId, e.payload.ms)),
       listen<string>("term-exit", (e) => useApp.getState().updateTab(e.payload, { alive: false })),
     ];
     return () => {

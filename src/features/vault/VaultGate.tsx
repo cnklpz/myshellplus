@@ -7,10 +7,9 @@ import "./vault.css";
 
 function Logo() {
   return (
-    <svg className="vg-logo" viewBox="0 0 32 32" aria-hidden>
-      <rect x="1" y="1" width="30" height="30" rx="8" fill="var(--accent)" />
-      <path d="M9 11l5 5-5 5" fill="none" stroke="var(--accent-fg)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M19 21h5M21.5 18.5v5" fill="none" stroke="var(--accent-fg)" strokeWidth="2.6" strokeLinecap="round" />
+    <svg className="vg-logo" viewBox="0 0 24 24" aria-hidden>
+      <rect x="1" y="1" width="22" height="22" rx="6" />
+      <path d="M7 8.5 10.5 12 7 15.5M12.5 15.5H17" />
     </svg>
   );
 }
@@ -92,12 +91,7 @@ export function VaultGate() {
           <span>MyShell+</span>
         </div>
 
-        <div className="stack gap-1">
-          <div className="vg-title">{setup ? "设置主密码" : "解锁"}</div>
-          <div className="faint vg-sub">
-            {setup ? "主密码用于加密所有服务器密码和密钥，无法找回。" : "输入主密码以解锁服务器和密钥。"}
-          </div>
-        </div>
+        {setup && <div className="vg-warn">主密码无法找回</div>}
 
         <div className="stack">
           <div className="vg-pw">
@@ -105,7 +99,7 @@ export function VaultGate() {
               ref={inputRef}
               className="input"
               type={show ? "text" : "password"}
-              placeholder={setup ? "主密码（至少 8 位）" : "主密码"}
+              placeholder={setup ? "设置主密码" : "主密码"}
               value={pw}
               disabled={busy}
               autoFocus
@@ -135,7 +129,7 @@ export function VaultGate() {
                 {[1, 2, 3, 4].map((i) => (
                   <i key={i} className={pw && i <= st.score ? st.cls : ""} />
                 ))}
-                <span className="faint">{pw ? `强度：${st.label}` : "建议 12 位以上，混合大小写、数字和符号"}</span>
+                {pw && <span className="faint">{st.label}</span>}
               </div>
             </>
           )}
@@ -143,7 +137,7 @@ export function VaultGate() {
 
         <label className="vg-check">
           <input type="checkbox" checked={remember} disabled={busy} onChange={(e) => setRemember(e.target.checked)} />
-          <span>在此设备上记住（Windows 账户保护）</span>
+          <span>在此设备上记住</span>
         </label>
 
         {error && <div className="vg-err selectable">{error}</div>}

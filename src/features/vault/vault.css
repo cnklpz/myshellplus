@@ -1,23 +1,24 @@
-/* Vault setup / unlock screen. */
-.vg { position: fixed; inset: 0; z-index: 150; background: var(--bg-0); display: flex; align-items: center; justify-content: center; }
+/* Vault setup / unlock screen. Starts below the 40px titlebar so the window stays draggable and closable. */
+.vg { position: fixed; inset: 40px 0 0 0; z-index: 150; background: var(--chrome); display: flex; align-items: center; justify-content: center; padding-bottom: 40px; }
 .vg-card {
-  width: 360px; max-width: calc(100vw - var(--sp-8));
+  width: 320px; max-width: calc(100vw - var(--sp-8));
   display: flex; flex-direction: column; gap: var(--sp-4);
-  padding: var(--sp-6); background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+  padding: var(--sp-8) var(--sp-6) var(--sp-6); background: var(--bg-1); border-radius: var(--radius-lg); box-shadow: var(--shadow);
 }
 .vg-card.shake { animation: vg-shake 0.36s ease; }
 @keyframes vg-shake {
   20%, 60% { transform: translateX(-6px); }
   40%, 80% { transform: translateX(6px); }
 }
-.vg-brand { display: flex; align-items: center; gap: var(--sp-2); font-weight: 700; font-size: var(--fs-lg); }
-.vg-logo { width: 28px; height: 28px; flex: none; }
-.vg-title { font-size: var(--fs-lg); font-weight: 600; }
-.vg-sub { font-size: var(--fs-sm); }
+.vg-brand { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-2); font-weight: 600; font-size: var(--fs-lg); letter-spacing: -0.01em; }
+.vg-logo { width: 40px; height: 40px; flex: none; }
+.vg-logo rect { fill: var(--accent); }
+.vg-logo path { fill: none; stroke: var(--accent-fg); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.vg-warn { color: var(--warn); font-size: var(--fs-sm); text-align: center; margin-top: calc(-1 * var(--sp-2)); }
 .vg-pw { position: relative; }
 .vg-pw > .input { padding-right: calc(var(--h-sm) + var(--sp-1)); }
 .vg-pw > .icon-btn { position: absolute; right: 2px; top: 2px; }
-.vg-strength { display: flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-xs); }
+.vg-strength { display: flex; align-items: center; gap: var(--sp-1); height: var(--sp-4); font-size: var(--fs-xs); }
 .vg-strength > i { width: 24px; height: 4px; border-radius: 2px; background: var(--bg-4); flex: none; }
 .vg-strength > i.err { background: var(--err); }
 .vg-strength > i.warn { background: var(--warn); }

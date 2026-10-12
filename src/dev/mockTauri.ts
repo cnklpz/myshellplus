@@ -70,6 +70,7 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "host_list": return hosts;
     case "key_list": return [{ id: "k1", name: "id_ed25519", publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq3xV2o0 ops@laptop", updatedAt: now }];
     case "conn_list": return ["h1", "h4"];
+    case "conn_latency": return [{ hostId: "h1", ms: 290 }, { hostId: "h4", ms: 42 }];
     case "term_list": return [];
     case "term_open": {
       const id = "t" + nextId++;
@@ -86,8 +87,12 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
       const cid = termChannels.get(args.id);
       const data = args.data === "\r" ? "\r\n\x1b[1;32mroot@web-prod-01\x1b[0m:\x1b[1;34m~\x1b[0m# " : args.data;
       const ch = callbacks.get(cid!);
-      (ch as any).__i = ((ch as any).__i ?? 0) + 1;
-      ch?.({ index: (ch as any).__i, message: enc.encode(data).buffer });
+      // Simulated slow link: echo comes back after ?lag=ms (default 300).
+      const lag = Number(new URLSearchParams(location.search).get("lag") ?? 300);
+      setTimeout(() => {
+        (ch as any).__i = ((ch as any).__i ?? 0) + 1;
+        ch?.({ index: (ch as any).__i, message: enc.encode(data).buffer });
+      }, lag);
       return null;
     }
     case "monitor_subscribe":
@@ -147,6 +152,10 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
   }
 }
 
+setInterval(() => {
+  const lag = Number(new URLSearchParams(location.search).get("lag") ?? 300);
+  for (const id of ["h1", "h4"]) emit("latency", { hostId: id, ms: lag - 10 + Math.round(Math.random() * 20) });
+}, 2000);
 setInterval(() => emit("monitor", { hostId: "h1", sample: sample(60 + Math.random() * 10) }), 3000);
 
 (window as any).__TAURI_INTERNALS__ = {

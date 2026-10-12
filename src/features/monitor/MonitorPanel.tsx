@@ -82,6 +82,7 @@ function useMonitor(hostId: string, gen: number) {
   return { history, info, error, loading };
 }
 
+
 export function MonitorPanel({ hostId }: { hostId: string }) {
   const [gen, setGen] = useState(0);
   const { history, info, error, loading } = useMonitor(hostId, gen);
@@ -106,11 +107,16 @@ export function MonitorPanel({ hostId }: { hostId: string }) {
     return (
       <div className="panel-body">
         <div className="mon">
-          {info && <InfoCard info={info} />}
-          <div className="section-title">{loading ? "正在采集…" : "等待数据…"}</div>
-          <div className="mon-skel" />
-          <div className="mon-skel" />
-          <div className="mon-skel" />
+          {info && <HostInfo info={info} />}
+          <div className="mon-sec">
+            <div className="mon-loading">{loading ? "采集中…" : "等待数据…"}</div>
+            <div className="mon-skel-tiles">
+              <div className="mon-skel" />
+              <div className="mon-skel" />
+              <div className="mon-skel" />
+            </div>
+          </div>
+          <div className="mon-skel wide" />
         </div>
       </div>
     );
@@ -120,13 +126,13 @@ export function MonitorPanel({ hostId }: { hostId: string }) {
     <div className="panel-body">
       <div className="mon">
         {error && (
-          <div className="row" style={{ color: "var(--err)", fontSize: "var(--fs-sm)" }}>
-            <AlertTriangle size={14} style={{ flex: "none" }} />
+          <div className="mon-alert">
+            <AlertTriangle />
             <span className="grow ellipsis selectable" title={error}>{error}</span>
-            <button className="btn sm" onClick={retry}>重试</button>
+            <button className="btn ghost sm" onClick={retry}>重试</button>
           </div>
         )}
-        {info && <InfoCard info={info} sample={cur} />}
+        {info && <HostInfo info={info} sample={cur} />}
         <Gauges history={history} cur={cur} />
         {cur.cores.length > 1 && <Cores cores={cur.cores} />}
         <NetSection history={history} cur={cur} />
@@ -138,19 +144,21 @@ export function MonitorPanel({ hostId }: { hostId: string }) {
   );
 }
 
-function InfoCard({ info, sample }: { info: SysInfo; sample?: Sample }) {
+function HostInfo({ info, sample }: { info: SysInfo; sample?: Sample }) {
   return (
-    <div className="card stack gap-1">
-      <div className="mon-host ellipsis selectable" title={info.hostname}>{info.hostname || "-"}</div>
-      <dl className="mon-info selectable" style={{ margin: 0 }}>
-        <dt>系统</dt>
-        <dd className="ellipsis" title={info.os}>{info.os || "-"}</dd>
+    <section className="mon-host selectable">
+      <div className="mon-host-title">
+        <span className="mon-host-name ellipsis" title={info.hostname}>{info.hostname || "-"}</span>
+        <span className="mon-host-os ellipsis" title={info.os}>{info.os || "-"}</span>
+      </div>
+      <dl className="mon-info">
         <dt>内核</dt>
-        <dd className="ellipsis" title={`${info.kernel} · ${info.arch}`}>{info.kernel} · {info.arch}</dd>
+        <dd className="ellipsis" title={`${info.kernel} · ${info.arch}`}>
+          {info.kernel} <span className="sep">·</span> {info.arch}
+        </dd>
         <dt>CPU</dt>
         <dd className="ellipsis" title={info.cpu}>
-          <span style={{ fontVariantNumeric: "tabular-nums" }}>{info.cores} 核</span>
-          <span className="faint"> · {info.cpu || "-"}</span>
+          {info.cores} 核 <span className="sep">· {info.cpu || "-"}</span>
         </dd>
         <dt>IP</dt>
         <dd className="ellipsis mono">{info.ip || "-"}</dd>
@@ -159,14 +167,13 @@ function InfoCard({ info, sample }: { info: SysInfo; sample?: Sample }) {
             <dt>运行</dt>
             <dd>{fmtUptime(sample.uptime)}</dd>
             <dt>负载</dt>
-            <dd style={{ fontVariantNumeric: "tabular-nums" }}>
+            <dd title="1 / 5 / 15 分钟">
               {sample.load.map((l) => l.toFixed(2)).join("  ")}
-              <span className="faint"> (1/5/15)</span>
             </dd>
           </>
         )}
       </dl>
-    </div>
+    </section>
   );
 }
 
@@ -204,15 +211,17 @@ function Tile(props: { label: string; pct: number; sub: string; values: number[]
         <small>%</small>
       </span>
       <span className="sub ellipsis" title={props.sub}>{props.sub}</span>
-      <Sparkline series={[{ values: props.values, color: props.color }]} max={100} height={24} />
+      <Sparkline series={[{ values: props.values, color: props.color }]} max={100} height={28} />
     </div>
   );
 }
 
 function Cores({ cores }: { cores: number[] }) {
   return (
-    <div className="stack gap-1">
-      <div className="section-title">CPU 核心 <span className="faint" style={{ textTransform: "none" }}>{cores.length}</span></div>
+    <div className="mon-sec">
+      <div className="section-title">
+        核心 <span className="count">{cores.length}</span>
+      </div>
       <div className="mon-cores">
         {cores.map((c, i) => (
           <div className="mon-core" key={i} title={`CPU${i}: ${fmtPct(c, 1)}`}>
@@ -225,29 +234,22 @@ function Cores({ cores }: { cores: number[] }) {
   );
 }
 
-function RateRow({ down, up, downLabel, upLabel }: { down: number; up: number; downLabel: string; upLabel: string }) {
-  return (
-    <div className="mon-rate">
-      <ArrowDown style={{ color: "var(--chart-2)" }} />
-      <span className="ellipsis" title={downLabel}>{fmtRate(down)}</span>
-      <ArrowUp style={{ color: "var(--chart-1)" }} />
-      <span className="ellipsis" title={upLabel}>{fmtRate(up)}</span>
-    </div>
-  );
-}
-
 function NetSection({ history, cur }: { history: Sample[]; cur: Sample }) {
   const [open, setOpen] = useState(false);
   const rx = useMemo(() => history.map((s) => s.rxRate), [history]);
   const tx = useMemo(() => history.map((s) => s.txRate), [history]);
   return (
-    <div className="stack gap-1">
+    <div className="mon-sec">
       <div className="section-title">
         网络
-        <span className="spacer" />
-        <span style={{ textTransform: "none", fontWeight: 400, fontVariantNumeric: "tabular-nums" }}>TCP {cur.tcpConns}</span>
+        <span className="meta">TCP {cur.tcpConns}</span>
       </div>
-      <RateRow down={cur.rxRate} up={cur.txRate} downLabel="下行" upLabel="上行" />
+      <div className="mon-rate">
+        <ArrowDown className="c2" />
+        <span className="ellipsis" title="下行">{fmtRate(cur.rxRate)}</span>
+        <ArrowUp className="c1" />
+        <span className="ellipsis" title="上行">{fmtRate(cur.txRate)}</span>
+      </div>
       <div className="mon-chart">
         <Sparkline
           series={[
@@ -260,16 +262,18 @@ function NetSection({ history, cur }: { history: Sample[]; cur: Sample }) {
       </div>
       {cur.nets.length > 0 && (
         <>
-          <div className="list-row" onClick={() => setOpen(!open)} style={{ color: "var(--fg-1)", fontSize: "var(--fs-sm)" }}>
+          <div className="list-row mon-toggle" onClick={() => setOpen(!open)}>
             {open ? <ChevronDown /> : <ChevronRight />}
-            <span className="grow">网卡 ({cur.nets.length})</span>
+            <span className="grow">
+              网卡 <span className="count">{cur.nets.length}</span>
+            </span>
           </div>
           {open && (
             <div>
-              <div className="mon-grid-row faint" style={{ fontSize: "var(--fs-xs)" }}>
+              <div className="mon-grid-row head">
                 <span>名称</span>
-                <span className="num">↓ 下行</span>
-                <span className="num">↑ 上行</span>
+                <span className="num">下行</span>
+                <span className="num">上行</span>
               </div>
               {cur.nets.map((n) => (
                 <div className="mon-grid-row" key={n.name} title={`累计 ↓${fmtBytes(n.rxTotal)} ↑${fmtBytes(n.txTotal)}`}>
@@ -290,12 +294,12 @@ function DiskIoSection({ history, cur }: { history: Sample[]; cur: Sample }) {
   const rd = useMemo(() => history.map((s) => s.readRate), [history]);
   const wr = useMemo(() => history.map((s) => s.writeRate), [history]);
   return (
-    <div className="stack gap-1">
+    <div className="mon-sec">
       <div className="section-title">磁盘 IO</div>
       <div className="mon-rate">
-        <span className="faint" style={{ fontSize: "var(--fs-xs)" }}>读</span>
+        <span className="k c2">读</span>
         <span className="ellipsis">{fmtRate(cur.readRate)}</span>
-        <span className="faint" style={{ fontSize: "var(--fs-xs)" }}>写</span>
+        <span className="k c4">写</span>
         <span className="ellipsis">{fmtRate(cur.writeRate)}</span>
       </div>
       <div className="mon-chart">
@@ -315,19 +319,19 @@ function DiskIoSection({ history, cur }: { history: Sample[]; cur: Sample }) {
 function DisksSection({ cur }: { cur: Sample }) {
   if (!cur.disks.length) return null;
   return (
-    <div className="stack gap-1">
+    <div className="mon-sec">
       <div className="section-title">磁盘</div>
-      <div className="stack gap-1">
+      <div>
         {cur.disks.map((d) => {
           const pct = d.total ? (d.used / d.total) * 100 : 0;
           return (
             <div className="mon-disk" key={d.mount + d.fs} title={d.fs}>
               <div className="mon-disk-head">
                 <span className="ellipsis mono">{d.mount}</span>
-                <span className="num faint" style={{ fontSize: "var(--fs-xs)" }}>
+                <span className="size">
                   {fmtBytes(d.used)} / {fmtBytes(d.total)}
                 </span>
-                <span className="num" style={{ color: pctColor(pct) }}>{pct.toFixed(0)}%</span>
+                <span className="pct" style={{ color: pctColor(pct) }}>{pct.toFixed(0)}%</span>
               </div>
               <Bar value={d.used} max={d.total || 1} />
             </div>
@@ -362,7 +366,7 @@ function ProcSection({ hostId, procs }: { hostId: string; procs: Proc[] }) {
       if (r.exitCode !== 0) {
         toast((r.stderr || r.stdout || `退出码 ${r.exitCode}`).trim(), "error");
       } else {
-        toast(`已发送${force ? " SIGKILL" : " SIGTERM"} 到 ${pid}`, "success");
+        toast(`已向 ${pid} 发送 ${force ? "SIGKILL" : "SIGTERM"}`, "success");
         setKilled((k) => new Set(k).add(pid));
       }
       setTarget(null);
@@ -375,22 +379,24 @@ function ProcSection({ hostId, procs }: { hostId: string; procs: Proc[] }) {
 
   const rows = procs.filter((p) => !killed.has(p.pid));
   return (
-    <div className="stack gap-1">
-      <div className="section-title">进程 Top {rows.length}</div>
+    <div className="mon-sec">
+      <div className="section-title">
+        进程 <span className="count">{rows.length}</span>
+      </div>
       <table className="table mon-procs">
         <colgroup>
+          <col style={{ width: 52 }} />
+          <col style={{ width: 60 }} />
+          <col style={{ width: 44 }} />
           <col style={{ width: 56 }} />
-          <col style={{ width: 60 }} />
-          <col style={{ width: 48 }} />
-          <col style={{ width: 60 }} />
           <col />
-          <col style={{ width: 28 }} />
+          <col style={{ width: 24 }} />
         </colgroup>
         <thead>
           <tr>
             <th className="num">PID</th>
             <th>用户</th>
-            <th className="num">CPU%</th>
+            <th className="num">CPU</th>
             <th className="num">内存</th>
             <th>命令</th>
             <th className="act" />
@@ -399,10 +405,10 @@ function ProcSection({ hostId, procs }: { hostId: string; procs: Proc[] }) {
         <tbody>
           {rows.map((p) => (
             <tr key={p.pid} onContextMenu={(e) => { e.preventDefault(); setTarget(p); }}>
-              <td className="num mono">{p.pid}</td>
-              <td className="ellipsis" title={p.user} style={{ maxWidth: 0 }}>{p.user}</td>
-              <td className="num" style={{ color: pctColor(p.cpu) }}>{p.cpu.toFixed(1)}</td>
-              <td className="num" title={`${fmtPct(p.mem, 1)}`}>{fmtBytes(p.rss, 0)}</td>
+              <td className="num mono pid">{p.pid}</td>
+              <td className="user" title={p.user}>{p.user}</td>
+              <td className={"num" + (p.cpu >= 90 ? " cpu-err" : p.cpu >= 75 ? " cpu-warn" : "")}>{p.cpu.toFixed(1)}</td>
+              <td className="num" title={fmtPct(p.mem, 1)}>{fmtBytes(p.rss, 0)}</td>
               <td className="cmd mono" title={p.command}>{p.command}</td>
               <td className="act">
                 <button className="icon-btn" title="结束进程" onClick={() => setTarget(p)}>
@@ -421,13 +427,13 @@ function ProcSection({ hostId, procs }: { hostId: string; procs: Proc[] }) {
           footer={
             <>
               <button className="btn" disabled={busy} onClick={() => setTarget(null)}>取消</button>
-              <button className="btn danger" disabled={busy} onClick={() => kill(true)}>强制结束 (-9)</button>
+              <button className="btn danger" disabled={busy} title="kill -9" onClick={() => kill(true)}>强制结束</button>
               <button className="btn danger solid" disabled={busy} onClick={() => kill(false)}>结束</button>
             </>
           }
         >
           <div className="muted selectable">
-            结束进程 <span className="mono">{target.command}</span>（PID <span className="mono">{target.pid}</span>，用户 {target.user}）？
+            结束 <span className="mono">{target.command}</span>（PID <span className="mono">{target.pid}</span>）？
           </div>
         </Dialog>
       )}

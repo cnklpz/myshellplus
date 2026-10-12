@@ -247,7 +247,7 @@ export class Predictor {
         if (seq !== this.aiSeq || this.disposed) return;
         this.ai = r.map((s) => ({ ...s, source: "ai" as const }));
         this.aiInput = input;
-        if (force && this.ai.length === 0) toast("AI 没有给出预测");
+        if (force && this.ai.length === 0) toast("AI 无预测结果");
       })
       .catch((e) => {
         if (force && seq === this.aiSeq) toast(`AI 预测失败：${errMsg(e)}`, "error");
@@ -285,7 +285,7 @@ export class Predictor {
     let left = sr.left - wr.left + startX * cw - POPUP_TEXT_OFFSET;
     left = Math.max(4, Math.min(left, wr.width - Math.min(POPUP_WIDTH, wr.width - 8) - 4));
     const rowTop = sr.top - wr.top + b.cursorY * ch;
-    const estH = rows * POPUP_ROW_H + 8 + 24;
+    const estH = rows * POPUP_ROW_H + 8;
     if (rowTop + ch + estH + 4 > wr.height && rowTop > estH) return { left, bottom: wr.height - rowTop + 2 };
     return { left, top: rowTop + ch + 2 };
   }

@@ -10,19 +10,12 @@ import "./tunnels.css";
 
 type Kind = TunnelDef["kind"];
 
-const KIND_LABEL: Record<Kind, string> = { local: "本地转发 -L", remote: "远程转发 -R", dynamic: "动态 SOCKS5 -D" };
-const KIND_HINT: Record<Kind, string> = {
-  local: "本机监听端口，经服务器转发到目标地址（访问内网服务）。",
-  remote: "服务器监听端口，连接转回本机的目标地址（暴露本地服务）。",
-  dynamic: "本机开启 SOCKS5 代理，流量经服务器出口。",
-};
+const KIND_LABEL: Record<Kind, string> = { local: "本地 -L", remote: "远程 -R", dynamic: "动态 -D" };
 
 function mapping(t: TunnelDef): string {
   const bind = `${t.bindAddr}:${t.bindPort}`;
-  const target = `${t.targetHost}:${t.targetPort}`;
   if (t.kind === "dynamic") return `SOCKS5 ${bind}`;
-  if (t.kind === "remote") return `远程 ${bind} → 本机 ${target}`;
-  return `${bind} → ${target}`;
+  return `${bind} → ${t.targetHost}:${t.targetPort}`;
 }
 
 export function TunnelsView() {
@@ -96,95 +89,70 @@ export function TunnelsView() {
         <span className="spacer" />
         <button className="btn primary sm" onClick={newTunnel}>
           <Plus />
-          新建隧道
+          新建
         </button>
       </div>
       <div className="page-body">
         {list && list.length === 0 ? (
           <Empty
             icon={<Network />}
-            text="还没有隧道。端口转发可把远程服务映射到本机，或开启 SOCKS5 代理。"
+            text="还没有隧道"
             action={
-              <button className="btn primary sm" onClick={newTunnel}>
+              <button className="btn sm" onClick={newTunnel}>
                 <Plus />
                 新建隧道
               </button>
             }
           />
         ) : (
-          <table className="table tn-table">
-            <colgroup>
-              <col style={{ width: 40 }} />
-              <col style={{ width: "16%" }} />
-              <col style={{ width: 128 }} />
-              <col style={{ width: "12%" }} />
-              <col />
-              <col style={{ width: 152 }} />
-              <col style={{ width: 72 }} />
-              <col style={{ width: 72 }} />
-              <col style={{ width: 168 }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th>名称</th>
-                <th>类型</th>
-                <th>服务器</th>
-                <th>映射</th>
-                <th className="num">流量 ↑ / ↓</th>
-                <th className="num">活动连接</th>
-                <th>自动启动</th>
-                <th className="tn-actions-h">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(list ?? []).map((t) => {
-                const st = status[t.id];
-                const running = !!st?.running;
-                const dot = st?.error ? "err" : running ? "ok" : "";
-                return [
-                  <tr key={t.id} className={st?.error ? "tn-has-err" : ""}>
-                    <td>
-                      <span className={"dot " + dot} title={st?.error ? "出错" : running ? "运行中" : "已停止"} />
-                    </td>
-                    <td className="ellipsis" title={t.name}>{t.name || "未命名"}</td>
-                    <td>
-                      <span className={"badge" + (t.kind === "local" ? " accent" : t.kind === "remote" ? " warn" : "")}>{KIND_LABEL[t.kind]}</span>
-                    </td>
-                    <td className="ellipsis" title={hostName(t.hostId)}>{hostName(t.hostId)}</td>
-                    <td className="mono ellipsis selectable" title={mapping(t)}>{mapping(t)}</td>
-                    <td className="num">
+          <div className="tn-list">
+            <div className="tn-grid tn-head">
+              <span />
+              <span>名称</span>
+              <span>类型</span>
+              <span>服务器</span>
+              <span className="num">流量 ↑ / ↓</span>
+              <span className="num">连接</span>
+              <span>自启</span>
+              <span />
+            </div>
+            {(list ?? []).map((t) => {
+              const st = status[t.id];
+              const running = !!st?.running;
+              const dot = st?.error ? "err" : running ? "ok" : "";
+              return (
+                <div key={t.id} className="tn-item">
+                  <div className="tn-grid tn-row">
+                    <span className={"dot " + dot} title={st?.error ? "出错" : running ? "运行中" : "已停止"} />
+                    <div className="tn-main">
+                      <span className="ellipsis tn-name" title={t.name}>{t.name || "未命名"}</span>
+                      <span className="mono ellipsis selectable tn-map" title={mapping(t)}>{mapping(t)}</span>
+                    </div>
+                    <span className="tn-quiet">{KIND_LABEL[t.kind]}</span>
+                    <span className="ellipsis tn-quiet" title={hostName(t.hostId)}>{hostName(t.hostId)}</span>
+                    <span className="num tn-quiet">
                       {fmtBytes(st?.up ?? 0)} / {fmtBytes(st?.down ?? 0)}
-                    </td>
-                    <td className="num">{st?.active ?? 0}</td>
-                    <td>
-                      <Toggle on={t.autoStart} onChange={(v) => setAuto(t, v)} />
-                    </td>
-                    <td>
-                      <div className="row gap-1 tn-actions">
-                        <button className={"btn sm" + (running ? "" : " primary")} disabled={busy[t.id]} onClick={() => toggleRun(t)}>
-                          {running ? <Square /> : <Play />}
-                          {running ? "停止" : "启动"}
-                        </button>
-                        <button className="icon-btn" title="编辑" onClick={() => setEditing({ ...t })}>
-                          <Pencil />
-                        </button>
-                        <button className="icon-btn" title="删除" onClick={() => setDeleting(t)}>
-                          <Trash2 />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>,
-                  st?.error ? (
-                    <tr key={t.id + ":err"} className="tn-err-row">
-                      <td />
-                      <td colSpan={8} className="selectable">{st.error}</td>
-                    </tr>
-                  ) : null,
-                ];
-              })}
-            </tbody>
-          </table>
+                    </span>
+                    <span className="num tn-quiet">{st?.active ?? 0}</span>
+                    <Toggle on={t.autoStart} onChange={(v) => setAuto(t, v)} />
+                    <div className="row gap-1 tn-actions">
+                      <button className="btn sm tn-run" disabled={busy[t.id]} onClick={() => toggleRun(t)}>
+                        {running ? <Square /> : <Play />}
+                        {running ? "停止" : "启动"}
+                      </button>
+                      <button className="icon-btn tn-hover" title="编辑" onClick={() => setEditing({ ...t })}>
+                        <Pencil />
+                      </button>
+                      <button className="icon-btn tn-hover" title="删除" onClick={() => setDeleting(t)}>
+                        <Trash2 />
+                      </button>
+                    </div>
+                  </div>
+                  {st?.error && <div className="tn-err selectable">{st.error}</div>}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -201,7 +169,7 @@ export function TunnelsView() {
       {deleting && (
         <Confirm
           title="删除隧道"
-          message={`确定删除隧道「${deleting.name || mapping(deleting)}」？运行中的隧道会先停止。`}
+          message={`删除「${deleting.name || mapping(deleting)}」？运行中会先停止。`}
           confirmText="删除"
           danger
           onCancel={() => setDeleting(null)}
@@ -284,7 +252,7 @@ function TunnelEditor(props: { initial: Partial<TunnelDef>; onClose: () => void;
     >
       <div className="stack gap-3">
         <Field label="名称">
-          <input className="input" value={name} placeholder="如：数据库" onChange={(e) => setName(e.target.value)} autoFocus />
+          <input className="input" value={name} placeholder="数据库" onChange={(e) => setName(e.target.value)} autoFocus />
         </Field>
         <Field label="服务器">
           <select className="select" value={hostId} onChange={(e) => setHostId(e.target.value)}>
@@ -297,7 +265,7 @@ function TunnelEditor(props: { initial: Partial<TunnelDef>; onClose: () => void;
             ))}
           </select>
         </Field>
-        <Field label="类型" hint={KIND_HINT[kind]}>
+        <Field label="类型" hint={kind === "remote" ? "外部访问需服务器开启 GatewayPorts" : undefined}>
           <div className="seg">
             {(["local", "remote", "dynamic"] as Kind[]).map((k) => (
               <button key={k} type="button" className={kind === k ? "on" : ""} onClick={() => setKind(k)}>
@@ -306,19 +274,19 @@ function TunnelEditor(props: { initial: Partial<TunnelDef>; onClose: () => void;
             ))}
           </div>
         </Field>
-        <Field label="监听地址" hint={kind === "remote" ? "在服务器上监听" : "在本机监听"}>
+        <Field label={kind === "remote" ? "远程监听" : "本机监听"}>
           <input className="input mono" value={bindAddr} onChange={(e) => setBindAddr(e.target.value)} />
           <span className="faint">:</span>
-          <input className={portCls(bindPort)} value={bindPort} placeholder="端口" inputMode="numeric" onChange={(e) => setBindPort(e.target.value.trim())} />
+          <input className={portCls(bindPort)} value={bindPort} placeholder="8080" inputMode="numeric" onChange={(e) => setBindPort(e.target.value.trim())} />
         </Field>
         {needTarget && (
-          <Field label="目标地址" hint={kind === "remote" ? "本机可访问的地址" : "从服务器可访问的地址"}>
+          <Field label="目标地址">
             <input className="input mono" value={targetHost} onChange={(e) => setTargetHost(e.target.value)} />
             <span className="faint">:</span>
-            <input className={portCls(targetPort)} value={targetPort} placeholder="端口" inputMode="numeric" onChange={(e) => setTargetPort(e.target.value.trim())} />
+            <input className={portCls(targetPort)} value={targetPort} placeholder="80" inputMode="numeric" onChange={(e) => setTargetPort(e.target.value.trim())} />
           </Field>
         )}
-        <Field label="自动启动" hint="应用启动并解锁后自动建立">
+        <Field label="自动启动">
           <Toggle on={autoStart} onChange={setAutoStart} />
         </Field>
       </div>

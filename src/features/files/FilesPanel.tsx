@@ -212,7 +212,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
 
   const openEntry = (entry: FileEntry) => {
     if (entry.isDir) navigate(entry.path);
-    else if (isBinaryName(entry.name)) toast("二进制文件不支持在线编辑，请下载", "info");
+    else if (isBinaryName(entry.name)) toast("二进制文件无法编辑", "info");
     else setModal({ kind: "edit", entry });
   };
 
@@ -251,7 +251,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
   // ---------- actions ----------
   const download = async (list: FileEntry[]) => {
     const files = list.filter((e) => !e.isDir);
-    if (files.length < list.length) toast("暂不支持下载文件夹", "info");
+    if (files.length < list.length) toast("不支持下载文件夹", "info");
     if (!files.length) return;
     try {
       if (files.length === 1) {
@@ -259,7 +259,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
         if (!local) return;
         await api.transferStart(hostId, "download", local, files[0].path);
       } else {
-        const dir = await openDialog({ directory: true, title: "选择保存目录" });
+        const dir = await openDialog({ directory: true, title: "保存到" });
         if (!dir || Array.isArray(dir)) return;
         const sep = dir.includes("\\") ? "\\" : "/";
         for (const f of files) await api.transferStart(hostId, "download", dir.replace(/[\\/]+$/, "") + sep + f.name, f.path);
@@ -410,11 +410,13 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           <button className="icon-btn" title="主目录" onClick={() => navigate("")}>
             <Home />
           </button>
+          <span className="fp-sep" />
           <input
-            className="input sm mono grow"
+            className="fp-path"
             value={input}
             spellCheck={false}
-            placeholder="路径"
+            placeholder="/home/user"
+            title={cwd}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") navigate(input.trim());
@@ -430,7 +432,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           <input className="input sm grow" placeholder="筛选" value={filter} onChange={(e) => setFilter(e.target.value)} />
           <button
             className={"icon-btn" + (showHidden ? " active" : "")}
-            title={showHidden ? "隐藏点文件" : `显示隐藏文件${hiddenCount ? ` (${hiddenCount})` : ""}`}
+            title={showHidden ? "不显示隐藏文件" : `显示隐藏文件${hiddenCount ? ` (${hiddenCount})` : ""}`}
             onClick={() => setShowHidden(!showHidden)}
           >
             {showHidden ? <Eye /> : <EyeOff />}
@@ -438,7 +440,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           <button className="icon-btn" title="新建文件夹" disabled={!cwd} onClick={() => setModal({ kind: "mkdir" })}>
             <FolderPlus />
           </button>
-          <button className="icon-btn" title="上传文件（也可拖放到此处）" disabled={!cwd} onClick={pickUpload}>
+          <button className="icon-btn" title="上传" disabled={!cwd} onClick={pickUpload}>
             <Upload />
           </button>
         </div>
@@ -453,7 +455,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           {sort.key === "size" && <SortIcon />} 大小
         </button>
         <button className={"num" + (sort.key === "mtime" ? " on" : "")} onClick={() => toggleSort("mtime")}>
-          {sort.key === "mtime" && <SortIcon />} 修改时间
+          {sort.key === "mtime" && <SortIcon />} 修改
         </button>
       </div>
 
@@ -477,7 +479,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
             }
           />
         ) : !loaded ? (
-          <div className="faint" style={{ padding: "var(--sp-2)", fontSize: "var(--fs-sm)" }}>加载中…</div>
+          <div className="fp-loading">加载中…</div>
         ) : view.length === 0 ? (
           <Empty text={filter ? "无匹配项" : "空目录"} />
         ) : (
@@ -496,8 +498,8 @@ export function FilesPanel({ hostId }: { hostId: string }) {
               ) : (
                 <span className={"ellipsis" + (e.isLink ? " link" : "")}>{e.name}</span>
               )}
-              <span className="num">{e.isDir ? "" : fmtBytes(e.size)}</span>
-              <span className="num">{fmtMtime(e.mtime)}</span>
+              <span className="num size">{e.isDir ? "" : fmtBytes(e.size)}</span>
+              <span className="num time">{fmtMtime(e.mtime)}</span>
             </div>
           ))
         )}
@@ -505,7 +507,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
 
       <Transfers hostId={hostId} onFinished={onTransferDone} />
 
-      {dragOver && <div className="fp-drop">松开以上传到 {baseName(cwd) || "/"}</div>}
+      {dragOver && <div className="fp-drop">上传到 {baseName(cwd) || "/"}</div>}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
@@ -518,7 +520,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
               <MenuItem icon={Pencil} disabled={!one} onClick={() => one && setRenaming(one.path)}>重命名</MenuItem>
               <MenuItem icon={KeyRound} onClick={() => setModal({ kind: "chmod", entries: selected })}>修改权限</MenuItem>
               <MenuItem icon={Copy} onClick={() => copyPath(selected)}>复制路径</MenuItem>
-              <MenuItem icon={SquareTerminal} disabled={selected.length > 1} onClick={() => cdInTerminal(one)}>在终端中 cd</MenuItem>
+              <MenuItem icon={SquareTerminal} disabled={selected.length > 1} onClick={() => cdInTerminal(one)}>终端 cd</MenuItem>
               <MenuItem icon={Trash2} danger onClick={() => setModal({ kind: "delete", entries: selected })}>删除</MenuItem>
               <hr />
             </>
@@ -528,8 +530,8 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           <MenuItem icon={ArrowUpFromLine} onClick={pickUpload}>上传文件</MenuItem>
           {selected.length === 0 && (
             <>
-              <MenuItem icon={Copy} onClick={() => copyPath([])}>复制当前路径</MenuItem>
-              <MenuItem icon={SquareTerminal} onClick={() => cdInTerminal(undefined)}>在终端中 cd</MenuItem>
+              <MenuItem icon={Copy} onClick={() => copyPath([])}>复制路径</MenuItem>
+              <MenuItem icon={SquareTerminal} onClick={() => cdInTerminal(undefined)}>终端 cd</MenuItem>
               <MenuItem icon={RefreshCw} onClick={refresh}>刷新</MenuItem>
             </>
           )}
@@ -548,11 +550,11 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           message={
             modal.entries.length === 1 ? (
               <>
-                确定删除 <span className="mono">{modal.entries[0].path}</span>
-                {modal.entries[0].isDir ? " 及其全部内容" : ""}？此操作不可撤销。
+                删除 <span className="mono">{modal.entries[0].path}</span>
+                {modal.entries[0].isDir ? " 及其全部内容" : ""}？无法恢复。
               </>
             ) : (
-              <>确定删除选中的 {modal.entries.length} 项？文件夹将连同内容一起删除，此操作不可撤销。</>
+              <>删除 {modal.entries.length} 项（含文件夹内容）？无法恢复。</>
             )
           }
           onCancel={() => setModal(null)}

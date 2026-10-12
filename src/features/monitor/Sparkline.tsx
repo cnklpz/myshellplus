@@ -64,14 +64,14 @@ export function Sparkline(props: {
               <>
                 <defs>
                   <linearGradient id={`${gid}-${si}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" stopColor={s.color} stopOpacity={0.28} />
-                    <stop offset="1" stopColor={s.color} stopOpacity={0.04} />
+                    <stop offset="0" style={{ stopColor: s.color, stopOpacity: 0.24 }} />
+                    <stop offset="1" style={{ stopColor: s.color, stopOpacity: 0 }} />
                   </linearGradient>
                 </defs>
                 <path d={area} fill={`url(#${gid}-${si})`} stroke="none" />
               </>
             )}
-            <path d={line} fill="none" stroke={s.color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+            <path d={line} fill="none" style={{ stroke: s.color }} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
           </g>
         );
       })}

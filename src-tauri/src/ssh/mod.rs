@@ -97,6 +97,8 @@ pub struct Conn {
     pub handle: Handle<ClientHandler>,
     pub forwards: ForwardMap,
     sftp: tokio::sync::Mutex<Option<Arc<SftpSession>>>,
+    /// Last measured SSH ping round trip (ms).
+    pub latency: Mutex<Option<u32>>,
     /// Keeps the jump connection alive while this one exists.
     _jump: Option<Arc<Conn>>,
 }
@@ -139,6 +141,14 @@ pub struct Pool {
 impl Pool {
     pub fn connected_ids(&self) -> Vec<String> {
         self.conns.lock().iter().filter(|(_, c)| !c.is_closed()).map(|(k, _)| k.clone()).collect()
+    }
+
+    pub fn latencies(&self) -> Vec<Latency> {
+        self.conns
+            .lock()
+            .values()
+            .map(|c| Latency { host_id: c.host_id.clone(), ms: *c.latency.lock() })
+            .collect()
     }
 
     pub fn existing(&self, host_id: &str) -> Option<Arc<Conn>> {
@@ -191,14 +201,31 @@ fn emit_state(ctx: &Ctx, host_id: &str, state: &str, error: Option<String>) {
     let _ = ctx.app.emit("conn-state", ConnState { host_id: host_id.into(), state: state.into(), error });
 }
 
-/// Notify the UI when a pooled connection drops.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Latency {
+    pub host_id: String,
+    /// Round trip of an SSH ping in ms (None = no reply within 5s).
+    pub ms: Option<u32>,
+}
+
+/// Notify the UI when a pooled connection drops, and sample network latency (SSH ping RTT).
 fn spawn_watch(ctx: Arc<Ctx>, c: Arc<Conn>) {
     let weak = Arc::downgrade(&c);
     drop(c);
     tokio::spawn(async move {
+        let mut tick: u32 = 0;
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
+            tick += 1;
             let Some(c) = weak.upgrade() else { return };
+            if tick % 2 == 1 && !c.is_closed() {
+                let start = std::time::Instant::now();
+                let ok = tokio::time::timeout(Duration::from_secs(5), c.handle.send_ping()).await;
+                let ms = matches!(ok, Ok(Ok(()))).then(|| start.elapsed().as_millis() as u32);
+                *c.latency.lock() = ms;
+                let _ = ctx.app.emit("latency", Latency { host_id: c.host_id.clone(), ms });
+            }
             if c.is_closed() {
                 let id = c.host_id.clone();
                 let mut m = ctx.pool.conns.lock();
@@ -257,6 +284,7 @@ async fn connect(ctx: Arc<Ctx>, host_id: &str, depth: u8) -> Result<Arc<Conn>> {
         handle,
         forwards,
         sftp: Default::default(),
+        latency: Mutex::new(None),
         _jump: jump,
     }))
 }

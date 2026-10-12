@@ -96,10 +96,10 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
     mode === "list" ? (
       <>
         <button className="btn" onClick={() => reset("import")}>
-          <FileUp /> 导入密钥
+          <FileUp /> 导入
         </button>
         <button className="btn primary" onClick={() => reset("generate")}>
-          <Plus /> 生成新密钥
+          <Plus /> 生成
         </button>
       </>
     ) : created ? (
@@ -116,7 +116,7 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
   return (
     <>
       <Dialog
-        title={mode === "list" ? "密钥" : mode === "generate" ? "生成新密钥" : "导入密钥"}
+        title={mode === "list" ? "密钥" : mode === "generate" ? "生成密钥" : "导入密钥"}
         width={560}
         onClose={deleting ? () => {} : props.onClose}
         footer={footer}
@@ -129,7 +129,7 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
               {keys.map((k) => (
                 <div className="km-row" key={k.id}>
                   <span className="name ellipsis" title={k.name}>{k.name}</span>
-                  <span className="grow ellipsis mono faint" style={{ fontSize: "var(--fs-xs)" }} title={k.publicKey}>
+                  <span className="grow ellipsis mono faint pub" title={k.publicKey}>
                     {shortPub(k.publicKey)}
                   </span>
                   <button className="icon-btn" title="复制公钥" onClick={() => copy(k.publicKey)}>
@@ -145,7 +145,9 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
 
         {mode !== "list" && created && (
           <div className="stack gap-3">
-            <div className="muted">已生成「{created.name}」。将公钥添加到服务器的 ~/.ssh/authorized_keys</div>
+            <div className="muted">
+              添加到服务器 <span className="mono">~/.ssh/authorized_keys</span>
+            </div>
             <div className="km-pub">{created.publicKey}</div>
             <div className="row">
               <button className="btn sm" onClick={() => copy(created.publicKey)}>
@@ -164,9 +166,13 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
             }}
           >
             <Field label="名称">
-              <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 work-ed25519" />
+              <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="work-ed25519" />
             </Field>
-            {mode === "generate" && <Field label="">{<span className="faint">生成 Ed25519 密钥，私钥加密保存在本地</span>}</Field>}
+            {mode === "generate" && (
+              <Field label="类型">
+                <span className="faint">Ed25519</span>
+              </Field>
+            )}
             {mode === "import" && (
               <>
                 <Field label="私钥" top>
@@ -188,7 +194,7 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
                   </div>
                 </Field>
                 <Field label="私钥密码">
-                  <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="可选" />
+                  <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
                 </Field>
               </>
             )}
@@ -205,7 +211,7 @@ export function KeyManager(props: { onClose: () => void; onChanged?: (keys: KeyE
       {deleting && (
         <Confirm
           title="删除密钥"
-          message={`确定删除「${deleting.name}」？使用此密钥的服务器将无法登录。`}
+          message={`删除「${deleting.name}」后，使用它的服务器将无法登录。`}
           confirmText="删除"
           danger
           onCancel={() => setDeleting(null)}

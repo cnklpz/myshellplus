@@ -16,6 +16,7 @@ import { type TermTab, useApp } from "../../store";
 import { AiBar, ExplainCard } from "./AiBar";
 import { onThemeChange, termTheme } from "../../lib/themes";
 import { refreshAiPredict, savedFontSize, TERM_OPTIONS } from "./config";
+import { LocalEcho } from "./localEcho";
 import { reopenTerminal } from "./open";
 import { PredictPopup } from "./PredictPopup";
 import { type PopupState, Predictor } from "./predictor";
@@ -64,7 +65,7 @@ export function XTermView(props: {
   const explainSelection = () => {
     const sel = inst.current?.term.getSelection().trim();
     if (!sel) {
-      toast("先在终端中选中要解释的内容");
+      toast("先选中要解释的文本");
       return;
     }
     setExplain(sel.length > 4000 ? sel.slice(-4000) : sel);
@@ -101,6 +102,10 @@ export function XTermView(props: {
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
     term.open(hostEl);
+    const echo = new LocalEcho(term);
+    echo.mount();
+    echo.setNetworkLatency(useApp.getState().latency[hostId] ?? null);
+    const unLatency = useApp.subscribe((s) => echo.setNetworkLatency(s.latency[hostId] ?? null));
     try {
       const gl = new WebglAddon();
       gl.onContextLoss(() => gl.dispose()); // xterm falls back to the DOM renderer
@@ -162,13 +167,18 @@ export function XTermView(props: {
           return;
         }
         predictor.onData(data);
+        echo.onInput(data);
         api.termWrite(id, data).catch(() => {});
       }),
       term.onResize(({ cols, rows }) => {
         predictor.reset();
+        echo.clear();
         if (live.current.alive) api.termResize(id, cols, rows).catch(() => {});
       }),
-      term.onWriteParsed(() => predictor.onWriteParsed()),
+      term.onWriteParsed(() => {
+        echo.onOutput();
+        predictor.onWriteParsed();
+      }),
       term.onCursorMove(() => predictor.onCursorMove()),
       term.onScroll(() => predictor.onWriteParsed()),
       term.onSelectionChange(() => setHasSel(term.hasSelection())),
@@ -249,6 +259,7 @@ export function XTermView(props: {
           return;
         }
         predictor.onRun();
+        echo.clear();
         api.termWrite(id, command + "\r").catch((e) => toast(errMsg(e), "error"));
         const c = command.trim();
         if (c && !c.includes("\n")) api.historyRecord(hostId, c).catch(() => {});
@@ -266,6 +277,8 @@ export function XTermView(props: {
       hostEl.removeEventListener("contextmenu", onContextMenu);
       unregister();
       predictor.dispose();
+      echo.dispose();
+      unLatency();
       unTheme();
       window.removeEventListener("term-font-change", onFont);
       subs.forEach((s) => s.dispose());
@@ -293,13 +306,10 @@ export function XTermView(props: {
     <div className="term-view" style={{ display: active ? "flex" : "none" }}>
       {!tab.alive && (
         <div className="term-exit row">
-          <Unplug size={14} />
+          <Unplug />
           <span>连接已断开</span>
-          <span className="faint">
-            按 <kbd>Enter</kbd> 或点击按钮重新连接
-          </span>
           <span className="spacer" />
-          <button className="btn sm primary" disabled={reconnecting} onClick={reconnect}>
+          <button className="btn sm primary" title="Enter" disabled={reconnecting} onClick={reconnect}>
             <RotateCw className={reconnecting ? "spin" : undefined} />
             重新连接
           </button>
