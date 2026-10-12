@@ -21,6 +21,8 @@ const SOURCES: {
   { id: "xshell", name: "Xshell", hint: "*.xsh 文件夹", kind: "dir" },
   { id: "mobaxterm", name: "MobaXterm", hint: "MobaXterm.ini", kind: "file", filters: [{ name: "MobaXterm 配置", extensions: ["ini"] }] },
   { id: "finalshell", name: "FinalShell", hint: "conn 文件夹", kind: "dir" },
+  { id: "termius", name: "Termius", hint: "导入模板 CSV", kind: "file", filters: [{ name: "CSV", extensions: ["csv"] }] },
+  { id: "ishell", name: "iShell Pro", hint: "导出的 CSV", kind: "file", filters: [{ name: "CSV", extensions: ["csv"] }] },
   { id: "csv", name: "CSV", hint: "*.csv", kind: "file", filters: [{ name: "CSV", extensions: ["csv"] }] },
   { id: "backup", name: "MyShell+ 备份", hint: "*.json", kind: "file", filters: [{ name: "MyShell+ 备份", extensions: ["json"] }] },
 ];

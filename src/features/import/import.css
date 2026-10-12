@@ -1,5 +1,5 @@
 /* Import wizard */
-.imp-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+.imp-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
 .imp-tile {
   display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); min-width: 0;
   padding: var(--sp-3); text-align: left; cursor: pointer; color: var(--fg-0);

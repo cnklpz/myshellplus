@@ -32,7 +32,7 @@
 .term-tablist::-webkit-scrollbar { display: none; }
 
 .term-tab {
-  flex: none; width: 200px; gap: var(--sp-2);
+  flex: none; width: 240px; gap: var(--sp-2);
   padding: 0 var(--sp-1) 0 var(--sp-3);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   color: var(--fg-2); font-size: var(--fs-sm); user-select: none;
@@ -47,6 +47,8 @@
 }
 .term-tab.active::before { opacity: 1; }
 .term-tab .dot { width: 6px; height: 6px; }
+.term-tab-name { flex: 0 1 auto; }
+.term-tab-addr { flex: 0 1 auto; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--fg-2); }
 .term-tab .dot.ok { background: color-mix(in srgb, var(--ok) 80%, transparent); }
 .term-tab-close {
   width: calc(var(--h-sm) - var(--sp-2)); height: calc(var(--h-sm) - var(--sp-2));

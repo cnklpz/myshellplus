@@ -39,6 +39,8 @@ interface AppState {
   /** Host editor dialog: null = closed, "" = new host, id = edit */
   editingHost: string | null;
   importOpen: boolean;
+  /** Mask host addresses on screen */
+  privacy: boolean;
 
   refreshVault: () => Promise<void>;
   refreshHosts: () => Promise<void>;
@@ -56,11 +58,21 @@ interface AppState {
   setActiveTab: (id: string | null) => void;
   openEditor: (hostId: string | null) => void;
   setImportOpen: (open: boolean) => void;
+  setPrivacy: (on: boolean) => void;
   toast: (text: string, kind?: Toast["kind"]) => void;
   dismissToast: (id: number) => void;
 }
 
 let toastSeq = 1;
+
+const PRIVACY_KEY = "privacyMode";
+function loadPrivacy(): boolean {
+  try {
+    return localStorage.getItem(PRIVACY_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 export const useApp = create<AppState>((set, get) => ({
   vault: null,
@@ -78,6 +90,7 @@ export const useApp = create<AppState>((set, get) => ({
   toasts: [],
   editingHost: null,
   importOpen: false,
+  privacy: loadPrivacy(),
 
   refreshVault: async () => set({ vault: await api.vaultStatus() }),
   refreshHosts: async () => set({ hosts: await api.hostList() }),
@@ -106,6 +119,14 @@ export const useApp = create<AppState>((set, get) => ({
   },
   openEditor: (editingHost) => set({ editingHost }),
   setImportOpen: (importOpen) => set({ importOpen }),
+  setPrivacy: (privacy) => {
+    try {
+      localStorage.setItem(PRIVACY_KEY, privacy ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+    set({ privacy });
+  },
   toast: (text, kind = "info") => {
     const id = toastSeq++;
     set({ toasts: [...get().toasts, { id, kind, text }] });

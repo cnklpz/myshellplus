@@ -114,7 +114,14 @@ pub fn preview(ctx: &Ctx, source: &str, path: &str, password: Option<&str>) -> R
         "xshell" => parse_xshell(Path::new(path), &mut warnings)?,
         "mobaxterm" => parse_mobaxterm(&read_text(Path::new(path))?),
         "finalshell" => parse_finalshell(Path::new(path), &mut warnings)?,
-        "csv" => parse_csv(&read_text(Path::new(path))?)?,
+        "csv" | "termius" | "ishell" => {
+            let default_group = match source {
+                "termius" => "Termius",
+                "ishell" => "iShell",
+                _ => "",
+            };
+            parse_csv(&read_text(Path::new(path))?, default_group, &mut warnings)?
+        }
         "backup" => {
             let b = read_backup(path, password)?;
             snippets = b.snippets;
@@ -130,6 +137,12 @@ pub fn preview(ctx: &Ctx, source: &str, path: &str, password: Option<&str>) -> R
     }
     if matches!(source, "xshell" | "finalshell" | "mobaxterm") {
         warnings.push("该软件的密码为加密存储，导入后需要重新填写密码".into());
+    }
+    if matches!(source, "termius" | "ishell")
+        && !hosts.is_empty()
+        && hosts.iter().all(|c| c.password.is_none() && c.key_text.is_none() && c.key_path.is_none())
+    {
+        warnings.push("文件不含密码或私钥，导入后需要重新填写".into());
     }
     Ok(Preview { source: source.into(), path: path.into(), hosts, snippets, tunnels, warnings })
 }
@@ -595,13 +608,16 @@ fn parse_finalshell(dir: &Path, warnings: &mut Vec<String>) -> Result<Vec<Candid
     Ok(out)
 }
 
-// ---------------- CSV ----------------
+// ---------------- CSV (generic, Termius, iShell Pro) ----------------
 
-fn split_csv(line: &str) -> Vec<String> {
-    let mut out = Vec::new();
+/// RFC 4180 records: quoted fields may contain commas, doubled quotes and line breaks
+/// (iShell Pro puts whole private keys in one cell).
+fn parse_csv_records(text: &str) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row: Vec<String> = Vec::new();
     let mut cur = String::new();
     let mut q = false;
-    let mut chars = line.chars().peekable();
+    let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
             '"' if q && chars.peek() == Some(&'"') => {
@@ -609,53 +625,77 @@ fn split_csv(line: &str) -> Vec<String> {
                 chars.next();
             }
             '"' => q = !q,
-            ',' if !q => out.push(std::mem::take(&mut cur)),
+            ',' if !q => row.push(std::mem::take(&mut cur)),
+            '\r' if !q => {}
+            '\n' if !q => {
+                row.push(std::mem::take(&mut cur));
+                rows.push(std::mem::take(&mut row));
+            }
             _ => cur.push(c),
         }
     }
-    out.push(cur);
-    out.into_iter().map(|s| s.trim().to_string()).collect()
+    if !cur.is_empty() || !row.is_empty() {
+        row.push(cur);
+        rows.push(row);
+    }
+    rows.into_iter()
+        .map(|r| r.into_iter().map(|s| s.trim().to_string()).collect::<Vec<_>>())
+        .filter(|r| r.iter().any(|c| !c.is_empty()))
+        .collect()
 }
 
-/// Header row required; recognised columns: name, group, host, port, username/user, password, key, notes, tags.
-fn parse_csv(text: &str) -> Result<Vec<Candidate>> {
-    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
-    let header: Vec<String> = split_csv(lines.next().ok_or_else(|| anyhow!("CSV 为空"))?)
-        .into_iter()
-        .map(|h| h.to_lowercase())
-        .collect();
+/// Header row required. Column names are matched case-insensitively and cover this app's template,
+/// Termius (`Groups,Label,Tags,Hostname/IP,Protocol,Port,Username,Password`) and
+/// iShell Pro (`主机名称,协议,主机地址,端口,用户名,密码,认证方式,私钥内容,私钥密码,分组,标签,备注,系统类型`).
+fn parse_csv(text: &str, default_group: &str, warnings: &mut Vec<String>) -> Result<Vec<Candidate>> {
+    let mut rows = parse_csv_records(text.trim_start_matches('\u{feff}')).into_iter();
+    let header: Vec<String> = rows.next().ok_or_else(|| anyhow!("CSV 为空"))?.into_iter().map(|h| h.to_lowercase()).collect();
     let col = |names: &[&str]| header.iter().position(|h| names.contains(&h.as_str()));
-    let c_host = col(&["host", "hostname", "address", "ip", "主机", "地址"]).ok_or_else(|| anyhow!("CSV 缺少 host 列"))?;
-    let c_name = col(&["name", "名称"]);
-    let c_group = col(&["group", "分组"]);
+    let c_host = col(&["host", "hostname", "hostname/ip", "address", "ip", "主机", "地址", "主机地址"]).ok_or_else(|| anyhow!("CSV 缺少主机地址列"))?;
+    let c_name = col(&["name", "label", "名称", "主机名称"]);
+    let c_group = col(&["group", "groups", "分组"]);
+    let c_proto = col(&["protocol", "协议"]);
     let c_port = col(&["port", "端口"]);
     let c_user = col(&["username", "user", "用户名", "用户"]);
     let c_pass = col(&["password", "密码"]);
     let c_key = col(&["key", "keyfile", "identityfile", "密钥"]);
-    let c_notes = col(&["notes", "备注"]);
+    let c_key_text = col(&["privatekey", "private key", "私钥内容"]);
+    let c_key_pass = col(&["passphrase", "key passphrase", "私钥密码"]);
+    let c_notes = col(&["notes", "note", "备注"]);
     let c_tags = col(&["tags", "标签"]);
     let mut out = Vec::new();
-    for line in lines {
-        let f = split_csv(line);
+    let mut skipped = 0;
+    for f in rows {
         let get = |c: Option<usize>| c.and_then(|i| f.get(i)).cloned().unwrap_or_default();
         let host = get(Some(c_host));
         if host.is_empty() {
             continue;
         }
+        let proto = get(c_proto).to_lowercase();
+        if !proto.is_empty() && proto != "ssh" && proto != "ssh2" {
+            skipped += 1;
+            continue;
+        }
         let name = get(c_name);
+        let group = get(c_group).replace('\\', "/").trim_matches('/').to_string();
         out.push(Candidate {
             alias: if name.is_empty() { host.clone() } else { name.clone() },
             name: if name.is_empty() { host.clone() } else { name },
-            group: get(c_group),
+            group: if group.is_empty() { default_group.into() } else { group },
             host,
             port: get(c_port).parse().unwrap_or(22),
             username: get(c_user),
             password: Some(get(c_pass)).filter(|p| !p.is_empty()),
-            key_path: Some(get(c_key)).filter(|p| !p.is_empty()),
+            key_path: Some(get(c_key)).filter(|p| !p.is_empty() && p.contains(['/', '\\'])),
+            key_text: Some(get(c_key_text)).filter(|p| p.contains("PRIVATE KEY")),
+            key_passphrase: Some(get(c_key_pass)).filter(|p| !p.is_empty()),
             notes: get(c_notes),
-            tags: get(c_tags).split([';', '|']).map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect(),
+            tags: get(c_tags).split([';', '|', ',', '，', '、']).map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect(),
             ..Default::default()
         });
+    }
+    if skipped > 0 {
+        warnings.push(format!("已跳过 {skipped} 条非 SSH 协议的记录"));
     }
     Ok(out)
 }
@@ -774,9 +814,51 @@ mod tests {
 
     #[test]
     fn csv() {
-        let r = parse_csv("name,host,port,user,password\n\"web, prod\",1.2.3.4,22,root,\"p\"\"w\"\n").unwrap();
+        let r = parse_csv("name,host,port,user,password\n\"web, prod\",1.2.3.4,22,root,\"p\"\"w\"\n", "", &mut vec![]).unwrap();
         assert_eq!(r[0].name, "web, prod");
         assert_eq!(r[0].password.as_deref(), Some("p\"w"));
+    }
+
+    #[test]
+    fn termius_csv() {
+        let mut w = vec![];
+        let r = parse_csv(
+            "\u{feff}Groups,Label,Tags,Hostname/IP,Protocol,Port,Username,Password\r\nProd/Web,web-01,\"nginx,edge\",10.0.0.1,ssh,2222,root,pw\r\n,telnet-box,,10.0.0.2,telnet,23,,\r\n,10.0.0.3,,10.0.0.3,,,,\r\n",
+            "Termius",
+            &mut w,
+        )
+        .unwrap();
+        assert_eq!(r.len(), 2);
+        assert_eq!((r[0].group.as_str(), r[0].name.as_str(), r[0].port), ("Prod/Web", "web-01", 2222));
+        assert_eq!(r[0].tags, vec!["nginx", "edge"]);
+        assert_eq!(r[0].password.as_deref(), Some("pw"));
+        assert_eq!((r[1].group.as_str(), r[1].port), ("Termius", 22));
+        assert_eq!(w.len(), 1);
+    }
+
+    #[test]
+    fn ishell_csv_with_multiline_key() {
+        let key = "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\nBBBB\n-----END OPENSSH PRIVATE KEY-----";
+        let text = format!(
+            "主机名称,协议,主机地址,端口,用户名,密码,认证方式,私钥内容,私钥密码,分组,标签,备注,系统类型\r\n\
+             web,SSH,10.0.0.1,22,root,pw,密码,,,生产,a;b,备注一,Linux\r\n\
+             db,SSH,10.0.0.2,22,admin,,密钥,\"{key}\",kp,生产/数据库,,,Linux\r\n"
+        );
+        let r = parse_csv(&text, "iShell", &mut vec![]).unwrap();
+        assert_eq!(r.len(), 2);
+        assert_eq!((r[0].name.as_str(), r[0].group.as_str(), r[0].notes.as_str()), ("web", "生产", "备注一"));
+        assert_eq!(r[0].tags, vec!["a", "b"]);
+        assert!(r[0].key_text.is_none());
+        assert_eq!(r[1].key_text.as_deref(), Some(key));
+        assert_eq!(r[1].key_passphrase.as_deref(), Some("kp"));
+        assert_eq!(r[1].group, "生产/数据库");
+    }
+
+    #[test]
+    fn ishell_safe_csv_has_no_secrets() {
+        let r = parse_csv("主机名称,协议,主机地址,端口,用户名,认证方式,分组,标签,备注,系统类型\r\nweb,SSH,10.0.0.1,22,root,密码,生产,,,Linux\r\n", "iShell", &mut vec![]).unwrap();
+        assert_eq!(r.len(), 1);
+        assert!(r[0].password.is_none() && r[0].key_text.is_none());
     }
 
     #[test]

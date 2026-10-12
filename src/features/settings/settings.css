@@ -23,7 +23,10 @@
 .set-inner { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-6); }
 
 /* Right padding keeps title actions clear of the modal close button. */
-.set-title { display: flex; align-items: center; gap: var(--sp-3); height: 64px; flex: none; margin-bottom: calc(-1 * var(--sp-2)); padding-right: var(--sp-6); }
+.set-title {
+  display: flex; align-items: center; gap: var(--sp-3); height: 64px; flex: none; padding-right: var(--sp-6);
+  position: sticky; top: 0; z-index: 2; background: var(--bg-0);
+}
 .set-title h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
 
 /* A block = optional small heading + one group card. */

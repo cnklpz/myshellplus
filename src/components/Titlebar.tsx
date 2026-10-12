@@ -1,6 +1,6 @@
 // Custom window chrome: app mark, view switcher, window controls. The bar itself is the drag region.
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Lock } from "lucide-react";
+import { Eye, EyeOff, Lock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useApp } from "../store";
@@ -17,6 +17,7 @@ function win() {
 
 export function Titlebar() {
   const passwordOn = useApp((s) => !!s.vault?.passwordEnabled);
+  const privacy = useApp((s) => s.privacy);
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -43,20 +44,25 @@ export function Titlebar() {
       <div className="spacer" data-tauri-drag-region />
 
       {passwordOn && (
-        <>
+        <button
+          className="tb-btn"
+          title="锁定"
+          onClick={async () => {
+            await api.vaultLock();
+            await useApp.getState().refreshVault();
+          }}
+        >
+          <Lock />
+        </button>
+      )}
       <button
-        className="tb-btn"
-        title="锁定"
-        onClick={async () => {
-          await api.vaultLock();
-          await useApp.getState().refreshVault();
-        }}
+        className={"tb-btn" + (privacy ? " on" : "")}
+        title={privacy ? "关闭隐私模式" : "隐私模式"}
+        onClick={() => useApp.getState().setPrivacy(!privacy)}
       >
-        <Lock />
+        {privacy ? <EyeOff /> : <Eye />}
       </button>
       <div className="tb-sep" />
-        </>
-      )}
       <button className="tb-btn" title="最小化" onClick={() => win()?.minimize()}>
         <svg viewBox="0 0 12 12"><path d="M2 6h8" /></svg>
       </button>

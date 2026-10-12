@@ -1,8 +1,10 @@
-// Left sidebar: grouped host list, search, context menu, drag to regroup.
-import { ChevronDown, ChevronRight, Copy, Download, Link, Pencil, Plug, Plus, SquareTerminal, Trash2, Unplug } from "lucide-react";
+// Left sidebar: grouped host list, search, context menu, drag to regroup, hidden groups.
+import { ChevronDown, ChevronRight, Copy, Download, Eye, EyeOff, Link, Pencil, Plug, Plus, SquareTerminal, Trash2, Unplug } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Confirm, Empty, toast } from "../../components/ui";
 import { api, errMsg, type Host } from "../../lib/api";
+import { nameIsAddr, usePrivacy } from "../../lib/privacy";
 import { useApp } from "../../store";
 import { openTerminal } from "../terminal/open";
 import "./hosts.css";
@@ -10,17 +12,20 @@ import { GlobalSearch } from "../../components/GlobalSearch";
 
 const UNGROUPED = "未分组";
 const COLLAPSE_KEY = "hostGroupsCollapsed";
+const HIDDEN_KEY = "hostGroupsHidden";
+/** Collapse key of the "已隐藏" section (cannot clash with a group name). */
+const HIDDEN_SECTION = "\u0000hidden";
 
-function loadCollapsed(): Record<string, boolean> {
+function load<T>(key: string, fallback: T): T {
   try {
-    return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "{}") ?? {};
+    return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
   } catch {
-    return {};
+    return fallback;
   }
 }
-function saveCollapsed(v: Record<string, boolean>) {
+function save(key: string, v: unknown) {
   try {
-    localStorage.setItem(COLLAPSE_KEY, JSON.stringify(v));
+    localStorage.setItem(key, JSON.stringify(v));
   } catch {
     /* ignore */
   }
@@ -53,6 +58,9 @@ async function openTerm(id: string) {
 }
 
 interface Menu { x: number; y: number; host: Host }
+interface GroupMenu { x: number; y: number; group: string }
+interface Drag { id: string; over: string | null; x: number; y: number }
+interface Group { name: string; items: Host[] }
 
 /** `header` renders between the search bar and the host list (the sidebar puts page links there). */
 export function HostSidebar(props: { header?: ReactNode } = {}) {
@@ -61,14 +69,20 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
   const openEditor = useApp((s) => s.openEditor);
   const setImportOpen = useApp((s) => s.setImportOpen);
   const setPanelHost = useApp((s) => s.setPanelHost);
+  const priv = usePrivacy();
 
   // Search lives in the global palette (Ctrl+P); the list itself is unfiltered.
   const query = "";
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    const c = load<Record<string, boolean>>(COLLAPSE_KEY, {});
+    return HIDDEN_SECTION in c ? c : { ...c, [HIDDEN_SECTION]: true };
+  });
+  const [hidden, setHidden] = useState<string[]>(() => load<string[]>(HIDDEN_KEY, []));
   const [selected, setSelected] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [groupMenu, setGroupMenu] = useState<GroupMenu | null>(null);
   const [deleting, setDeleting] = useState<Host | null>(null);
-  const [drag, setDrag] = useState<{ id: string; over: string | null } | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
 
@@ -81,7 +95,7 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
       if (!map.has(g)) map.set(g, []);
       map.get(g)!.push(h);
     }
-    const list = [...map.entries()].map(([name, items]) => ({
+    const list: Group[] = [...map.entries()].map(([name, items]) => ({
       name,
       items: items.sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name, "zh-CN")),
     }));
@@ -89,13 +103,27 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
     return list;
   }, [hosts, q]);
 
+  const shownGroups = useMemo(() => groups.filter((g) => !hidden.includes(g.name)), [groups, hidden]);
+  const hiddenGroups = useMemo(() => groups.filter((g) => hidden.includes(g.name)), [groups, hidden]);
+  const hiddenOpen = !!q || !collapsed[HIDDEN_SECTION];
+
   // Hosts in display order (searching expands every group).
-  const visible = useMemo(() => groups.flatMap((g) => (q || !collapsed[g.name] ? g.items : [])), [groups, collapsed, q]);
+  const visible = useMemo(
+    () => [...shownGroups, ...(hiddenOpen ? hiddenGroups : [])].flatMap((g) => (q || !collapsed[g.name] ? g.items : [])),
+    [shownGroups, hiddenGroups, hiddenOpen, collapsed, q],
+  );
 
   const toggleGroup = (name: string) => {
     const next = { ...collapsed, [name]: !collapsed[name] };
     setCollapsed(next);
-    saveCollapsed(next);
+    save(COLLAPSE_KEY, next);
+  };
+
+  const setGroupHidden = (name: string, hide: boolean) => {
+    const next = hidden.filter((g) => g !== name);
+    if (hide) next.push(name);
+    setHidden(next);
+    save(HIDDEN_KEY, next);
   };
 
   const select = (id: string) => {
@@ -121,6 +149,7 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
 
 
   // Pointer-based drag (HTML5 DnD is swallowed by the webview's file-drop handler on Windows).
+  // A ghost row follows the cursor; dropping on any row of a group moves the host there.
   const startDrag = (e: React.MouseEvent, host: Host) => {
     if (e.button !== 0) return;
     const sx = e.clientX;
@@ -129,14 +158,17 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
     let over: string | null = null;
     const move = (ev: MouseEvent) => {
       if (!active && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 6) return;
+      if (!active) document.body.classList.add("hs-dragging");
       active = true;
+      ev.preventDefault();
       const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-group]");
       over = el?.dataset.group ?? null;
-      setDrag({ id: host.id, over });
+      setDrag({ id: host.id, over, x: ev.clientX, y: ev.clientY });
     };
     const up = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      document.body.classList.remove("hs-dragging");
       setDrag(null);
       if (!active || over === null) return;
       const groupName = over === UNGROUPED ? "" : over;
@@ -148,6 +180,60 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
   };
+
+  const renderGroup = (g: Group) => {
+    const isCollapsed = !q && !!collapsed[g.name];
+    return (
+      <div key={g.name}>
+        <div
+          className={"list-row hs-group" + (drag && drag.over === g.name ? " drop" : "")}
+          data-group={g.name}
+          onClick={() => toggleGroup(g.name)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setGroupMenu({ x: e.clientX, y: e.clientY, group: g.name });
+          }}
+        >
+          <span className="hs-icon">{isCollapsed ? <ChevronRight /> : <ChevronDown />}</span>
+          <span className="grow ellipsis">{g.name}</span>
+          <span className="meta">{g.items.length}</span>
+        </div>
+        {!isCollapsed &&
+          g.items.map((h) => (
+            <div
+              key={h.id}
+              data-host={h.id}
+              data-group={g.name}
+              className={
+                "list-row hs-host" + (selected === h.id ? " selected" : "") + (drag?.id === h.id ? " dragging" : "")
+              }
+              title={`${h.username}@${priv.addr(h.host)}:${h.port}`}
+              onMouseDown={(e) => startDrag(e, h)}
+              onClick={() => {
+                select(h.id);
+                listRef.current?.focus();
+              }}
+              onDoubleClick={() => openTerm(h.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                select(h.id);
+                setMenu({ x: e.clientX, y: e.clientY, host: h });
+              }}
+            >
+              {h.color && <span className="marker" style={{ background: h.color }} />}
+              <span className="hs-icon">
+                <span className={connDot(conn[h.id]?.state)} />
+              </span>
+              <span className="name ellipsis">{priv.text(h.name, h.host)}</span>
+              {!nameIsAddr(h.name, h.host) && <span className="meta hs-addr">{priv.addr(h.host)}</span>}
+            </div>
+          ))}
+      </div>
+    );
+  };
+
+  const dragHost = drag ? hosts.find((h) => h.id === drag.id) : undefined;
 
   return (
     <div className="hs">
@@ -176,55 +262,54 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
         <>
           <div className="hs-list" ref={listRef} tabIndex={0} onKeyDown={onListKey}>
             {groups.length === 0 && <div className="empty">无匹配结果</div>}
-            {groups.map((g) => {
-              const isCollapsed = !q && !!collapsed[g.name];
-              return (
-                <div key={g.name}>
-                  <div
-                    className={"list-row hs-group" + (drag && drag.over === g.name ? " drop" : "")}
-                    data-group={g.name}
-                    onClick={() => toggleGroup(g.name)}
-                  >
-                    <span className="hs-icon">{isCollapsed ? <ChevronRight /> : <ChevronDown />}</span>
-                    <span className="grow ellipsis">{g.name}</span>
-                    <span className="meta">{g.items.length}</span>
-                  </div>
-                  {!isCollapsed &&
-                    g.items.map((h) => (
-                      <div
-                        key={h.id}
-                        data-host={h.id}
-                        data-group={g.name}
-                        className={
-                          "list-row hs-host" +
-                          (selected === h.id ? " selected" : "") +
-                          (drag?.id === h.id ? " dragging" : "")
-                        }
-                        title={`${h.username}@${h.host}:${h.port}`}
-                        onMouseDown={(e) => startDrag(e, h)}
-                        onClick={() => {
-                          select(h.id);
-                          listRef.current?.focus();
-                        }}
-                        onDoubleClick={() => openTerm(h.id)}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          select(h.id);
-                          setMenu({ x: e.clientX, y: e.clientY, host: h });
-                        }}
-                      >
-                        {h.color && <span className="marker" style={{ background: h.color }} />}
-                        <span className="hs-icon">
-                          <span className={connDot(conn[h.id]?.state)} />
-                        </span>
-                        <span className="name ellipsis">{h.name}</span>
-                      </div>
-                    ))}
+            {shownGroups.map(renderGroup)}
+            {hiddenGroups.length > 0 && (
+              <div className="hs-hidden">
+                <div className="list-row hs-group" onClick={() => toggleGroup(HIDDEN_SECTION)}>
+                  <span className="hs-icon">{hiddenOpen ? <ChevronDown /> : <ChevronRight />}</span>
+                  <span className="grow ellipsis">已隐藏</span>
+                  <span className="meta">{hiddenGroups.length}</span>
                 </div>
-              );
-            })}
+                {hiddenOpen && <div className="hs-hidden-body">{hiddenGroups.map(renderGroup)}</div>}
+              </div>
+            )}
           </div>
         </>
+      )}
+
+      {dragHost &&
+        drag &&
+        createPortal(
+          <div className="hs-ghost" style={{ left: drag.x + 12, top: drag.y + 8 }}>
+            {dragHost.color && <span className="marker" style={{ background: dragHost.color }} />}
+            <span className="ellipsis">{priv.text(dragHost.name, dragHost.host)}</span>
+            {drag.over && <span className="hs-ghost-to">→ {drag.over}</span>}
+          </div>,
+          document.body,
+        )}
+
+      {groupMenu && (
+        <MenuBox x={groupMenu.x} y={groupMenu.y} onClose={() => setGroupMenu(null)}>
+          {hidden.includes(groupMenu.group) ? (
+            <button
+              onClick={() => {
+                setGroupMenu(null);
+                setGroupHidden(groupMenu.group, false);
+              }}
+            >
+              <Eye /> 取消隐藏
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                setGroupMenu(null);
+                setGroupHidden(groupMenu.group, true);
+              }}
+            >
+              <EyeOff /> 隐藏分组
+            </button>
+          )}
+        </MenuBox>
       )}
 
       {menu && (
@@ -260,11 +345,11 @@ export function HostSidebar(props: { header?: ReactNode } = {}) {
   );
 }
 
-function HostMenu(props: { menu: Menu; state?: string; onClose: () => void; onDelete: () => void }) {
-  const { menu, onClose } = props;
-  const h = menu.host;
+/** Context menu shell: closes on outside click / Esc / blur and stays inside the window. */
+function MenuBox(props: { x: number; y: number; onClose: () => void; children: ReactNode }) {
+  const { x, y, onClose } = props;
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x: menu.x, y: menu.y });
+  const [pos, setPos] = useState({ x, y });
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -288,10 +373,21 @@ function HostMenu(props: { menu: Menu; state?: string; onClose: () => void; onDe
     const r = ref.current?.getBoundingClientRect();
     if (!r) return;
     setPos({
-      x: Math.min(menu.x, window.innerWidth - r.width - 4),
-      y: Math.min(menu.y, window.innerHeight - r.height - 4),
+      x: Math.min(x, window.innerWidth - r.width - 4),
+      y: Math.min(y, window.innerHeight - r.height - 4),
     });
-  }, [menu.x, menu.y]);
+  }, [x, y]);
+
+  return (
+    <div className="ctx-menu" ref={ref} style={{ left: pos.x, top: pos.y }} onContextMenu={(e) => e.preventDefault()}>
+      {props.children}
+    </div>
+  );
+}
+
+function HostMenu(props: { menu: Menu; state?: string; onClose: () => void; onDelete: () => void }) {
+  const { menu, onClose } = props;
+  const h = menu.host;
 
   const run = (fn: () => unknown) => async () => {
     onClose();
@@ -304,7 +400,7 @@ function HostMenu(props: { menu: Menu; state?: string; onClose: () => void; onDe
   const isUp = props.state === "connected" || props.state === "connecting";
 
   return (
-    <div className="ctx-menu" ref={ref} style={{ left: pos.x, top: pos.y }} onContextMenu={(e) => e.preventDefault()}>
+    <MenuBox x={menu.x} y={menu.y} onClose={onClose}>
       <button onClick={run(() => openTerminal(h.id))}>
         <SquareTerminal /> 打开终端
       </button>
@@ -333,7 +429,7 @@ function HostMenu(props: { menu: Menu; state?: string; onClose: () => void; onDe
         onClick={run(async () => {
           const addr = `${h.username}@${h.host}` + (h.port !== 22 ? ` -p ${h.port}` : "");
           await navigator.clipboard.writeText(addr);
-          toast("已复制 " + addr, "success");
+          toast("已复制 " + (useApp.getState().privacy ? "地址" : addr), "success");
         })}
       >
         <Link /> 复制地址
@@ -348,6 +444,6 @@ function HostMenu(props: { menu: Menu; state?: string; onClose: () => void; onDe
       >
         <Trash2 /> 删除
       </button>
-    </div>
+    </MenuBox>
   );
 }

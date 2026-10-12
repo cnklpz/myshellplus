@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   Download,
   Gauge,
+  Upload,
   Link,
   LoaderCircle,
   MoreHorizontal,
@@ -17,14 +18,26 @@ import {
 import { type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Confirm, toast } from "../../components/ui";
+import { ExportDialog } from "../settings/SettingsView";
 import { api, errMsg, type Host } from "../../lib/api";
 import { useApp } from "../../store";
 import { openTerminal } from "../terminal/open";
 import "./home.css";
 import { useLatencyHistory } from "./latencyHistory";
 import { probeHosts, useProbe, useProbing } from "./probe";
+import { usePrivacy } from "../../lib/privacy";
 
 const UNGROUPED = "未分组";
+const ALL = "";
+const GROUP_KEY = "msp.home.group";
+
+function loadGroup() {
+  try {
+    return localStorage.getItem(GROUP_KEY) ?? ALL;
+  } catch {
+    return ALL;
+  }
+}
 const TUNNEL_POLL_MS = 5000;
 
 function matches(h: Host, q: string, os: string | undefined) {
@@ -96,14 +109,38 @@ export function HomeView() {
   const osMap = useHostOs();
   const [query, setQuery] = useState("");
   const [deleting, setDeleting] = useState<Host | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [group, setGroupState] = useState(loadGroup);
+  const setGroup = (g: string) => {
+    setGroupState(g);
+    try {
+      localStorage.setItem(GROUP_KEY, g);
+    } catch {
+      /* per-viewer convenience only */
+    }
+  };
   const probing = useProbing();
 
   const q = query.trim().toLowerCase();
+  /** Every group with its host count (unfiltered), for the tab bar. */
+  const groupTabs = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const h of hosts) {
+      const g = h.groupName.trim() || UNGROUPED;
+      counts.set(g, (counts.get(g) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => (a.name === UNGROUPED ? 1 : b.name === UNGROUPED ? -1 : a.name.localeCompare(b.name, "zh-CN")));
+  }, [hosts]);
+  const activeGroup = groupTabs.some((g) => g.name === group) ? group : ALL;
+
   const groups = useMemo(() => {
     const map = new Map<string, Host[]>();
     for (const h of hosts) {
       if (!matches(h, q, osMap[h.id])) continue;
       const g = h.groupName.trim() || UNGROUPED;
+      if (activeGroup !== ALL && g !== activeGroup) continue;
       if (!map.has(g)) map.set(g, []);
       map.get(g)!.push(h);
     }
@@ -113,7 +150,7 @@ export function HomeView() {
     }));
     list.sort((a, b) => (a.name === UNGROUPED ? 1 : b.name === UNGROUPED ? -1 : a.name.localeCompare(b.name, "zh-CN")));
     return list;
-  }, [hosts, q, osMap]);
+  }, [hosts, q, osMap, activeGroup]);
 
   const connected = hosts.filter((h) => conn[h.id]?.state === "connected").length;
 
@@ -144,6 +181,9 @@ export function HomeView() {
         <button className="btn" onClick={() => setImportOpen(true)}>
           <Download /> 导入
         </button>
+        <button className="btn" disabled={hosts.length === 0} onClick={() => setExporting(true)}>
+          <Upload /> 导出
+        </button>
         <button className="btn" onClick={() => openEditor("")}>
           <Plus /> 新建
         </button>
@@ -156,6 +196,23 @@ export function HomeView() {
           <Stat value={tabs.length} label="终端" />
           <Stat value={tunnels} label="运行中隧道" />
         </div>
+
+        {groupTabs.length > 1 && (
+          <div className="home-tabs" role="tablist">
+            {[{ name: ALL, count: hosts.length }, ...groupTabs].map((g) => (
+              <button
+                key={g.name || "*"}
+                role="tab"
+                aria-selected={g.name === activeGroup}
+                className={"home-tab" + (g.name === activeGroup ? " on" : "")}
+                onClick={() => setGroup(g.name)}
+              >
+                <span className="ellipsis">{g.name || "全部"}</span>
+                <span className="home-tab-count">{g.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {hosts.length === 0 ? (
           <div className="empty home-empty">
@@ -188,6 +245,7 @@ export function HomeView() {
         )}
       </div>
 
+      {exporting && <ExportDialog onClose={() => setExporting(false)} />}
       {deleting && (
         <Confirm
           title="删除服务器"
@@ -282,7 +340,9 @@ function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefine
   const conn = useApp((s) => s.conn[h.id]);
   const [menu, setMenu] = useState<DOMRect | null>(null);
   const kind: ConnKind = conn?.state ?? "disconnected";
-  const addr = `${h.username}@${h.host}` + (h.port !== 22 ? `:${h.port}` : "");
+  const priv = usePrivacy();
+  const addr = `${h.username}@${priv.addr(h.host)}` + (h.port !== 22 ? `:${h.port}` : "");
+  const name = priv.text(h.name, h.host);
   const note = h.notes.trim().split("\n")[0];
   const stop = (e: MouseEvent) => e.stopPropagation();
   const stateTitle = kind === "error" && conn?.error ? `${STATE_LABEL[kind]}：${conn.error}` : STATE_LABEL[kind];
@@ -310,8 +370,8 @@ function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefine
       </div>
 
       <div className="home-name-row">
-        <span className="home-name ellipsis" title={h.name}>
-          {h.name}
+        <span className="home-name ellipsis" title={name}>
+          {name}
         </span>
         <span className="home-proto">SSH</span>
         <span className={"dot " + DOT[kind]} title={stateTitle} />

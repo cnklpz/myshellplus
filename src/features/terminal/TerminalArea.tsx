@@ -2,6 +2,7 @@
 // Two-level tab bar: group tabs (derived from the hosts of open sessions) above the session tabs.
 import { Plus, Search, Server, X } from "lucide-react";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { nameIsAddr, usePrivacy } from "../../lib/privacy";
 import { type TermTab, useApp } from "../../store";
 import { installAiPredictWatcher } from "./config";
 import { closeTerminal, openTerminal } from "./open";
@@ -152,7 +153,12 @@ function GroupTab(props: { label: string; count: number; on: boolean; onClick: (
 
 function TabItem(props: { tab: TermTab; active: boolean; onSelect: () => void; onClose: () => void }) {
   const { tab, active } = props;
-  const color = useApp((s) => s.hosts.find((h) => h.id === tab.hostId)?.color);
+  const host = useApp((s) => s.hosts.find((h) => h.id === tab.hostId));
+  const color = host?.color;
+  const priv = usePrivacy();
+  const addr = host?.host ?? "";
+  const title = priv.text(tab.title, addr);
+  const showAddr = !!addr && !nameIsAddr(tab.title, addr);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (active) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -162,7 +168,7 @@ function TabItem(props: { tab: TermTab; active: boolean; onSelect: () => void; o
       ref={ref}
       className={"tab term-tab" + (active ? " active" : "")}
       style={color ? ({ "--host-color": color } as CSSProperties) : undefined}
-      title={tab.title + (tab.alive ? "" : "（已断开）")}
+      title={title + (showAddr ? ` ${priv.addr(addr)}` : "") + (tab.alive ? "" : "（已断开）")}
       onMouseDown={(e) => {
         if (e.button === 1) e.preventDefault(); // no autoscroll on middle click
       }}
@@ -172,7 +178,9 @@ function TabItem(props: { tab: TermTab; active: boolean; onSelect: () => void; o
       onClick={props.onSelect}
     >
       <span className={"dot " + (tab.alive ? "ok" : "err")} />
-      <span className="ellipsis grow">{tab.title}</span>
+      <span className="ellipsis term-tab-name">{title}</span>
+      {showAddr && <span className="ellipsis term-tab-addr">{priv.addr(addr)}</span>}
+      <span className="grow" />
       {tab.alive && <LatencyTag hostId={tab.hostId} />}
       <button
         className="icon-btn term-tab-close"
@@ -200,6 +208,7 @@ function LatencyTag({ hostId }: { hostId: string }) {
 /** `group`: the selected terminal group; its hosts are listed first. */
 function HostPicker(props: { group: string; onClose: () => void }) {
   const hosts = useApp((s) => s.hosts);
+  const priv = usePrivacy();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -279,9 +288,9 @@ function HostPicker(props: { group: string; onClose: () => void }) {
             onClick={() => pick(h.id)}
           >
             {h.color ? <span className="host-picker-color"><span className="dot" style={{ background: h.color }} /></span> : <Server />}
-            <span className="ellipsis grow">{h.name}</span>
+            <span className="ellipsis grow">{priv.text(h.name, h.host)}</span>
             <span className="meta ellipsis mono host-picker-addr">
-              {h.username}@{h.host}
+              {h.username}@{priv.addr(h.host)}
               {h.port !== 22 ? `:${h.port}` : ""}
             </span>
           </div>

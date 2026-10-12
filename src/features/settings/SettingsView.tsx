@@ -2,7 +2,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { appDataDir } from "@tauri-apps/api/path";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Lock, Plus, Trash2, Zap } from "lucide-react";
+import { Lock, Trash2, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Select } from "../../components/Select";
 import { Dialog, Field, Toggle, toast } from "../../components/ui";
@@ -107,12 +107,22 @@ const PRESETS: { label: string; p: Omit<AiProvider, "id"> }[] = [
   { label: "自定义", p: { name: "自定义服务", kind: "openai", baseUrl: "", model: "" } },
 ];
 
+const CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"];
+
+/** Quick picks for a provider's model fields (any other model name can be typed). */
+function modelsFor(p: AiProvider): string[] {
+  if (p.kind === "anthropic") return CLAUDE_MODELS;
+  const url = p.baseUrl.toLowerCase();
+  if (url.includes("deepseek")) return ["deepseek-chat", "deepseek-reasoner"];
+  if (url.includes("dashscope")) return ["qwen-flash", "qwen-turbo", "qwen-plus", "qwen-max"];
+  return [];
+}
+
 function AiSection() {
   const [s, setS] = useState<AiSettings | null>(null);
   /** providerId -> new key; "" = clear on save. Only edited providers are present. */
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
-  const [preset, setPreset] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = async () => {
@@ -143,9 +153,10 @@ function AiSection() {
     setKeys(next);
     setDirty(true);
   };
-  const add = () => {
+  const add = (preset: number) => {
     const id = "p" + Date.now().toString(36);
-    const providers = [...s.providers, { id, ...PRESETS[preset].p }];
+    // New service goes first so it is visible without scrolling.
+    const providers = [{ id, ...PRESETS[preset].p }, ...s.providers];
     update({
       providers,
       active: s.active && providers.some((p) => p.id === s.active) ? s.active : id,
@@ -197,6 +208,8 @@ function AiSection() {
     }
   };
 
+  const predictProvider = s.providers.find((p) => p.id === (s.predictProvider || s.active));
+  const predictModels = predictProvider ? modelsFor(predictProvider) : [];
   const providerOptions = s.providers.map((p) => ({ value: p.id, label: p.name || p.id }));
 
   return (
@@ -212,11 +225,14 @@ function AiSection() {
         title="服务"
         actions={
           <>
-            <Select size="sm" width={128} value={preset} options={PRESETS.map((p, i) => ({ value: i, label: p.label }))} onChange={setPreset} />
-            <button className="btn sm" onClick={add}>
-              <Plus />
-              添加
-            </button>
+            <Select
+              size="sm"
+              width={128}
+              value={-1}
+              placeholder="添加服务"
+              options={PRESETS.map((p, i) => ({ value: i, label: p.label }))}
+              onChange={add}
+            />
           </>
         }
       >
@@ -261,6 +277,15 @@ function AiSection() {
                 </Field>
                 <Field label="模型">
                   <input className="input mono" value={p.model} onChange={(e) => updateProvider(p.id, { model: e.target.value })} />
+                  {modelsFor(p).length > 0 && (
+                    <Select
+                      width={128}
+                      value=""
+                      placeholder="常用模型"
+                      options={modelsFor(p).map((m) => ({ value: m, label: m.replace("claude-", "") }))}
+                      onChange={(model) => updateProvider(p.id, { model })}
+                    />
+                  )}
                 </Field>
                 <Field label="API Key">
                   <input
@@ -301,12 +326,21 @@ function AiSection() {
           </Field>
           <Field label="预测模型">
             <input
-              className="input"
+              className="input mono"
               value={s.predictModel ?? ""}
-              placeholder="claude-haiku-5-5"
+              placeholder={predictProvider?.model || "同服务模型"}
               spellCheck={false}
               onChange={(e) => update({ predictModel: e.target.value || null })}
             />
+            {predictModels.length > 0 && (
+              <Select
+                width={128}
+                value=""
+                placeholder="常用模型"
+                options={predictModels.map((m) => ({ value: m, label: m.replace("claude-", "") }))}
+                onChange={(predictModel) => update({ predictModel })}
+              />
+            )}
           </Field>
           <Field label="深度思考">
             <Toggle on={!!s.thinking} onChange={(v) => update({ thinking: v })} />
@@ -652,7 +686,7 @@ function BackupSection() {
   );
 }
 
-function ExportDialog(props: { onClose: () => void }) {
+export function ExportDialog(props: { onClose: () => void }) {
   const [secrets, setSecrets] = useState(false);
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");

@@ -11,6 +11,7 @@
   width: 48px; height: 44px; border: none; background: transparent; color: var(--fg-1); cursor: pointer; flex: none;
 }
 .tb-btn:hover { background: var(--bg-3); color: var(--fg-0); }
+.tb-btn.on { color: var(--accent); }
 .tb-btn.close:hover { background: #e5484d; color: #fff; }
 .tb-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.2; }
 .tb-btn > .lucide { width: 16px; height: 16px; stroke-width: 1.75; }

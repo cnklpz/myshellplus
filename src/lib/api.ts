@@ -71,7 +71,7 @@ export interface Latency { hostId: string; ms: number | null }
 export interface Probe { hostId: string; ms: number | null; via: "ssh" | "tcp"; error?: string | null }
 export interface ConnState { hostId: string; state: "connecting" | "connected" | "error" | "disconnected"; error?: string | null }
 
-export type ImportSource = "openssh" | "putty" | "xshell" | "mobaxterm" | "finalshell" | "csv" | "backup";
+export type ImportSource = "openssh" | "putty" | "xshell" | "mobaxterm" | "finalshell" | "termius" | "ishell" | "csv" | "backup";
 export interface ImportCandidate {
   alias: string; name: string; group: string; host: string; port: number; username: string;
   password?: string | null; keyPath?: string | null; keyText?: string | null; keyPassphrase?: string | null;

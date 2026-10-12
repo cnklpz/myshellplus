@@ -332,6 +332,22 @@ await run("files: mkdir + delete", async () => {
   await body.getByText("e2e-dir").waitFor({ state: "detached" });
 });
 
+await run("settings: add AI service from preset", async () => {
+  await page.locator(".sb-item", { hasText: "设置" }).click();
+  await page.locator(".set-nav button, .set-nav *", { hasText: "AI 服务" }).first().click().catch(() => {});
+  await page.locator("button", { hasText: "添加服务" }).click();
+  await page.locator(".select-menu .select-item", { hasText: "DeepSeek" }).click();
+  const url = page.locator("input.input.mono[value='https://api.deepseek.com']");
+  await url.waitFor({ timeout: 3000 });
+  // quick pick a Claude model on the first Claude service
+  await page.locator("button", { hasText: "常用模型" }).nth(1).click();
+  await page.locator(".select-menu .select-item", { hasText: "sonnet-5-5" }).click();
+  await page.locator("input.input.mono[value='claude-sonnet-5-5']").first().waitFor({ timeout: 3000 });
+  await shot(page, "17b-ai-add");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+});
+
 await run("theme switch", async () => {
   await page.locator(".sb-item", { hasText: "设置" }).click();
   await modal().getByText("外观").first().click();
@@ -400,6 +416,21 @@ await run("import CSV", async () => {
 // ---------------------------------------------------------------- batch 3
 const hostId = async (name) => (await invoke("host_list")).find((h) => h.name === name)?.id;
 const remote = async (cmd) => (await invoke("exec_run", { hostId: await hostId("e2e-box"), command: cmd })).stdout;
+
+await run("home: group tabs + export", async () => {
+  await page.locator(".sb-item", { hasText: "首页" }).click();
+  await page.locator(".home-tab", { hasText: "导入组" }).click();
+  await page.locator(".home-card", { hasText: "imported-1" }).waitFor();
+  if (await page.locator(".home-card", { hasText: "e2e-box" }).count()) throw new Error("other group still shown");
+  await shot(page, "20b-home-tabs");
+  await page.locator(".home-tab", { hasText: "全部" }).click();
+  await page.locator(".home-card", { hasText: "e2e-box" }).waitFor();
+  await page.locator(".page-header button", { hasText: "导出" }).click();
+  await page.getByText("导出备份").first().waitFor();
+  await page.keyboard.press("Escape");
+  await page.locator(".sb-item", { hasText: "终端" }).click();
+  await page.locator(".term-view:visible .xterm").waitFor();
+});
 
 await run("local echo overlay on slow link", async () => {
   await backToTerm();

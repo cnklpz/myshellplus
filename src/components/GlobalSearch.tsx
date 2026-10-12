@@ -12,6 +12,7 @@ import { termBus } from "../lib/termBus";
 import { applyTheme, currentTheme, THEMES } from "../lib/themes";
 import { useApp } from "../store";
 import { toast, useEscClose } from "./ui";
+import { maskAddr, maskText } from "../lib/privacy";
 
 interface Item {
   key: string;
@@ -129,8 +130,8 @@ function SearchPalette(props: { initial: string; onClose: () => void }) {
 
     for (const h of hosts)
       push({
-        key: "h:" + h.id, group: "服务器", icon: <Server />, title: h.name,
-        sub: `${h.username}@${h.host}${h.port !== 22 ? ":" + h.port : ""}`,
+        key: "h:" + h.id, group: "服务器", icon: <Server />, title: s.privacy ? maskText(h.name, h.host) : h.name,
+        sub: `${h.username}@${s.privacy ? maskAddr(h.host) : h.host}${h.port !== 22 ? ":" + h.port : ""}`,
         keywords: [h.groupName, h.tags.join(" "), h.notes].join(" "),
         run: () => openTerminal(h.id), alt: () => s.openEditor(h.id), altLabel: "编辑",
       });

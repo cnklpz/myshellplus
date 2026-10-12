@@ -5,6 +5,7 @@ import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { Bar, Dialog, Empty, toast, TweenNum } from "../../components/ui";
 import { api, errMsg, type Proc, type Sample, type SysInfo } from "../../lib/api";
 import { fmtBytes, fmtPct, fmtRate, fmtUptime } from "../../lib/format";
+import { usePrivacy } from "../../lib/privacy";
 import { type DetailKind, MonitorDetail } from "./MonitorDetail";
 import { Sparkline } from "./Sparkline";
 import "./monitor.css";
@@ -167,6 +168,7 @@ export function MonitorPanel({ hostId }: { hostId: string }) {
 }
 
 function HostInfo({ info, sample }: { info: SysInfo; sample?: Sample }) {
+  const priv = usePrivacy();
   return (
     <section className="mon-host selectable">
       <div className="mon-host-title">
@@ -183,7 +185,7 @@ function HostInfo({ info, sample }: { info: SysInfo; sample?: Sample }) {
           {info.cores} 核 <span className="sep">· {info.cpu || "-"}</span>
         </dd>
         <dt>IP</dt>
-        <dd className="ellipsis mono">{info.ip || "-"}</dd>
+        <dd className="ellipsis mono">{info.ip ? priv.text(info.ip) : "-"}</dd>
         {sample && (
           <>
             <dt>运行</dt>
