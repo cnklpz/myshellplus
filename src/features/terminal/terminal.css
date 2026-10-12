@@ -200,3 +200,38 @@
 .term-latency { flex: none; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--fg-2); }
 .term-latency.warn { color: var(--warn); }
 .term-latency.err { color: var(--err); }
+
+/* ---------- batch command bar (docked under the terminal) ---------- */
+.cmdbar {
+  flex: none; display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); background: var(--bg-1); box-shadow: inset 0 1px 0 var(--line);
+}
+.cmdbar-main { display: flex; align-items: flex-end; gap: var(--sp-2); min-width: 0; }
+/* One line = --h-sm so the textarea lines up with the controls; grows to 8 lines, then scrolls. */
+.cmdbar-input {
+  --cmdbar-lh: 1.5em;
+  display: block; height: var(--h-sm); max-height: calc(8 * var(--cmdbar-lh) + var(--h-sm) - var(--cmdbar-lh));
+  padding: calc((var(--h-sm) - var(--cmdbar-lh)) / 2) var(--sp-3);
+  border: none; border-radius: var(--radius-md); outline: none; resize: none; overflow-y: auto;
+  background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-0); font-family: var(--font-mono); font-size: var(--fs-md); line-height: var(--cmdbar-lh);
+  white-space: pre; user-select: text; transition: box-shadow 0.12s;
+}
+.cmdbar-input:focus { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
+.cmdbar-input::placeholder { color: var(--fg-2); }
+.cmdbar-tools { flex: none; }
+.cmdbar-select { width: auto; }
+.cmdbar-progress { min-width: 48px; font-size: var(--fs-sm); color: var(--fg-1); font-variant-numeric: tabular-nums; text-align: right; }
+.cmdbar-tools > .icon-btn { color: var(--fg-2); }
+.cmdbar-tools > .icon-btn:hover { color: var(--fg-0); }
+.cmdbar-confirm {
+  height: var(--h-sm); padding: 0 var(--sp-1) 0 var(--sp-3); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--err) 10%, var(--bg-1)); color: var(--err); font-size: var(--fs-sm);
+}
+.cmdbar-confirm svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; }
+
+/* Session-row tools (right end): batch bar toggle. */
+.term-tools { display: flex; align-items: center; flex: none; margin-left: auto; padding-bottom: var(--sp-1); }
+.term-tools > .icon-btn { color: var(--fg-2); }
+.term-tools > .icon-btn:hover { color: var(--fg-0); }
+.term-tools > .icon-btn.active { background: var(--bg-3); color: var(--fg-0); }

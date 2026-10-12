@@ -14,6 +14,7 @@ import { api, errMsg } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
 import { type TermTab, useApp } from "../../store";
 import { AiBar, ExplainCard } from "./AiBar";
+import { CommandBar } from "./CommandBar";
 import { onThemeChange, termTheme } from "../../lib/themes";
 import { refreshAiPredict, savedFontSize, TERM_OPTIONS } from "./config";
 import { LocalEcho } from "./localEcho";
@@ -47,6 +48,7 @@ export function XTermView(props: {
   const [explain, setExplain] = useState<string | null>(null);
   const [hasSel, setHasSel] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const composerOpen = useApp((s) => s.composerOpen);
 
   // Latest props/actions for handlers registered once at mount.
   const live = useRef({ props, alive: tab.alive, explainSel: () => {}, reconnect: () => {} });
@@ -378,6 +380,7 @@ export function XTermView(props: {
           />
         )}
       </div>
+      {composerOpen && <CommandBar tab={tab} active={active} />}
     </div>
   );
 }

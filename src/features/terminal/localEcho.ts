@@ -50,6 +50,8 @@ export class LocalEcho {
   /** Absolute buffer position where the first pending char will appear. */
   private anchor: { x: number; y: number } | null = null;
   private overlay: HTMLDivElement;
+  private text: HTMLSpanElement;
+  private caret: HTMLSpanElement;
   private samples: number[] = [];
   private sentAt = 0;
   private networkMs = 0;
@@ -79,6 +81,18 @@ export class LocalEcho {
     this.overlay = document.createElement("div");
     this.overlay.className = "local-echo";
     this.overlay.style.display = "none";
+    this.text = document.createElement("span");
+    // Stand-in for the real (hidden) cursor at the end of the predicted text.
+    this.caret = document.createElement("span");
+    Object.assign(this.caret.style, {
+      display: "inline-block",
+      width: "2px",
+      height: "100%",
+      verticalAlign: "top",
+      background: "var(--accent)",
+      textDecoration: "none",
+    });
+    this.overlay.append(this.text, this.caret);
     window.addEventListener(SETTINGS_EVENT, this.onSettings);
   }
 
@@ -175,16 +189,45 @@ export class LocalEcho {
       // The server did something else (completion, redraw, prompt change): trust the server.
       return this.clear();
     }
+    this.fadeOut(confirmed, 220);
     this.pending = this.pending.slice(n);
     this.anchor = cur;
     this.render();
   }
 
   clear() {
+    if (this.pending && this.overlay.style.display !== "none") this.fadeOut(this.pending, 140);
     this.pending = "";
     this.anchor = null;
     this.overlay.style.display = "none";
     this.setCursorHidden(false);
+  }
+
+  /**
+   * Leave a copy of `text` at the current overlay position and fade it out, so predicted characters
+   * dissolve into the real ones the server just drew underneath instead of vanishing abruptly.
+   */
+  private fadeOut(text: string, ms: number) {
+    const parent = this.overlay.parentElement;
+    if (!parent || !text || this.overlay.style.display === "none") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const ghost = document.createElement("div");
+    ghost.className = "local-echo";
+    ghost.style.cssText = this.overlay.style.cssText;
+    ghost.style.maxWidth = "none";
+    ghost.textContent = text;
+    parent.appendChild(ghost);
+    const anim = ghost.animate(
+      [
+        { opacity: 1, filter: "blur(0px)" },
+        { opacity: 0, filter: "blur(0.6px)" },
+      ],
+      { duration: ms, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" },
+    );
+    const done = () => ghost.remove();
+    anim.onfinish = anim.oncancel = done;
+    // Animations pause while the window is hidden; never let ghosts pile up.
+    window.setTimeout(done, ms + 120);
   }
 
   /** Typed but nothing came back for a while: probably echo is off (password prompt). */
@@ -217,7 +260,7 @@ export class LocalEcho {
       return;
     }
     const o = this.overlay;
-    o.textContent = this.pending;
+    this.text.textContent = this.pending;
     o.style.display = "block";
     this.setCursorHidden(true);
     o.style.left = `${this.anchor.x * cw}px`;

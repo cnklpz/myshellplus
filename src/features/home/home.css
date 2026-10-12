@@ -21,11 +21,13 @@
 .home-group + .home-group { margin-top: var(--sp-6); }
 .home-group > .section-title { margin-bottom: var(--sp-2); }
 .home-count { color: var(--fg-2); font-weight: 500; font-variant-numeric: tabular-nums; }
-.home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-3); }
+.home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-3); }
 
 /* ---------- host card ---------- */
+/* Grid rows stretch, the footer sits at the bottom: cards in a row share one height.
+   Every line starts at the card's padding edge. */
 .home-card {
-  position: relative; display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0;
+  position: relative; display: flex; flex-direction: column; min-width: 0;
   padding: var(--sp-4); border-radius: var(--radius-lg);
   background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--line);
   cursor: default; transition: background 0.12s, box-shadow 0.12s;
@@ -38,20 +40,59 @@
 
 .home-card-top { display: flex; align-items: center; gap: var(--sp-2); height: 20px; min-width: 0; }
 .home-name { flex: 1 1 auto; font-weight: 600; font-size: var(--fs-md); }
+.home-state { flex: none; font-size: var(--fs-xs); color: var(--fg-2); }
+.home-state.connected { color: var(--ok); }
+.home-state.connecting { color: var(--warn); }
+.home-state.error { color: var(--err); }
+
+.home-addr { margin-top: var(--sp-1); font-size: var(--fs-xs); color: var(--fg-2); line-height: 18px; }
+
+/* Latency: value · signal meter · sparkline. --tier drives all three. */
 .home-latency {
-  flex: none; font-size: var(--fs-xs); color: var(--fg-2);
-  font-variant-numeric: tabular-nums; text-align: right;
+  --tier: var(--fg-2);
+  display: flex; align-items: center; gap: var(--sp-3); height: 24px; margin-top: var(--sp-3);
+  color: var(--tier);
 }
-.home-latency.warn { color: var(--warn); }
-.home-latency.err { color: var(--err); }
+.home-latency.ok { --tier: var(--ok); }
+.home-latency.warn { --tier: var(--warn); }
+.home-latency.err { --tier: var(--err); }
+.home-latency-value {
+  flex: none; min-width: 48px; font-size: var(--fs-lg); font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+}
+.home-latency.idle .home-latency-value { font-weight: 400; color: var(--fg-2); }
+.home-latency-unit { margin-left: 2px; font-size: var(--fs-xs); font-weight: 500; color: var(--fg-2); }
+.home-signal { flex: none; width: 19px; height: 12px; }
+.home-signal rect { fill: color-mix(in srgb, var(--fg-2) 35%, transparent); }
+.home-signal rect.on { fill: var(--tier); }
+.home-spark { flex: 1 1 auto; min-width: 0; height: 24px; }
+.home-spark polyline {
+  fill: none; stroke: var(--tier); stroke-width: 1.5;
+  stroke-linejoin: round; stroke-linecap: round; opacity: 0.85;
+}
 
-/* Address and tags indent to the name's left edge (dot 8px + gap). */
-.home-addr, .home-tags { padding-left: calc(8px + var(--sp-2)); }
-.home-addr { font-size: var(--fs-xs); color: var(--fg-2); line-height: 18px; }
-.home-tags { font-size: var(--fs-xs); color: var(--fg-2); line-height: 18px; min-height: 18px; opacity: 0.85; }
+.home-meta { margin-top: var(--sp-3); font-size: var(--fs-xs); color: var(--fg-2); line-height: 18px; }
 
-.home-card-actions { display: flex; align-items: center; gap: var(--sp-1); margin-top: var(--sp-3); }
-.home-card-actions .btn.sm { padding: 0 var(--sp-3); }
+/* Tags wrap to at most two rows (20px + 4px gap + 20px). */
+.home-tags {
+  display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2);
+  max-height: calc(20px * 2 + var(--sp-1)); overflow: hidden;
+}
+.home-tag {
+  display: block; height: 20px; line-height: 20px; max-width: 100%; padding: 0 var(--sp-2);
+  border-radius: var(--radius-sm); background: var(--bg-2); color: var(--fg-1);
+  font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.home-card:hover .home-tag { background: var(--bg-3); }
+
+.home-notes { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--fg-2); line-height: 18px; }
+
+.home-card-actions { display: flex; align-items: center; gap: var(--sp-1); margin-top: auto; padding-top: var(--sp-4); }
+/* Connect fills the row; icon buttons keep their fixed size on the right. */
+.home-connect { flex: 1 1 auto; min-width: 0; height: var(--h-md); justify-content: center; }
+.home-card:hover .home-connect { background: var(--bg-3); }
+.home-card .home-connect:hover { background: var(--bg-4); }
+.home-card-actions .icon-btn { width: var(--h-md); height: var(--h-md); }
 .home-card-actions .icon-btn { color: var(--fg-2); }
 .home-card:hover .home-card-actions .icon-btn { color: var(--fg-1); }
 .home-card-actions .icon-btn:hover { color: var(--fg-0); }

@@ -1,10 +1,12 @@
 // Home page: server overview — summary stats + grouped host cards.
-import { Download, Pencil, Plus, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { api, type Host } from "../../lib/api";
+import { Copy, Download, Pencil, Plus, Search } from "lucide-react";
+import { type MouseEvent, useEffect, useMemo, useState } from "react";
+import { toast } from "../../components/ui";
+import { type AgentPolicy, api, errMsg, type Host } from "../../lib/api";
 import { useApp } from "../../store";
 import { openTerminal } from "../terminal/open";
 import "./home.css";
+import { useLatencyHistory } from "./latencyHistory";
 
 const UNGROUPED = "未分组";
 const TUNNEL_POLL_MS = 5000;
@@ -15,11 +17,36 @@ function matches(h: Host, q: string) {
   return q.split(/\s+/).every((t) => hay.includes(t));
 }
 
-function connDot(state?: string) {
-  if (state === "connected") return "dot ok";
-  if (state === "connecting") return "dot warn";
-  if (state === "error") return "dot err";
-  return "dot";
+type ConnKind = "connected" | "connecting" | "error" | "disconnected";
+const CONN: Record<ConnKind, { dot: string; label: string }> = {
+  connected: { dot: "ok", label: "已连接" },
+  connecting: { dot: "warn", label: "连接中" },
+  error: { dot: "err", label: "错误" },
+  disconnected: { dot: "", label: "未连接" },
+};
+
+const POLICY: Record<AgentPolicy, string> = { deny: "禁止", readonly: "只读", ask: "询问", auto: "自动" };
+
+type Tier = "ok" | "warn" | "err";
+const tierOf = (ms: number | null): Tier => (ms === null || ms >= 200 ? "err" : ms >= 60 ? "warn" : "ok");
+/** Filled bars (of 5) for the signal meter. */
+const barsOf = (ms: number | null) =>
+  ms === null ? 0 : ms < 30 ? 5 : ms < 60 ? 4 : ms < 120 ? 3 : ms < 200 ? 2 : 1;
+
+/** Key id -> name, fetched once per mount. */
+function useKeyNames() {
+  const [names, setNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let alive = true;
+    api
+      .keyList()
+      .then((list) => alive && setNames(Object.fromEntries(list.map((k) => [k.id, k.name]))))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return names;
 }
 
 /** Running tunnel count, polled while the page is mounted. */
@@ -49,6 +76,7 @@ export function HomeView() {
   const openEditor = useApp((s) => s.openEditor);
   const setImportOpen = useApp((s) => s.setImportOpen);
   const tunnels = useRunningTunnels();
+  const keyNames = useKeyNames();
   const [query, setQuery] = useState("");
 
   const q = query.trim().toLowerCase();
@@ -126,7 +154,7 @@ export function HomeView() {
               </div>
               <div className="home-grid">
                 {g.items.map((h) => (
-                  <HostCard key={h.id} host={h} />
+                  <HostCard key={h.id} host={h} keyNames={keyNames} />
                 ))}
               </div>
             </section>
@@ -146,44 +174,145 @@ function Stat(props: { value: number | null; label: string }) {
   );
 }
 
-function Latency({ ms }: { ms: number | null | undefined }) {
-  if (ms === undefined) return null;
-  if (ms === null) return <span className="home-latency err">超时</span>;
-  const cls = ms >= 200 ? " err" : ms >= 60 ? " warn" : "";
-  return <span className={"home-latency" + cls}>{Math.round(ms)} ms</span>;
+function Signal({ bars }: { bars: number }) {
+  return (
+    <svg className="home-signal" viewBox="0 0 19 12" aria-hidden>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <rect
+          key={i}
+          x={i * 4}
+          y={12 - (4 + i * 2)}
+          width={3}
+          height={4 + i * 2}
+          rx={0.5}
+          className={i < bars ? "on" : undefined}
+        />
+      ))}
+    </svg>
+  );
 }
 
-function HostCard({ host: h }: { host: Host }) {
-  const state = useApp((s) => s.conn[h.id]?.state);
-  const latency = useApp((s) => s.latency[h.id]);
+const SPARK_W = 100;
+const SPARK_H = 24;
+
+function Sparkline({ samples }: { samples: readonly (number | null)[] }) {
+  if (samples.length < 2) return <div className="home-spark" />;
+  const vals = samples.filter((v): v is number => v !== null);
+  const top = Math.max(60, ...vals) * 1.15;
+  const step = SPARK_W / (samples.length - 1);
+  const pts = samples
+    .map((v, i) => {
+      const y = v === null ? 1 : SPARK_H - 1 - (Math.min(v, top) / top) * (SPARK_H - 2);
+      return `${(i * step).toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg className="home-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none" aria-hidden>
+      <polyline points={pts} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+function LatencyBlock({ hostId, connected }: { hostId: string; connected: boolean }) {
+  const latency = useApp((s) => s.latency[hostId]);
+  const samples = useLatencyHistory(hostId);
+  if (!connected || latency === undefined) {
+    return (
+      <div className="home-latency idle">
+        <span className="home-latency-value">—</span>
+      </div>
+    );
+  }
+  const tier = tierOf(latency);
+  return (
+    <div className={"home-latency " + tier}>
+      <span className="home-latency-value">
+        {latency === null ? (
+          "超时"
+        ) : (
+          <>
+            {Math.round(latency)}
+            <span className="home-latency-unit">ms</span>
+          </>
+        )}
+      </span>
+      <Signal bars={barsOf(latency)} />
+      <Sparkline samples={samples} />
+    </div>
+  );
+}
+
+function HostCard({ host: h, keyNames }: { host: Host; keyNames: Record<string, string> }) {
+  const conn = useApp((s) => s.conn[h.id]);
+  const jumpName = useApp((s) => (h.jumpHostId ? s.hosts.find((x) => x.id === h.jumpHostId)?.name : undefined));
+  const sessions = useApp((s) => s.tabs.filter((t) => t.hostId === h.id && t.alive).length);
   const openEditor = useApp((s) => s.openEditor);
+  const kind: ConnKind = conn?.state ?? "disconnected";
+  const st = CONN[kind];
   const addr = `${h.username}@${h.host}:${h.port}`;
+
+  const auth = h.authType === "key" ? (h.keyId && keyNames[h.keyId]) || "密钥" : "密码";
+  const meta = [
+    `认证 ${auth}`,
+    jumpName && `跳板 ${jumpName}`,
+    sessions > 0 && `${sessions} 个终端`,
+    `Agent ${POLICY[h.agentPolicy] ?? h.agentPolicy}`,
+  ].filter(Boolean) as string[];
+
+  const copyAddr = async () => {
+    try {
+      await navigator.clipboard.writeText(h.host);
+      toast("已复制", "success");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const stop = (e: MouseEvent) => e.stopPropagation();
 
   return (
     <div className="home-card" onDoubleClick={() => openTerminal(h.id)}>
       {h.color && <span className="home-marker" style={{ background: h.color }} />}
       <div className="home-card-top">
-        <span className={connDot(state)} />
+        <span className={"dot " + st.dot} />
         <span className="home-name ellipsis" title={h.name}>
           {h.name}
         </span>
-        {state === "connected" && <Latency ms={latency} />}
+        <span className={"home-state " + kind} title={kind === "error" ? (conn?.error ?? undefined) : undefined}>
+          {st.label}
+        </span>
       </div>
       <div className="home-addr mono ellipsis" title={addr}>
         {addr}
       </div>
-      <div className="home-tags ellipsis">{h.tags.join(" · ")}</div>
+
+      <LatencyBlock hostId={h.id} connected={kind === "connected"} />
+
+      <div className="home-meta ellipsis" title={meta.join(" · ")}>
+        {meta.join(" · ")}
+      </div>
+      {h.tags.length > 0 && (
+        <div className="home-tags">
+          {h.tags.map((t) => (
+            <span key={t} className="home-tag" title={t}>
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+      {h.notes.trim() && (
+        <div className="home-notes ellipsis" title={h.notes}>
+          {h.notes.trim().split("\n")[0]}
+        </div>
+      )}
+
       <div className="home-card-actions">
-        <button className="btn sm" onClick={() => openTerminal(h.id)} onDoubleClick={(e) => e.stopPropagation()}>
+        <button className="btn home-connect" onClick={() => openTerminal(h.id)} onDoubleClick={stop}>
           连接
         </button>
-        <div className="spacer" />
-        <button
-          className="icon-btn"
-          title="编辑"
-          onClick={() => openEditor(h.id)}
-          onDoubleClick={(e) => e.stopPropagation()}
-        >
+        <button className="icon-btn" title="复制地址" onClick={copyAddr} onDoubleClick={stop}>
+          <Copy />
+        </button>
+        <button className="icon-btn" title="编辑" onClick={() => openEditor(h.id)} onDoubleClick={stop}>
           <Pencil />
         </button>
       </div>
