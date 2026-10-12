@@ -55,6 +55,7 @@ export interface BatchHostResult {
   batchId: string; hostId: string; state: "running" | "done" | "error";
   stdout: string; stderr: string; exitCode: number | null; durationMs: number; error?: string | null;
 }
+export interface HistoryHit { command: string; count: number; lastUsed: number }
 export interface Suggestion { command: string; source: "history" | "snippet" | "builtin" | "ai"; description: string }
 export interface NlCommand { command: string; explanation: string; dangerous: boolean }
 
@@ -115,6 +116,9 @@ export const api = {
   termClose: (id: string) => invoke<void>("term_close", { id }),
   termList: () => invoke<TermInfo[]>("term_list"),
   historyRecord: (hostId: string, command: string) => invoke<void>("history_record", { hostId, command }),
+  /** hostId "" = all hosts; newest first */
+  historyList: (hostId: string, query = "", limit?: number) => invoke<HistoryHit[]>("history_list", { hostId, query, limit }),
+  historyDelete: (hostId: string, command: string) => invoke<void>("history_delete", { hostId, command }),
   execRun: (hostId: string, command: string, timeoutSecs?: number) => invoke<ExecResult>("exec_run", { hostId, command, timeoutSecs }),
 
   // monitor

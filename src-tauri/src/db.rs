@@ -499,6 +499,29 @@ impl Db {
         Ok(rows)
     }
 
+    /// History of one host ("" = all hosts), newest first, optionally filtered by substring.
+    pub fn list_history(&self, host_id: &str, query: &str, limit: usize) -> Result<Vec<HistoryHit>> {
+        let c = self.conn.lock();
+        let like = format!("%{}%", query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let mut st = c.prepare(
+            "SELECT command, SUM(count), MAX(last_used) FROM history
+             WHERE (?1 = '' OR host_id = ?1) AND command LIKE ?2 ESCAPE '\'
+             GROUP BY command ORDER BY MAX(last_used) DESC LIMIT ?3",
+        )?;
+        let rows = st
+            .query_map(params![host_id, like, limit as i64], |r| {
+                Ok(HistoryHit { command: r.get(0)?, count: r.get(1)?, last_used: r.get(2)? })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn delete_history(&self, host_id: &str, command: &str) -> Result<()> {
+        let c = self.conn.lock();
+        c.execute("DELETE FROM history WHERE (?1 = '' OR host_id = ?1) AND command = ?2", params![host_id, command])?;
+        Ok(())
+    }
+
     pub fn recent_history(&self, host_id: &str, limit: usize) -> Result<Vec<String>> {
         let c = self.conn.lock();
         let mut st = c.prepare("SELECT command FROM history WHERE host_id=?1 ORDER BY last_used DESC LIMIT ?2")?;

@@ -248,6 +248,16 @@ fn history_record(ctx: S, host_id: String, command: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
+fn history_list(ctx: S, host_id: String, query: String, limit: Option<usize>) -> CmdResult<Vec<db::HistoryHit>> {
+    Ok(ctx.db.list_history(&host_id, &query, limit.unwrap_or(500).min(5000))?)
+}
+
+#[tauri::command]
+fn history_delete(ctx: S, host_id: String, command: String) -> CmdResult<()> {
+    Ok(ctx.db.delete_history(&host_id, &command)?)
+}
+
+#[tauri::command]
 async fn exec_run(ctx: S<'_>, host_id: String, command: String, timeout_secs: Option<u64>) -> CmdResult<ssh::exec::ExecResult> {
     let c = ssh::get_conn(ctx.inner().clone(), host_id.clone()).await?;
     let _ = ctx.db.audit("user", Some(&host_id), "exec", &command, "run");
@@ -596,7 +606,7 @@ pub fn run() {
             vault_status, vault_setup, vault_unlock, vault_lock, vault_remember, vault_change_password,
             host_list, host_save, host_delete, key_list, key_import, key_generate, key_delete,
             conn_connect, conn_disconnect, conn_list, conn_latency,
-            term_open, term_attach, term_write, term_resize, term_close, term_list, history_record, exec_run,
+            term_open, term_attach, term_write, term_resize, term_close, term_list, history_record, history_list, history_delete, exec_run,
             monitor_subscribe, monitor_unsubscribe,
             sftp_list, sftp_read, sftp_write, sftp_mkdir, sftp_rename, sftp_remove, sftp_chmod,
             transfer_start, transfer_list, transfer_cancel, transfer_clear,

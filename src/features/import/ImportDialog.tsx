@@ -334,7 +334,7 @@ function PreviewStep(props: {
         {preview.snippets.length > 0 && (
           <div className="row">
             <Toggle on={props.withSnippets} onChange={props.setWithSnippets} />
-            <span className="lbl">片段 {preview.snippets.length}</span>
+            <span className="lbl">命令 {preview.snippets.length}</span>
           </div>
         )}
         <span className="spacer" />
@@ -409,7 +409,7 @@ function DoneStep(props: { result: ImportResult }) {
   const stats: [string, number][] = [
     ["服务器", r.hosts],
     ["密钥", r.keys],
-    ["片段", r.snippets],
+    ["命令", r.snippets],
     ["隧道", r.tunnels],
   ];
   return (

@@ -369,17 +369,17 @@ function SnippetMenu(props: { onPick: (s: Snippet) => void }) {
     <div className="bt-pop-wrap" ref={ref}>
       <button className="btn sm" onClick={() => setOpen(!open)}>
         <ScrollText />
-        片段
+        命令
         <ChevronDown />
       </button>
       {open && (
         <div className="bt-pop">
-          <input className="input sm" placeholder="搜索片段" autoFocus value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="input sm" placeholder="搜索命令" autoFocus value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="bt-pop-list">
             {list === null ? (
               <div className="faint bt-pop-empty">加载中…</div>
             ) : shown.length === 0 ? (
-              <div className="faint bt-pop-empty">{list.length ? "无匹配" : "还没有片段"}</div>
+              <div className="faint bt-pop-empty">{list.length ? "无匹配" : "还没有命令"}</div>
             ) : (
               shown.map((s) => (
                 <div

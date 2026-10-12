@@ -1,7 +1,8 @@
-// Multi-line command bar docked under a terminal ("批量执行"). One per terminal tab; drafts, recall history and
-// in-progress runs are kept at module level by tab id so they survive tab switches and closing the bar.
-import { Play, Square, TriangleAlert, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+// "批量执行": a dialog with a multi-line editor whose lines are sent to one terminal session. Drafts, recall
+// history and in-progress runs are kept at module level by tab id so they survive closing the dialog.
+import { Play, Square, TriangleAlert } from "lucide-react";
+import { Dialog } from "../../components/ui";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "../../components/ui";
 import { api, errMsg } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
@@ -32,6 +33,11 @@ const setRun = (tabId: string, r: Run | null) => {
   else runs.delete(tabId);
   emit();
 };
+
+/** Progress of a running batch in `tabId` (for the toolbar badge). */
+export function useBatchRun(tabId: string): Run | undefined {
+  return useSyncExternalStore(subscribe, () => runs.get(tabId));
+}
 
 const isAlive = (tabId: string) => !!useApp.getState().tabs.find((t) => t.id === tabId)?.alive;
 
@@ -93,8 +99,9 @@ function savePref(key: string, v: string | number) {
   }
 }
 
-export function CommandBar(props: { tab: TermTab; active: boolean }) {
-  const { tab, active } = props;
+export function BatchDialog(props: { tab: TermTab; onClose: () => void }) {
+  const { tab } = props;
+  const hostName = useApp((s) => s.hosts.find((h) => h.id === tab.hostId)?.name ?? tab.title);
   const [text, setText] = useState(() => drafts.get(tab.id) ?? "");
   const [mode, setMode] = useState<Mode>(() => loadPref<Mode>("cmdbar.mode", (v) => v === "line" || v === "paste", "line"));
   const [interval, setIntervalMs] = useState(() =>
@@ -104,7 +111,6 @@ export function CommandBar(props: { tab: TermTab; active: boolean }) {
   const recall = useRef<{ idx: number; stash: string } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const run = useSyncExternalStore(subscribe, () => runs.get(tab.id));
-  const setComposerOpen = useApp((s) => s.setComposerOpen);
 
   const update = (v: string) => {
     setText(v);
@@ -112,17 +118,8 @@ export function CommandBar(props: { tab: TermTab; active: boolean }) {
     setConfirm(false);
   };
 
-  // Auto-grow 1 → 8 lines (max-height in CSS), then scroll.
-  useLayoutEffect(() => {
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = ta.scrollHeight + "px";
-  }, [text, active]);
-
-  // Opened while visible: take focus (after XTermView's own focus-on-activate).
+  // Focus the editor once the dialog is shown.
   useEffect(() => {
-    if (!active) return;
     let r2 = 0;
     const r1 = requestAnimationFrame(() => {
       r2 = requestAnimationFrame(() => taRef.current?.focus());
@@ -173,10 +170,9 @@ export function CommandBar(props: { tab: TermTab; active: boolean }) {
       await new Promise((r) => setTimeout(r, 30));
       api.termWrite(tab.id, "\r").catch((e) => toast(errMsg(e), "error"));
     }
-    if (useApp.getState().activeTab === tab.id) {
-      taRef.current?.focus();
-      taRef.current?.select();
-    }
+    // Done: hand control back to the terminal that received the commands.
+    props.onClose();
+    termBus.get(tab.id)?.focus();
   };
 
   const stop = () => cancels.get(tab.id)?.();
@@ -204,54 +200,34 @@ export function CommandBar(props: { tab: TermTab; active: boolean }) {
     setConfirm(false);
   };
 
-  const focusTerm = () => termBus.get(tab.id)?.focus();
   const disabled = !tab.alive;
 
+  const runButton = run ? (
+    <>
+      <span className="cmdbar-progress">
+        {run.done}/{run.total}
+      </span>
+      <button className="btn" onClick={stop}>
+        <Square />
+        停止
+      </button>
+    </>
+  ) : (
+    <button className="btn primary" title="Ctrl+Enter" disabled={disabled || !text.trim()} onClick={() => execute()}>
+      <Play />
+      执行
+    </button>
+  );
+
   return (
-    <div className="cmdbar">
-      {confirm && (
-        <div className="cmdbar-confirm row">
-          <TriangleAlert />
-          <span className="grow">包含高风险命令</span>
-          <button className="btn sm ghost" onClick={() => setConfirm(false)}>
-            取消
-          </button>
-          <button className="btn sm danger solid" onClick={() => execute(true)}>
-            确认执行
-          </button>
-        </div>
-      )}
-      <div className="cmdbar-main">
-        <textarea
-          ref={taRef}
-          className="cmdbar-input mono grow"
-          spellCheck={false}
-          rows={1}
-          placeholder={"cd /var/log\nls -la"}
-          value={text}
-          onChange={(e) => {
-            recall.current = null;
-            update(e.target.value);
-          }}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing) return;
-            if (e.key === "Enter" && e.ctrlKey) {
-              e.preventDefault();
-              if (confirm) execute(true);
-              else execute();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              if (confirm) setConfirm(false);
-              else focusTerm();
-            } else if (e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-              e.preventDefault();
-              recallStep(e.key === "ArrowUp" ? -1 : 1);
-            }
-          }}
-        />
-        <div className="cmdbar-tools row">
+    <Dialog
+      title={`批量执行 · ${hostName}`}
+      width={760}
+      onClose={props.onClose}
+      footer={
+        <>
           <select
-            className="select sm cmdbar-select"
+            className="select cmdbar-select"
             title="发送方式"
             value={mode}
             onChange={(e) => {
@@ -265,7 +241,7 @@ export function CommandBar(props: { tab: TermTab; active: boolean }) {
           </select>
           {mode === "line" && (
             <select
-              className="select sm cmdbar-select num"
+              className="select cmdbar-select num"
               title="行间隔"
               value={interval}
               onChange={(e) => {
@@ -276,44 +252,55 @@ export function CommandBar(props: { tab: TermTab; active: boolean }) {
             >
               {INTERVALS.map((ms) => (
                 <option key={ms} value={ms}>
-                  {ms === 0 ? "0" : ms < 1000 ? `${ms}ms` : `${ms / 1000}s`}
+                  {ms === 0 ? "无间隔" : ms < 1000 ? `间隔 ${ms}ms` : `间隔 ${ms / 1000}s`}
                 </option>
               ))}
             </select>
           )}
-          {run ? (
-            <>
-              <span className="cmdbar-progress">
-                {run.done}/{run.total}
-              </span>
-              <button className="btn sm" onClick={stop}>
-                <Square />
-                停止
-              </button>
-            </>
-          ) : (
-            <button
-              className="btn sm primary"
-              title="Ctrl+Enter"
-              disabled={disabled || !text.trim()}
-              onClick={() => execute()}
-            >
-              <Play />
-              执行
-            </button>
-          )}
-          <button
-            className="icon-btn"
-            title="关闭"
-            onClick={() => {
-              setComposerOpen(false);
-              focusTerm();
-            }}
-          >
-            <X />
+          <span className="spacer" />
+          <button className="btn ghost" onClick={props.onClose}>
+            取消
+          </button>
+          {runButton}
+        </>
+      }
+    >
+      {confirm && (
+        <div className="cmdbar-confirm row">
+          <TriangleAlert />
+          <span className="grow">包含高风险命令</span>
+          <button className="btn sm ghost" onClick={() => setConfirm(false)}>
+            取消
+          </button>
+          <button className="btn sm danger solid" onClick={() => execute(true)}>
+            确认执行
           </button>
         </div>
-      </div>
-    </div>
+      )}
+      <textarea
+        ref={taRef}
+        className="textarea mono cmdbar-editor"
+        spellCheck={false}
+        rows={12}
+        disabled={disabled}
+        placeholder={"cd /var/log\nls -la\ndf -h"}
+        value={text}
+        onChange={(e) => {
+          recall.current = null;
+          update(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return;
+          if (e.key === "Enter" && e.ctrlKey) {
+            e.preventDefault();
+            if (confirm) execute(true);
+            else execute();
+          } else if (e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+            e.preventDefault();
+            recallStep(e.key === "ArrowUp" ? -1 : 1);
+          }
+        }}
+      />
+    </Dialog>
   );
 }

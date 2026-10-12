@@ -1,6 +1,6 @@
 // Terminal tabs + xterm sessions, command prediction, AI command bar.
 // Two-level tab bar: group tabs (derived from the hosts of open sessions) above the session tabs.
-import { PanelBottom, Plus, Search, Server, X } from "lucide-react";
+import { Plus, Search, Server, X } from "lucide-react";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { type TermTab, useApp } from "../../store";
 import { installAiPredictWatcher } from "./config";
@@ -27,8 +27,6 @@ export function TerminalArea() {
   const termGroup = useApp((s) => s.termGroup);
   const setActiveTab = useApp((s) => s.setActiveTab);
   const setTermGroup = useApp((s) => s.setTermGroup);
-  const composerOpen = useApp((s) => s.composerOpen);
-  const setComposerOpen = useApp((s) => s.setComposerOpen);
   const [picker, setPicker] = useState(false);
 
   useEffect(() => installAiPredictWatcher(), []);
@@ -125,17 +123,6 @@ export function TerminalArea() {
           ))}
         </div>
         {!showGroups && addBtn}
-        {tabs.length > 0 && (
-          <div className="term-tools">
-            <button
-              className={"icon-btn" + (composerOpen ? " active" : "")}
-              title="批量执行"
-              onClick={() => setComposerOpen(!composerOpen)}
-            >
-              <PanelBottom />
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="term-stack">

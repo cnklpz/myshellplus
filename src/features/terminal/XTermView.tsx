@@ -7,14 +7,14 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { RotateCw, Sparkles, Unplug } from "lucide-react";
+import { Layers, ListChecks, Network, RotateCw, ScrollText, Search, Sparkles, Unplug } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "../../components/ui";
 import { api, errMsg } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
 import { type TermTab, useApp } from "../../store";
 import { AiBar, ExplainCard } from "./AiBar";
-import { CommandBar } from "./CommandBar";
+import { BatchDialog, useBatchRun } from "./CommandBar";
 import { onThemeChange, termTheme } from "../../lib/themes";
 import { refreshAiPredict, savedFontSize, TERM_OPTIONS } from "./config";
 import { LocalEcho } from "./localEcho";
@@ -48,7 +48,8 @@ export function XTermView(props: {
   const [explain, setExplain] = useState<string | null>(null);
   const [hasSel, setHasSel] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
-  const composerOpen = useApp((s) => s.composerOpen);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const batchRun = useBatchRun(tab.id);
 
   // Latest props/actions for handlers registered once at mount.
   const live = useRef({ props, alive: tab.alive, explainSel: () => {}, reconnect: () => {} });
@@ -380,7 +381,54 @@ export function XTermView(props: {
           />
         )}
       </div>
-      {composerOpen && <CommandBar tab={tab} active={active} />}
+      <div className="term-toolbar">
+        <button className="term-tool" onClick={() => setBatchOpen(true)} title="多行命令发送到此终端">
+          <ListChecks />
+          <span>批量执行</span>
+          {batchRun && (
+            <span className="term-tool-badge num">
+              {batchRun.done}/{batchRun.total}
+            </span>
+          )}
+        </button>
+        <button className="term-tool" onClick={() => useApp.getState().setModal("batch")}>
+          <Layers />
+          <span>多机执行</span>
+        </button>
+        <button className="term-tool" onClick={() => useApp.getState().setModal("snippets")}>
+          <ScrollText />
+          <span>命令</span>
+        </button>
+        <button className="term-tool" onClick={() => useApp.getState().setModal("tunnels")}>
+          <Network />
+          <span>隧道</span>
+        </button>
+        <span className="term-tool-sep" />
+        <button
+          className="term-tool"
+          title="Ctrl+K"
+          onClick={() => {
+            inst.current?.predictor.reset();
+            setAiOpen(true);
+          }}
+        >
+          <Sparkles />
+          <span>AI 命令</span>
+        </button>
+        <button className="term-tool" title="Ctrl+F" onClick={() => setSearchOpen(true)}>
+          <Search />
+          <span>搜索</span>
+        </button>
+      </div>
+      {batchOpen && (
+        <BatchDialog
+          tab={tab}
+          onClose={() => {
+            setBatchOpen(false);
+            inst.current?.term.focus();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -25,7 +25,7 @@ import "./App.css";
 const PANELS: { id: Exclude<SidePanel, null>; icon: typeof Activity; label: string }[] = [
   { id: "monitor", icon: Activity, label: "状态" },
   { id: "files", icon: FolderOpen, label: "文件" },
-  { id: "snippets", icon: ScrollText, label: "片段" },
+  { id: "snippets", icon: ScrollText, label: "命令" },
 ];
 
 /** Restore state from the backend: sessions survive a webview reload. */
@@ -161,7 +161,7 @@ function SnippetsModal() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>片段</h1>
+        <h1>命令</h1>
       </div>
       <div className="snippets-modal-body">
         <SnippetsPanel hostId={hostId} />

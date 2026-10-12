@@ -11,7 +11,7 @@ const ICONS: Record<Suggestion["source"], typeof History> = {
 
 const LABELS: Record<Suggestion["source"], string> = {
   history: "历史",
-  snippet: "片段",
+  snippet: "命令",
   builtin: "常用",
   ai: "AI",
 };

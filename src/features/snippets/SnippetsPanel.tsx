@@ -85,9 +85,9 @@ export function SnippetsPanel({ hostId: _hostId }: { hostId: string | null }) {
         <div className="row">
           <div className="sn-search grow">
             <Search />
-            <input className="input sm" placeholder="搜索片段" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="input sm" placeholder="搜索命令" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <button className="icon-btn" title="新建片段" onClick={() => setEditing({ name: "", command: "", tags: [] })}>
+          <button className="icon-btn" title="新建命令" onClick={() => setEditing({ name: "", command: "", tags: [] })}>
             <Plus />
           </button>
         </div>
@@ -109,7 +109,7 @@ export function SnippetsPanel({ hostId: _hostId }: { hostId: string | null }) {
         {list && list.length === 0 ? (
           <Empty
             icon={<ScrollText />}
-            text="还没有片段"
+            text="还没有命令"
             action={
               <button className="btn sm" onClick={() => setEditing({ name: "", command: "", tags: [] })}>
                 <Plus />
@@ -158,7 +158,7 @@ export function SnippetsPanel({ hostId: _hostId }: { hostId: string | null }) {
       )}
       {deleting && (
         <Confirm
-          title="删除片段"
+          title="删除命令"
           message={`删除「${deleting.name}」？`}
           confirmText="删除"
           danger
@@ -261,7 +261,7 @@ function SnippetEditor(props: { initial: Partial<Snippet>; onClose: () => void; 
 
   return (
     <Dialog
-      title={init.id ? "编辑片段" : "新建片段"}
+      title={init.id ? "编辑命令" : "新建命令"}
       width={560}
       onClose={props.onClose}
       footer={
