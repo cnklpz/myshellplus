@@ -253,7 +253,6 @@ export function HostSidebar() {
                           <span className={connDot(conn[h.id]?.state)} />
                         </span>
                         <span className="name ellipsis">{h.name}</span>
-                        <span className="meta mono">{h.host}</span>
                       </div>
                     ))}
                 </div>

@@ -23,6 +23,9 @@ export const TERM_OPTIONS: ITerminalOptions = {
   lineHeight: 1.15,
   scrollback: 5000,
   cursorBlink: true,
+  cursorStyle: "bar",
+  cursorWidth: 2,
+  cursorInactiveStyle: "outline",
   allowProposedApi: true,
   get theme() {
     return termTheme();

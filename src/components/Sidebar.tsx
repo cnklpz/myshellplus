@@ -1,5 +1,5 @@
 // Left sidebar: page switch (首页 / 终端) on top, host list in the middle, tools (opened as modals) at the bottom.
-import { Bot, House, Layers, Network, ScrollText, Settings, SquareTerminal } from "lucide-react";
+import { Bot, House, Layers, ListChecks, Network, ScrollText, Settings, SquareTerminal } from "lucide-react";
 import { HostSidebar } from "../features/hosts/HostSidebar";
 import { type ToolModal, type View, useApp } from "../store";
 
@@ -9,7 +9,7 @@ const PAGES: { view: View; label: string; icon: typeof House }[] = [
 ];
 
 const TOOLS: { modal: ToolModal; label: string; icon: typeof House }[] = [
-  { modal: "batch", label: "批量执行", icon: Layers },
+  { modal: "batch", label: "多机执行", icon: Layers },
   { modal: "tunnels", label: "隧道", icon: Network },
   { modal: "snippets", label: "片段", icon: ScrollText },
   { modal: "agent", label: "Agent", icon: Bot },
@@ -21,6 +21,7 @@ export function Sidebar() {
   const modal = useApp((s) => s.modal);
   const setModal = useApp((s) => s.setModal);
   const sessions = useApp((s) => s.tabs.length);
+  const composerOpen = useApp((s) => s.composerOpen);
 
   return (
     <div className="sb">
@@ -39,6 +40,19 @@ export function Sidebar() {
       </div>
 
       <nav className="sb-tools">
+        <button
+          className={"sb-item" + (composerOpen && view === "terminal" ? " on" : "")}
+          title="在当前终端下方输入多行命令"
+          onClick={() => {
+            const s = useApp.getState();
+            const open = !(s.composerOpen && s.view === "terminal");
+            s.setComposerOpen(open);
+            if (open) s.setView("terminal");
+          }}
+        >
+          <ListChecks />
+          <span>批量执行</span>
+        </button>
         {TOOLS.map((t) => (
           <button key={t.modal} className={"sb-item" + (modal === t.modal ? " on" : "")} onClick={() => setModal(t.modal)}>
             <t.icon />

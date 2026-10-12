@@ -30,6 +30,8 @@ interface AppState {
   modal: ToolModal | null;
   /** Terminal page group filter ("" = all) */
   termGroup: string;
+  /** Multi-line command bar docked under the active terminal */
+  composerOpen: boolean;
   sidePanel: SidePanel;
   /** Host shown in the side panel (defaults to the active tab's host) */
   panelHostId: string | null;
@@ -45,6 +47,7 @@ interface AppState {
   setView: (v: View) => void;
   setModal: (m: ToolModal | null) => void;
   setTermGroup: (g: string) => void;
+  setComposerOpen: (open: boolean) => void;
   setSidePanel: (p: SidePanel) => void;
   setPanelHost: (id: string | null) => void;
   addTab: (t: TermTab) => void;
@@ -69,6 +72,7 @@ export const useApp = create<AppState>((set, get) => ({
   view: "home",
   modal: null,
   termGroup: "",
+  composerOpen: false,
   sidePanel: "monitor",
   panelHostId: null,
   toasts: [],
@@ -82,6 +86,7 @@ export const useApp = create<AppState>((set, get) => ({
   setView: (view) => set({ view }),
   setModal: (modal) => set({ modal }),
   setTermGroup: (termGroup) => set({ termGroup }),
+  setComposerOpen: (composerOpen) => set({ composerOpen }),
   setSidePanel: (sidePanel) => set({ sidePanel }),
   setPanelHost: (panelHostId) => set({ panelHostId }),
   addTab: (t) => set({ tabs: [...get().tabs, t], activeTab: t.id, view: "terminal", panelHostId: t.hostId }),

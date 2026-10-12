@@ -195,10 +195,7 @@
   text-decoration: underline dotted color-mix(in srgb, var(--accent) 70%, transparent);
   text-underline-offset: 3px;
 }
-.local-echo::after {
-  content: ""; display: inline-block; width: 2px; height: 70%; vertical-align: middle;
-  background: var(--accent); opacity: 0.7; margin-left: 1px;
-}
+
 
 .term-latency { flex: none; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--fg-2); }
 .term-latency.warn { color: var(--warn); }

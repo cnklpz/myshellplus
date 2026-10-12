@@ -2,6 +2,7 @@
 // underlined overlay at the cursor; when the server's echo arrives, confirmed characters drop out of
 // the overlay. Nothing is ever written into the xterm buffer, so a wrong guess can't corrupt output.
 import type { Terminal } from "@xterm/xterm";
+import { termTheme } from "../../lib/themes";
 
 export type EchoMode = "off" | "auto" | "on";
 
@@ -60,6 +61,19 @@ export class LocalEcho {
     this.settings = echoSettings();
     if (!this.enabled()) this.clear();
   };
+
+  /** Hides/restores the real cursor while predicted text is drawn. */
+  private cursorHidden = false;
+  private setCursorHidden(hide: boolean) {
+    if (hide === this.cursorHidden) return;
+    this.cursorHidden = hide;
+    const theme = { ...termTheme() };
+    if (hide) {
+      theme.cursor = "transparent";
+      theme.cursorAccent = "transparent";
+    }
+    this.term.options.theme = theme;
+  }
 
   constructor(private term: Terminal) {
     this.overlay = document.createElement("div");
@@ -170,6 +184,7 @@ export class LocalEcho {
     this.pending = "";
     this.anchor = null;
     this.overlay.style.display = "none";
+    this.setCursorHidden(false);
   }
 
   /** Typed but nothing came back for a while: probably echo is off (password prompt). */
@@ -188,6 +203,7 @@ export class LocalEcho {
   private render() {
     if (!this.pending || !this.anchor) {
       this.overlay.style.display = "none";
+      this.setCursorHidden(false);
       return;
     }
     const screen = this.overlay.parentElement;
@@ -203,6 +219,7 @@ export class LocalEcho {
     const o = this.overlay;
     o.textContent = this.pending;
     o.style.display = "block";
+    this.setCursorHidden(true);
     o.style.left = `${this.anchor.x * cw}px`;
     o.style.top = `${row * ch}px`;
     o.style.height = `${ch}px`;
