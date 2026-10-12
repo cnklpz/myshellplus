@@ -1,5 +1,309 @@
-// Command snippets list (side panel); click sends to active terminal.
-// STUB — implemented by a feature agent.
-export function SnippetsPanel(_props: { hostId: string | null }) {
-  return <div className="empty">SnippetsPanel</div>;
+// Command snippets list (side panel); click inserts into the active terminal.
+import { CornerDownLeft, Pencil, Play, Plus, ScrollText, Search, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Confirm, Dialog, Empty, Field, toast } from "../../components/ui";
+import { api, errMsg, type Snippet } from "../../lib/api";
+import { termBus } from "../../lib/termBus";
+import "./snippets.css";
+
+// {{name}} or {{name:default}}
+const VAR_RE = /\{\{\s*([\w.-]+)\s*(?::([^}]*))?\}\}/g;
+
+export interface SnippetVar { name: string; def: string }
+
+export function parseVars(cmd: string): SnippetVar[] {
+  const out: SnippetVar[] = [];
+  for (const m of cmd.matchAll(VAR_RE)) {
+    if (!out.some((v) => v.name === m[1])) out.push({ name: m[1], def: (m[2] ?? "").trim() });
+  }
+  return out;
+}
+
+export function fillVars(cmd: string, values: Record<string, string>): string {
+  return cmd.replace(VAR_RE, (_, name: string) => values[name] ?? "");
+}
+
+type Mode = "run" | "paste";
+
+export function SnippetsPanel({ hostId: _hostId }: { hostId: string | null }) {
+  const [list, setList] = useState<Snippet[] | null>(null);
+  const [q, setQ] = useState("");
+  const [tag, setTag] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Partial<Snippet> | null>(null);
+  const [deleting, setDeleting] = useState<Snippet | null>(null);
+  const [asking, setAsking] = useState<{ snippet: Snippet; mode: Mode } | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setList(await api.snippetList());
+    } catch (e) {
+      toast(errMsg(e), "error");
+      setList([]);
+    }
+  }, []);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const tags = useMemo(() => {
+    const s = new Set<string>();
+    (list ?? []).forEach((x) => x.tags.forEach((t) => s.add(t)));
+    return [...s].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }, [list]);
+
+  const shown = useMemo(() => {
+    const k = q.trim().toLowerCase();
+    return (list ?? [])
+      .filter((s) => !tag || s.tags.includes(tag))
+      .filter((s) => !k || s.name.toLowerCase().includes(k) || s.command.toLowerCase().includes(k) || s.tags.some((t) => t.toLowerCase().includes(k)))
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  }, [list, q, tag]);
+
+  const send = (cmd: string, mode: Mode) => {
+    const term = termBus.active();
+    if (!term) {
+      toast("请先打开终端", "error");
+      return;
+    }
+    if (mode === "run") term.run(cmd);
+    else term.paste(cmd);
+    term.focus();
+  };
+
+  const use = (s: Snippet, mode: Mode) => {
+    if (!termBus.active()) {
+      toast("请先打开终端", "error");
+      return;
+    }
+    if (parseVars(s.command).length) setAsking({ snippet: s, mode });
+    else send(s.command, mode);
+  };
+
+  return (
+    <div className="sn-root">
+      <div className="sn-top">
+        <div className="row">
+          <div className="sn-search grow">
+            <Search />
+            <input className="input sm" placeholder="搜索片段" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <button className="icon-btn" title="新建片段" onClick={() => setEditing({ name: "", command: "", tags: [] })}>
+            <Plus />
+          </button>
+        </div>
+        {tags.length > 0 && (
+          <div className="sn-tags">
+            <button className={"sn-chip" + (tag === null ? " on" : "")} onClick={() => setTag(null)}>
+              全部
+            </button>
+            {tags.map((t) => (
+              <button key={t} className={"sn-chip" + (tag === t ? " on" : "")} onClick={() => setTag(tag === t ? null : t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="sn-body">
+        {list && list.length === 0 ? (
+          <Empty
+            icon={<ScrollText />}
+            text="保存常用命令，点击即可发送到终端"
+            action={
+              <button className="btn sm" onClick={() => setEditing({ name: "", command: "", tags: [] })}>
+                <Plus />
+                新建片段
+              </button>
+            }
+          />
+        ) : list && shown.length === 0 ? (
+          <Empty text="没有匹配的片段" />
+        ) : (
+          shown.map((s) => (
+            <div key={s.id} className="sn-item" onClick={() => use(s, "paste")} title="点击插入到终端">
+              <div className="sn-line">
+                <span className="grow ellipsis sn-name">{s.name || "未命名"}</span>
+                <div className="sn-tagline">
+                  {s.tags.map((t) => (
+                    <span key={t} className="badge">{t}</span>
+                  ))}
+                </div>
+                <div className="sn-actions" onClick={(e) => e.stopPropagation()}>
+                  <button className="icon-btn" title="运行" onClick={() => use(s, "run")}>
+                    <Play />
+                  </button>
+                  <button className="icon-btn" title="插入" onClick={() => use(s, "paste")}>
+                    <CornerDownLeft />
+                  </button>
+                  <button className="icon-btn" title="编辑" onClick={() => setEditing({ ...s })}>
+                    <Pencil />
+                  </button>
+                  <button className="icon-btn" title="删除" onClick={() => setDeleting(s)}>
+                    <Trash2 />
+                  </button>
+                </div>
+              </div>
+              <div className="mono faint ellipsis sn-cmd">{s.command.replace(/\s*\n\s*/g, " ⏎ ")}</div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {editing && (
+        <SnippetEditor
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            refresh();
+          }}
+        />
+      )}
+      {deleting && (
+        <Confirm
+          title="删除片段"
+          message={`确定删除片段「${deleting.name}」？`}
+          confirmText="删除"
+          danger
+          onCancel={() => setDeleting(null)}
+          onConfirm={async () => {
+            const s = deleting;
+            setDeleting(null);
+            try {
+              await api.snippetDelete(s.id);
+              await refresh();
+            } catch (e) {
+              toast(errMsg(e), "error");
+            }
+          }}
+        />
+      )}
+      {asking && (
+        <VarsDialog
+          title={asking.snippet.name}
+          command={asking.snippet.command}
+          confirmText={asking.mode === "run" ? "运行" : "插入"}
+          onCancel={() => setAsking(null)}
+          onDone={(cmd) => {
+            const mode = asking.mode;
+            setAsking(null);
+            send(cmd, mode);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Asks for each {{var}} value, then returns the substituted command. */
+export function VarsDialog(props: { title: string; command: string; confirmText?: string; onCancel: () => void; onDone: (cmd: string) => void }) {
+  const vars = useMemo(() => parseVars(props.command), [props.command]);
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(vars.map((v) => [v.name, v.def])));
+  const result = fillVars(props.command, values);
+  const submit = () => props.onDone(result);
+  return (
+    <Dialog
+      title={`填写变量 · ${props.title}`}
+      width={480}
+      onClose={props.onCancel}
+      footer={
+        <>
+          <button className="btn" onClick={props.onCancel}>取消</button>
+          <button className="btn primary" onClick={submit}>{props.confirmText ?? "确定"}</button>
+        </>
+      }
+    >
+      <form
+        className="stack gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        {vars.map((v, i) => (
+          <Field key={v.name} label={<span className="mono">{v.name}</span>}>
+            <input
+              className="input mono"
+              autoFocus={i === 0}
+              value={values[v.name] ?? ""}
+              onChange={(e) => setValues({ ...values, [v.name]: e.target.value })}
+            />
+          </Field>
+        ))}
+        <Field label="预览" top>
+          <pre className="mono sn-preview selectable">{result}</pre>
+        </Field>
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
+  );
+}
+
+function SnippetEditor(props: { initial: Partial<Snippet>; onClose: () => void; onSaved: () => void }) {
+  const init = props.initial;
+  const [name, setName] = useState(init.name ?? "");
+  const [command, setCommand] = useState(init.command ?? "");
+  const [tags, setTags] = useState((init.tags ?? []).join(", "));
+  const [saving, setSaving] = useState(false);
+  const vars = parseVars(command);
+  const ok = name.trim() !== "" && command.trim() !== "";
+
+  const save = async () => {
+    if (!ok) return;
+    setSaving(true);
+    try {
+      const tagList = [...new Set(tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean))];
+      await api.snippetSave({ ...init, name: name.trim(), command, tags: tagList });
+      props.onSaved();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog
+      title={init.id ? "编辑片段" : "新建片段"}
+      width={560}
+      onClose={props.onClose}
+      footer={
+        <>
+          <button className="btn" onClick={props.onClose}>取消</button>
+          <button className="btn primary" disabled={!ok || saving} onClick={save}>保存</button>
+        </>
+      }
+    >
+      <div className="stack gap-3">
+        <Field label="名称">
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </Field>
+        <Field
+          label="命令"
+          top
+          hint={
+            vars.length ? `变量：${vars.map((v) => v.name).join("、")}` : "可用 {{变量}} 或 {{变量:默认值}} 作为占位符，执行前填写"
+          }
+        >
+          <textarea
+            className="textarea mono"
+            rows={6}
+            spellCheck={false}
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                save();
+              }
+            }}
+          />
+        </Field>
+        <Field label="标签" hint="多个标签用逗号分隔">
+          <input className="input" value={tags} placeholder="如：docker, 日志" onChange={(e) => setTags(e.target.value)} />
+        </Field>
+      </div>
+    </Dialog>
+  );
 }

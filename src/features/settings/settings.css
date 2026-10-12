@@ -1,0 +1,24 @@
+/* Settings page: left nav (160px) + scrolling content column (max 720px). */
+.set-layout { display: grid; grid-template-columns: 160px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
+.set-nav {
+  display: flex; flex-direction: column; gap: var(--sp-1);
+  padding: var(--sp-2); background: var(--bg-1); border-right: 1px solid var(--line); overflow: auto;
+}
+.set-content { overflow: auto; min-height: 0; padding: var(--sp-4) var(--sp-6); }
+.set-inner { max-width: 720px; display: flex; flex-direction: column; gap: var(--sp-4); }
+
+.set-title { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-md); }
+.set-title h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+
+.set-card { display: flex; flex-direction: column; gap: var(--sp-3); }
+.set-card-head { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-sm); font-weight: 600; }
+.set-card-head > svg { width: var(--icon-md); height: var(--icon-md); color: var(--fg-1); flex: none; }
+
+/* Provider sub-card inside the AI card */
+.set-sub {
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  padding: var(--sp-3); background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+
+.set-note { font-size: var(--fs-sm); color: var(--fg-2); }
+.set-path { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--fg-1); user-select: text; word-break: break-all; }

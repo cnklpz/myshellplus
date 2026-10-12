@@ -12,6 +12,7 @@
   --h-md: 32px; /* default controls */
   --icon-sm: 14px;
   --icon-md: 16px;
+  --scrollbar-w: 10px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;
@@ -81,7 +82,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 input, textarea, select, button { font: inherit; color: inherit; }
-::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar { width: var(--scrollbar-w); height: var(--scrollbar-w); }
 ::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 .mono { font-family: var(--font-mono); }

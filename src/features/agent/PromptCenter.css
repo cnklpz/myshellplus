@@ -1,0 +1,18 @@
+/* Prompt dialogs (host key / agent approval). Label column matches .field (96px). */
+.pc-kv { display: grid; grid-template-columns: 96px 1fr; column-gap: var(--sp-3); row-gap: var(--sp-2); align-items: baseline; }
+.pc-kv > span:nth-child(odd) { color: var(--fg-1); font-size: var(--fs-sm); text-align: right; }
+.pc-fp { word-break: break-all; font-size: var(--fs-sm); }
+.pc-old { color: var(--fg-2); text-decoration: line-through; }
+.pc-alert {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-md);
+  background: rgba(239, 107, 107, 0.12); border: 1px solid var(--err); color: var(--err); font-size: var(--fs-sm);
+}
+.pc-alert > svg { width: var(--icon-md); height: var(--icon-md); flex: none; }
+.pc-detail {
+  margin: 0; padding: var(--sp-2) var(--sp-3); max-height: 240px; overflow: auto;
+  background: var(--bg-0); border: 1px solid var(--line); border-radius: var(--radius-md);
+  font-size: var(--fs-sm); white-space: pre-wrap; word-break: break-all;
+}
+.pc-detail.danger { border-color: var(--err); }
+.pc-more, .pc-timer { font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }

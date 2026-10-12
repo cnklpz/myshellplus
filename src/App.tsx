@@ -63,11 +63,17 @@ export default function App() {
     const theme = localStorageGet("theme");
     if (theme) document.documentElement.dataset.theme = theme;
     bootstrap();
+    // Watchdog heartbeat: the backend reloads the webview if this stops while the window is visible.
+    api.uiHeartbeat();
+    const beat = setInterval(() => api.uiHeartbeat().catch(() => {}), 5000);
     const un = [
       listen<ConnState>("conn-state", (e) => useApp.getState().setConn(e.payload)),
       listen<string>("term-exit", (e) => useApp.getState().updateTab(e.payload, { alive: false })),
     ];
-    return () => un.forEach((p) => p.then((f) => f()));
+    return () => {
+      clearInterval(beat);
+      un.forEach((p) => p.then((f) => f()));
+    };
   }, []);
 
   if (!vault) return null;
@@ -113,7 +119,10 @@ export default function App() {
             </div>
           )}
         </div>
-        {view === "batch" && <BatchView />}
+        {/* Batch stays mounted so a running batch and its history survive view switches. */}
+        <div className="view" style={{ display: view === "batch" ? "flex" : "none" }}>
+          <BatchView />
+        </div>
         {view === "tunnels" && <TunnelsView />}
         {view === "agent" && <AgentView />}
         {view === "settings" && <SettingsView />}

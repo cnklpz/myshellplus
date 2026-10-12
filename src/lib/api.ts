@@ -170,6 +170,13 @@ export const api = {
   importApply: (hosts: ImportCandidate[], snippets: Snippet[], backupPath?: string, backupPassword?: string) =>
     invoke<ImportResult>("import_apply", { hosts, snippets, backupPath, backupPassword }),
   exportBackup: (path: string, password?: string) => invoke<number>("export_backup", { path, password }),
+
+  // UI support
+  uiHeartbeat: () => invoke<void>("ui_heartbeat"),
+  /** Read a small (≤2MB) local text file, e.g. a private key picked with the open dialog. */
+  localReadText: (path: string) => invoke<string>("local_read_text", { path }),
+  /** Write a small local text file to a path picked with the save dialog. */
+  localWriteText: (path: string, content: string) => invoke<void>("local_write_text", { path, content }),
 };
 
 /** Turn an invoke rejection into a readable message. */

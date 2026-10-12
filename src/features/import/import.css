@@ -1,0 +1,36 @@
+/* Import wizard */
+.imp-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+.imp-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1);
+  padding: var(--sp-3); text-align: left; cursor: pointer;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--fg-0);
+}
+.imp-tile:hover { background: var(--bg-3); }
+.imp-tile.on { border-color: var(--accent); background: var(--accent-soft); }
+.imp-tile > svg { width: 20px; height: 20px; color: var(--fg-1); flex: none; }
+.imp-tile.on > svg { color: var(--accent); }
+.imp-tile .name { font-weight: 600; }
+.imp-tile .hint { font-size: var(--fs-xs); color: var(--fg-2); }
+
+.imp-steps { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--fg-2); }
+.imp-steps .on { color: var(--accent); font-weight: 600; }
+
+.imp-template {
+  margin: 0; padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-mono); font-size: var(--fs-sm); white-space: pre; overflow: auto;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-md); user-select: text;
+}
+
+.imp-table { border: 1px solid var(--line); border-radius: var(--radius-md); overflow: auto; max-height: 380px; }
+.imp-table .table { table-layout: fixed; }
+.imp-table .table td { overflow: hidden; text-overflow: ellipsis; }
+.imp-table .table tr:last-child td { border-bottom: none; }
+.imp-table input[type="checkbox"] { margin: 0; vertical-align: middle; accent-color: var(--accent); }
+
+.imp-warnings { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 120px; overflow: auto; }
+.imp-warnings .row { font-size: var(--fs-sm); color: var(--fg-1); }
+
+.imp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+.imp-stat { padding: var(--sp-3); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.imp-stat .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.imp-stat .l { font-size: var(--fs-sm); color: var(--fg-2); }

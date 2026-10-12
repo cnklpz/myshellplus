@@ -8,6 +8,7 @@ mod mcp;
 mod monitor;
 mod predict;
 mod prompts;
+mod selftest;
 mod ssh;
 mod state;
 mod term;
@@ -15,6 +16,7 @@ mod transfer;
 mod tunnel;
 mod util;
 mod vault;
+mod watchdog;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -418,6 +420,14 @@ fn ai_settings_get(ctx: S) -> ai::AiSettings {
 #[tauri::command]
 fn ai_settings_save(ctx: S, mut settings: ai::AiSettings, keys: HashMap<String, String>) -> CmdResult<()> {
     let old = ai::settings(&ctx.db);
+    // Drop stored keys of providers that were removed.
+    for o in &old.providers {
+        if !settings.providers.iter().any(|p| p.id == o.id) {
+            if let Some(id) = &o.api_key_secret {
+                let _ = ctx.vault.delete(id);
+            }
+        }
+    }
     for p in settings.providers.iter_mut() {
         p.api_key_secret = old.providers.iter().find(|o| o.id == p.id).and_then(|o| o.api_key_secret.clone());
         if let Some(k) = keys.get(&p.id) {
@@ -467,6 +477,34 @@ fn audit_list(ctx: S, limit: Option<usize>) -> CmdResult<Vec<AuditEntry>> {
     Ok(ctx.db.list_audit(limit.unwrap_or(500))?)
 }
 
+// ---------------- UI support ----------------
+
+#[tauri::command]
+fn ui_heartbeat() {
+    watchdog::beat();
+}
+
+const LOCAL_FILE_MAX: u64 = 2 * 1024 * 1024;
+
+/// Read a small local text file chosen by the user (key files, configs).
+#[tauri::command]
+fn local_read_text(path: String) -> CmdResult<String> {
+    let md = std::fs::metadata(&path)?;
+    if md.len() > LOCAL_FILE_MAX {
+        bail_msg!("文件过大");
+    }
+    Ok(std::fs::read_to_string(&path)?)
+}
+
+/// Write a small local text file to a path chosen by the user via a save dialog.
+#[tauri::command]
+fn local_write_text(path: String, content: String) -> CmdResult<()> {
+    if content.len() as u64 > LOCAL_FILE_MAX {
+        bail_msg!("内容过大");
+    }
+    Ok(std::fs::write(&path, content)?)
+}
+
 // ---------------- import / export ----------------
 
 #[tauri::command]
@@ -505,7 +543,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let dir = app.path().app_data_dir()?;
+            // MYSHELL_DATA_DIR: portable mode / isolated test data.
+            let dir = match std::env::var_os("MYSHELL_DATA_DIR") {
+                Some(d) => std::path::PathBuf::from(d),
+                None => app.path().app_data_dir()?,
+            };
             std::fs::create_dir_all(&dir)?;
             let db = Arc::new(Db::open(&dir.join("myshellplus.db"))?);
             let vault = Arc::new(vault::Vault::new(db.clone()));
@@ -522,8 +564,18 @@ pub fn run() {
                 transfers: Default::default(),
             });
             let server = Arc::new(McpServer::default());
+            watchdog::spawn(app.handle().clone());
             app.manage(ctx.clone());
             app.manage(server.clone());
+            if let Ok(spec) = std::env::var("MYSHELL_SELFTEST") {
+                let (c, srv, handle) = (ctx.clone(), server.clone(), app.handle().clone());
+                tauri::async_runtime::spawn(async move {
+                    let ok = selftest::run(c, srv, spec).await;
+                    println!("SELFTEST {}", if ok { "OK" } else { "FAILED" });
+                    handle.exit(if ok { 0 } else { 1 });
+                });
+                return Ok(());
+            }
             let c2 = ctx.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = mcp::restart(c2.clone(), server).await {
@@ -548,6 +600,7 @@ pub fn run() {
             predict_local, predict_ai, ai_nl2cmd, ai_explain, ai_settings_get, ai_settings_save,
             mcp_settings_get, mcp_settings_save, mcp_new_token, prompt_list, prompt_answer, audit_list,
             import_default_path, import_preview, import_apply, export_backup,
+            ui_heartbeat, local_read_text, local_write_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

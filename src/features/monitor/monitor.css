@@ -1,0 +1,44 @@
+/* Monitor side panel. Every section shares the panel's left edge (--sp-3 padding). */
+.mon { display: flex; flex-direction: column; gap: var(--sp-3); }
+.mon .spark { display: block; width: 100%; }
+
+.mon-info { display: grid; grid-template-columns: 48px minmax(0, 1fr); column-gap: var(--sp-3); row-gap: var(--sp-1); font-size: var(--fs-sm); }
+.mon-info > dt { color: var(--fg-2); margin: 0; }
+.mon-info > dd { margin: 0; color: var(--fg-0); }
+.mon-host { font-size: var(--fs-lg); font-weight: 600; height: var(--h-sm); display: flex; align-items: center; }
+
+.mon-gauges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.mon-tile { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.mon-tile .lbl { font-size: var(--fs-xs); color: var(--fg-2); }
+.mon-tile .big { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 24px; }
+.mon-tile .big small { font-size: var(--fs-xs); font-weight: 400; color: var(--fg-2); margin-left: 2px; }
+.mon-tile .sub { font-size: var(--fs-xs); color: var(--fg-2); font-variant-numeric: tabular-nums; height: 16px; }
+
+.mon-cores { display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: var(--sp-1); }
+.mon-core { height: 24px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-sm); position: relative; overflow: hidden; }
+.mon-core > i { position: absolute; left: 0; right: 0; bottom: 0; background: var(--chart-1); opacity: 0.55; }
+.mon-core > i.warn { background: var(--warn); }
+.mon-core > i.err { background: var(--err); }
+.mon-core > span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; font-variant-numeric: tabular-nums; color: var(--fg-0); }
+
+.mon-rate { display: grid; grid-template-columns: 16px minmax(0, 1fr) 16px minmax(0, 1fr); align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; height: var(--h-sm); }
+.mon-rate svg { width: var(--icon-sm); height: var(--icon-sm); }
+.mon-chart { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--sp-1) 0; overflow: hidden; }
+
+/* Shared column template for interface / disk rows: name | value | value */
+.mon-grid-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px 84px; align-items: center; gap: var(--sp-2); height: var(--h-sm); font-size: var(--fs-sm); padding: 0 var(--sp-2); }
+.mon-grid-row .num { white-space: nowrap; }
+.mon-disk { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2); }
+.mon-disk-head { display: grid; grid-template-columns: minmax(0, 1fr) 128px 40px; gap: var(--sp-2); align-items: center; font-size: var(--fs-sm); height: 20px; }
+
+.mon-procs { table-layout: fixed; }
+.mon-procs td, .mon-procs th { padding: 0 var(--sp-1); }
+.mon-procs td:first-child, .mon-procs th:first-child { padding-left: var(--sp-2); }
+.mon-procs td.cmd { overflow: hidden; text-overflow: ellipsis; }
+.mon-procs .act { width: 28px; padding: 0; }
+.mon-procs .act .icon-btn { width: 24px; height: 24px; visibility: hidden; }
+.mon-procs tr:hover .act .icon-btn { visibility: visible; }
+.mon-procs .act .icon-btn svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+.mon-skel { height: 64px; border-radius: var(--radius-md); background: linear-gradient(90deg, var(--bg-2), var(--bg-3), var(--bg-2)); background-size: 200% 100%; animation: mon-shimmer 1.4s linear infinite; }
+@keyframes mon-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }

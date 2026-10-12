@@ -1,0 +1,14 @@
+.tn-table { table-layout: fixed; }
+.tn-table td.ellipsis { max-width: 0; }
+.tn-table td { height: 40px; }
+.tn-table .btn.sm { width: 64px; }
+.tn-actions-h { padding-left: var(--sp-2); }
+.tn-table tr.tn-has-err td { border-bottom: none; }
+.tn-err-row td {
+  height: auto; padding-bottom: var(--sp-2); white-space: normal;
+  color: var(--err); font-size: var(--fs-xs); word-break: break-all;
+}
+.tn-err-row:hover td { background: transparent; }
+.tn-port { width: 96px; flex: none; font-variant-numeric: tabular-nums; }
+.tn-invalid, .tn-invalid:focus { border-color: var(--err); }
+.tn-foot-err { color: var(--err); font-size: var(--fs-sm); }

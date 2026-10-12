@@ -1,5 +1,327 @@
 // Tunnel (port forwarding) management page.
-// STUB — implemented by a feature agent.
+import { listen } from "@tauri-apps/api/event";
+import { Network, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Confirm, Dialog, Empty, Field, Toggle, toast } from "../../components/ui";
+import { api, errMsg, type TunnelDef, type TunnelStatus } from "../../lib/api";
+import { fmtBytes } from "../../lib/format";
+import { useApp } from "../../store";
+import "./tunnels.css";
+
+type Kind = TunnelDef["kind"];
+
+const KIND_LABEL: Record<Kind, string> = { local: "本地转发 -L", remote: "远程转发 -R", dynamic: "动态 SOCKS5 -D" };
+const KIND_HINT: Record<Kind, string> = {
+  local: "本机监听端口，经服务器转发到目标地址（访问内网服务）。",
+  remote: "服务器监听端口，连接转回本机的目标地址（暴露本地服务）。",
+  dynamic: "本机开启 SOCKS5 代理，流量经服务器出口。",
+};
+
+function mapping(t: TunnelDef): string {
+  const bind = `${t.bindAddr}:${t.bindPort}`;
+  const target = `${t.targetHost}:${t.targetPort}`;
+  if (t.kind === "dynamic") return `SOCKS5 ${bind}`;
+  if (t.kind === "remote") return `远程 ${bind} → 本机 ${target}`;
+  return `${bind} → ${target}`;
+}
+
 export function TunnelsView() {
-  return <div className="empty">TunnelsView</div>;
+  const hosts = useApp((s) => s.hosts);
+  const [list, setList] = useState<TunnelDef[] | null>(null);
+  const [status, setStatus] = useState<Record<string, TunnelStatus>>({});
+  const [editing, setEditing] = useState<Partial<TunnelDef> | null>(null);
+  const [deleting, setDeleting] = useState<TunnelDef | null>(null);
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      const st = await api.tunnelStatus();
+      setStatus(Object.fromEntries(st.map((s) => [s.id, s])));
+    } catch {
+      /* ignore polling errors */
+    }
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      setList(await api.tunnelList());
+    } catch (e) {
+      toast(errMsg(e), "error");
+      setList([]);
+    }
+    await refreshStatus();
+  }, [refreshStatus]);
+
+  useEffect(() => {
+    refresh();
+    const timer = setInterval(refreshStatus, 2000);
+    const un = listen("tunnels-changed", () => refresh());
+    return () => {
+      clearInterval(timer);
+      un.then((f) => f());
+    };
+  }, [refresh, refreshStatus]);
+
+  const hostName = (id: string) => hosts.find((h) => h.id === id)?.name ?? "（已删除）";
+
+  const toggleRun = async (t: TunnelDef) => {
+    setBusy((b) => ({ ...b, [t.id]: true }));
+    try {
+      if (status[t.id]?.running) await api.tunnelStop(t.id);
+      else await api.tunnelStart(t.id);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setBusy((b) => ({ ...b, [t.id]: false }));
+      refreshStatus();
+    }
+  };
+
+  const setAuto = async (t: TunnelDef, autoStart: boolean) => {
+    try {
+      await api.tunnelSave({ ...t, autoStart });
+      await refresh();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+
+  const newTunnel = () =>
+    setEditing({ name: "", hostId: hosts[0]?.id ?? "", kind: "local", bindAddr: "127.0.0.1", bindPort: 8080, targetHost: "127.0.0.1", targetPort: 80, autoStart: false });
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h1>隧道</h1>
+        <span className="spacer" />
+        <button className="btn primary sm" onClick={newTunnel}>
+          <Plus />
+          新建隧道
+        </button>
+      </div>
+      <div className="page-body">
+        {list && list.length === 0 ? (
+          <Empty
+            icon={<Network />}
+            text="还没有隧道。端口转发可把远程服务映射到本机，或开启 SOCKS5 代理。"
+            action={
+              <button className="btn primary sm" onClick={newTunnel}>
+                <Plus />
+                新建隧道
+              </button>
+            }
+          />
+        ) : (
+          <table className="table tn-table">
+            <colgroup>
+              <col style={{ width: 40 }} />
+              <col style={{ width: "16%" }} />
+              <col style={{ width: 128 }} />
+              <col style={{ width: "12%" }} />
+              <col />
+              <col style={{ width: 152 }} />
+              <col style={{ width: 72 }} />
+              <col style={{ width: 72 }} />
+              <col style={{ width: 168 }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>名称</th>
+                <th>类型</th>
+                <th>服务器</th>
+                <th>映射</th>
+                <th className="num">流量 ↑ / ↓</th>
+                <th className="num">活动连接</th>
+                <th>自动启动</th>
+                <th className="tn-actions-h">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(list ?? []).map((t) => {
+                const st = status[t.id];
+                const running = !!st?.running;
+                const dot = st?.error ? "err" : running ? "ok" : "";
+                return [
+                  <tr key={t.id} className={st?.error ? "tn-has-err" : ""}>
+                    <td>
+                      <span className={"dot " + dot} title={st?.error ? "出错" : running ? "运行中" : "已停止"} />
+                    </td>
+                    <td className="ellipsis" title={t.name}>{t.name || "未命名"}</td>
+                    <td>
+                      <span className={"badge" + (t.kind === "local" ? " accent" : t.kind === "remote" ? " warn" : "")}>{KIND_LABEL[t.kind]}</span>
+                    </td>
+                    <td className="ellipsis" title={hostName(t.hostId)}>{hostName(t.hostId)}</td>
+                    <td className="mono ellipsis selectable" title={mapping(t)}>{mapping(t)}</td>
+                    <td className="num">
+                      {fmtBytes(st?.up ?? 0)} / {fmtBytes(st?.down ?? 0)}
+                    </td>
+                    <td className="num">{st?.active ?? 0}</td>
+                    <td>
+                      <Toggle on={t.autoStart} onChange={(v) => setAuto(t, v)} />
+                    </td>
+                    <td>
+                      <div className="row gap-1 tn-actions">
+                        <button className={"btn sm" + (running ? "" : " primary")} disabled={busy[t.id]} onClick={() => toggleRun(t)}>
+                          {running ? <Square /> : <Play />}
+                          {running ? "停止" : "启动"}
+                        </button>
+                        <button className="icon-btn" title="编辑" onClick={() => setEditing({ ...t })}>
+                          <Pencil />
+                        </button>
+                        <button className="icon-btn" title="删除" onClick={() => setDeleting(t)}>
+                          <Trash2 />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>,
+                  st?.error ? (
+                    <tr key={t.id + ":err"} className="tn-err-row">
+                      <td />
+                      <td colSpan={8} className="selectable">{st.error}</td>
+                    </tr>
+                  ) : null,
+                ];
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {editing && (
+        <TunnelEditor
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            refresh();
+          }}
+        />
+      )}
+      {deleting && (
+        <Confirm
+          title="删除隧道"
+          message={`确定删除隧道「${deleting.name || mapping(deleting)}」？运行中的隧道会先停止。`}
+          confirmText="删除"
+          danger
+          onCancel={() => setDeleting(null)}
+          onConfirm={async () => {
+            const t = deleting;
+            setDeleting(null);
+            try {
+              await api.tunnelDelete(t.id);
+              await refresh();
+            } catch (e) {
+              toast(errMsg(e), "error");
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+const validPort = (s: string) => /^\d+$/.test(s) && +s >= 1 && +s <= 65535;
+
+function TunnelEditor(props: { initial: Partial<TunnelDef>; onClose: () => void; onSaved: () => void }) {
+  const hosts = useApp((s) => s.hosts);
+  const init = props.initial;
+  const [name, setName] = useState(init.name ?? "");
+  const [hostId, setHostId] = useState(init.hostId ?? "");
+  const [kind, setKind] = useState<Kind>(init.kind ?? "local");
+  const [bindAddr, setBindAddr] = useState(init.bindAddr ?? "127.0.0.1");
+  const [bindPort, setBindPort] = useState(String(init.bindPort ?? ""));
+  const [targetHost, setTargetHost] = useState(init.targetHost ?? "127.0.0.1");
+  const [targetPort, setTargetPort] = useState(String(init.targetPort ?? ""));
+  const [autoStart, setAutoStart] = useState(!!init.autoStart);
+  const [saving, setSaving] = useState(false);
+
+  const needTarget = kind !== "dynamic";
+  const errors: string[] = [];
+  if (!hostId) errors.push("请选择服务器");
+  if (!bindAddr.trim()) errors.push("请填写监听地址");
+  if (!validPort(bindPort)) errors.push("监听端口需为 1-65535");
+  if (needTarget && !targetHost.trim()) errors.push("请填写目标地址");
+  if (needTarget && !validPort(targetPort)) errors.push("目标端口需为 1-65535");
+
+  const save = async () => {
+    if (errors.length) return;
+    setSaving(true);
+    try {
+      await api.tunnelSave({
+        ...init,
+        name: name.trim(),
+        hostId,
+        kind,
+        bindAddr: bindAddr.trim(),
+        bindPort: +bindPort,
+        targetHost: needTarget ? targetHost.trim() : "",
+        targetPort: needTarget ? +targetPort : 0,
+        autoStart,
+      });
+      props.onSaved();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const portCls = (s: string) => "input tn-port" + (s && !validPort(s) ? " tn-invalid" : "");
+
+  return (
+    <Dialog
+      title={init.id ? "编辑隧道" : "新建隧道"}
+      width={560}
+      onClose={props.onClose}
+      footer={
+        <>
+          {errors.length > 0 && <span className="grow ellipsis tn-foot-err">{errors[0]}</span>}
+          <button className="btn" onClick={props.onClose}>取消</button>
+          <button className="btn primary" disabled={saving || errors.length > 0} onClick={save}>保存</button>
+        </>
+      }
+    >
+      <div className="stack gap-3">
+        <Field label="名称">
+          <input className="input" value={name} placeholder="如：数据库" onChange={(e) => setName(e.target.value)} autoFocus />
+        </Field>
+        <Field label="服务器">
+          <select className="select" value={hostId} onChange={(e) => setHostId(e.target.value)}>
+            {!hostId && <option value="">选择服务器</option>}
+            {hosts.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.groupName ? `${h.groupName} / ` : ""}
+                {h.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="类型" hint={KIND_HINT[kind]}>
+          <div className="seg">
+            {(["local", "remote", "dynamic"] as Kind[]).map((k) => (
+              <button key={k} type="button" className={kind === k ? "on" : ""} onClick={() => setKind(k)}>
+                {KIND_LABEL[k]}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <Field label="监听地址" hint={kind === "remote" ? "在服务器上监听" : "在本机监听"}>
+          <input className="input mono" value={bindAddr} onChange={(e) => setBindAddr(e.target.value)} />
+          <span className="faint">:</span>
+          <input className={portCls(bindPort)} value={bindPort} placeholder="端口" inputMode="numeric" onChange={(e) => setBindPort(e.target.value.trim())} />
+        </Field>
+        {needTarget && (
+          <Field label="目标地址" hint={kind === "remote" ? "本机可访问的地址" : "从服务器可访问的地址"}>
+            <input className="input mono" value={targetHost} onChange={(e) => setTargetHost(e.target.value)} />
+            <span className="faint">:</span>
+            <input className={portCls(targetPort)} value={targetPort} placeholder="端口" inputMode="numeric" onChange={(e) => setTargetPort(e.target.value.trim())} />
+          </Field>
+        )}
+        <Field label="自动启动" hint="应用启动并解锁后自动建立">
+          <Toggle on={autoStart} onChange={setAutoStart} />
+        </Field>
+      </div>
+    </Dialog>
+  );
 }

@@ -1,7 +1,10 @@
 // Shared UI building blocks. Prefer these + base.css classes over ad-hoc styles.
 import { X } from "lucide-react";
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { useApp } from "../store";
+
+// Open dialogs, innermost last: only the topmost one reacts to Esc.
+const dialogStack: symbol[] = [];
 
 export function Dialog(props: {
   title: ReactNode;
@@ -10,11 +13,23 @@ export function Dialog(props: {
   footer?: ReactNode;
   children: ReactNode;
 }) {
+  const onClose = useRef(props.onClose);
+  onClose.current = props.onClose;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
+    const me = Symbol();
+    dialogStack.push(me);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && dialogStack[dialogStack.length - 1] === me) {
+        e.stopPropagation();
+        onClose.current();
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [props.onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      dialogStack.splice(dialogStack.indexOf(me), 1);
+    };
+  }, []);
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
       <div className="dialog" style={{ width: props.width ?? 520 }}>
