@@ -1,48 +1,45 @@
 /* Host sidebar + editor. Spacing only via --sp-*.
-   The sidebar sits on --chrome. Content column starts at --sp-4 (16px), matching the titlebar mark:
-   list padding (--sp-2) + row padding (--sp-2). Chevron and status dot share that 16px icon column. */
-.hs { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+   Sits in .sb-hosts under the .sb-item page links and shares their alignment lines:
+   row edge at --sp-3, icon column at --sp-3 + --sp-3 (--hs-icon wide, same as .sb-item icons),
+   text after a --sp-3 gap. The search icon and placeholder sit on the same two lines. */
+.hs { --hs-icon: var(--icon-lg); display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 
-.hs-bar { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-2); flex: none; }
+.hs-bar { display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-3) var(--sp-2); flex: none; }
 .hs-search-box { position: relative; flex: 1 1 auto; min-width: 0; }
 .hs-search-box > svg {
-  position: absolute; left: var(--sp-2); top: 50%; transform: translateY(-50%);
-  width: var(--icon-sm); height: var(--icon-sm); color: var(--fg-2); pointer-events: none;
+  position: absolute; top: 50%; transform: translateY(-50%);
+  left: calc(var(--sp-3) + (var(--hs-icon) - var(--icon-md)) / 2);
+  width: var(--icon-md); height: var(--icon-md); color: var(--fg-2); pointer-events: none;
 }
 .hs-search-box > .input {
-  padding-left: calc(var(--sp-2) + var(--icon-sm) + var(--sp-2));
+  padding-left: calc(var(--sp-3) + var(--hs-icon) + var(--sp-3));
   background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--line);
 }
 .hs-search-box > .input:focus { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
 
-.hs-list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 var(--sp-2) var(--sp-2); outline: none; }
-.hs-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-md); height: var(--icon-md); flex: none; }
+.hs-list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 var(--sp-3) var(--sp-3); outline: none; }
+.hs-list .list-row { gap: var(--sp-3); padding: 0 var(--sp-3); border-radius: var(--radius-md); }
+.hs-list .list-row:hover { background: var(--bg-2); }
+.hs-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--hs-icon); height: var(--hs-icon); flex: none; }
 .hs-icon > svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--fg-2); }
 
-.hs-list .list-row:hover { background: var(--bg-2); }
-
-.hs-group { margin-top: var(--sp-2); color: var(--fg-2); font-size: var(--fs-xs); font-weight: 600; }
+.hs-group { margin-top: var(--sp-2); color: var(--fg-2); font-size: var(--fs-sm); font-weight: 600; }
 .hs-list > div:first-child > .hs-group { margin-top: 0; }
 .hs-group:hover { color: var(--fg-1); }
 .hs-group .meta { font-weight: 500; }
 .hs-group.drop { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 
-.hs-host { position: relative; }
-.hs-host .marker { position: absolute; left: 0; top: calc((var(--h-sm) - var(--icon-md)) / 2); bottom: calc((var(--h-sm) - var(--icon-md)) / 2); width: 2px; border-radius: 1px; }
+.hs-host { position: relative; font-size: var(--fs-md); }
+.hs-host .marker { position: absolute; left: 0; top: var(--sp-2); bottom: var(--sp-2); width: 2px; border-radius: 1px; }
 .hs-host .name { flex: 1 1 auto; }
 .hs-host .meta { max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; opacity: 0; transition: opacity 0.12s; }
 .hs-host:hover .meta, .hs-host.selected .meta { opacity: 1; }
 .hs-list .hs-host.selected, .hs-list .hs-host.selected:hover { background: var(--bg-3); }
 .hs-host.dragging { opacity: 0.5; }
 
-.hs-footer {
-  display: flex; align-items: center; height: var(--h-sm); padding: 0 var(--sp-4); flex: none;
-  font-size: var(--fs-xs); color: var(--fg-2); font-variant-numeric: tabular-nums;
-}
-
 .ctx-menu {
   position: fixed; z-index: 120; min-width: 168px; padding: var(--sp-1);
-  background: var(--bg-2); border-radius: 6px; box-shadow: var(--shadow);
+  background: var(--bg-2); border-radius: var(--radius-md); box-shadow: var(--shadow);
 }
 .ctx-menu > button {
   display: flex; align-items: center; gap: var(--sp-2); width: 100%;
@@ -59,7 +56,7 @@
 .he-form { display: flex; flex-direction: column; gap: var(--sp-3); }
 .he-err { color: var(--err); font-size: var(--fs-xs); }
 .he-port { color: var(--fg-2); font-size: var(--fs-sm); white-space: nowrap; flex: none; }
-.he-port-input { width: 80px; flex: none; }
+.he-port-input { width: 96px; flex: none; }
 .link-btn { border: none; background: none; padding: 0; color: var(--accent); cursor: pointer; font-size: var(--fs-sm); white-space: nowrap; }
 .link-btn:hover { text-decoration: underline; }
 .he-swatches { display: flex; align-items: center; gap: var(--sp-3); height: var(--h-md); padding-left: var(--sp-1); }
@@ -73,16 +70,16 @@
 .swatch.none { background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .swatch.none:hover { box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 2px var(--bg-1), 0 0 0 3px var(--line-strong); }
 .swatch.none.on { box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 2px var(--bg-1), 0 0 0 3px var(--fg-1); }
-.swatch > svg { width: 10px; height: 10px; }
+.swatch > svg { width: var(--fs-xs); height: var(--fs-xs); }
 .pw-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
 .pw-wrap > .input { padding-right: calc(var(--h-sm) + var(--sp-1)); }
-.pw-wrap > .icon-btn { position: absolute; right: 2px; top: 2px; }
+.pw-wrap > .icon-btn { position: absolute; right: 2px; top: calc((var(--h-md) - var(--h-sm)) / 2); }
 
 /* Key manager */
 .km-list { display: flex; flex-direction: column; background: var(--bg-0); border-radius: var(--radius-md); max-height: 240px; overflow: auto; }
 .km-row { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-md); padding: 0 var(--sp-1) 0 var(--sp-3); box-shadow: inset 0 -1px 0 var(--line); }
 .km-row:last-child { box-shadow: none; }
-.km-row .name { width: 120px; flex: none; }
+.km-row .name { width: 136px; flex: none; }
 .km-row .pub { font-size: var(--fs-xs); }
 .km-pub {
   font-family: var(--font-mono); font-size: var(--fs-xs); word-break: break-all; user-select: text;

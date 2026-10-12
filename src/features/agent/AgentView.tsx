@@ -144,7 +144,7 @@ function McpCard() {
             <span className="lbl">端口</span>
             <input
               className="input mono num"
-              style={{ width: 88 }}
+              style={{ width: 96 }}
               inputMode="numeric"
               value={draft.port || ""}
               onChange={(e) => setDraft({ ...draft, port: Number(e.target.value.replace(/\D/g, "")) || 0 })}

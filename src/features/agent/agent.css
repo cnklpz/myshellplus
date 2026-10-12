@@ -1,5 +1,5 @@
 /* Agent page */
-.agent-inner { max-width: 1040px; display: flex; flex-direction: column; gap: var(--sp-8); }
+.agent-inner { max-width: 1072px; display: flex; flex-direction: column; gap: var(--sp-8); }
 .agent-sec { display: flex; flex-direction: column; gap: var(--sp-3); }
 .agent-sec-head { display: flex; align-items: center; gap: var(--sp-2); height: var(--h-md); }
 .agent-sec-head h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
@@ -36,12 +36,12 @@
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--sp-6);
   padding: var(--sp-2) var(--sp-4); background: var(--bg-1); border-radius: var(--radius-lg); box-shadow: inset 0 0 0 1px var(--line);
 }
-.agent-tools > div { display: grid; grid-template-columns: 136px minmax(0, 1fr); align-items: center; gap: var(--sp-3); height: var(--h-sm); font-size: var(--fs-sm); }
+.agent-tools > div { display: grid; grid-template-columns: 152px minmax(0, 1fr); align-items: center; gap: var(--sp-3); height: var(--h-sm); font-size: var(--fs-sm); }
 .agent-tools .mono { color: var(--fg-0); }
 .agent-tools .d { color: var(--fg-2); }
 
 /* Tables: fixed layout so columns line up and long cells ellipsize. Outer ring stays visible above sticky headers. */
-.agent-table-wrap { background: var(--bg-1); border-radius: var(--radius-lg); box-shadow: 0 0 0 1px var(--line); overflow: auto; max-height: 360px; }
+.agent-table-wrap { background: var(--bg-1); border-radius: var(--radius-lg); box-shadow: 0 0 0 1px var(--line); overflow: auto; max-height: 400px; }
 .agent-table-wrap.tall { max-height: 520px; }
 .agent-table-wrap .table { table-layout: fixed; }
 .agent-table-wrap .table th:first-child, .agent-table-wrap .table td:first-child { padding-left: var(--sp-4); }
@@ -51,9 +51,9 @@
 .agent-table-wrap .table tr.click { cursor: pointer; }
 .agent-time { color: var(--fg-2); font-variant-numeric: tabular-nums; }
 
-.agent-search { position: relative; width: 200px; flex: none; }
-.agent-search > svg { position: absolute; left: var(--sp-2); top: 50%; transform: translateY(-50%); width: var(--icon-sm); height: var(--icon-sm); color: var(--fg-2); pointer-events: none; }
-.agent-search > .input { padding-left: calc(var(--sp-2) + var(--icon-sm) + var(--sp-2)); }
+.agent-search { position: relative; width: 224px; flex: none; }
+.agent-search > svg { position: absolute; left: var(--sp-3); top: 50%; transform: translateY(-50%); width: var(--icon-sm); height: var(--icon-sm); color: var(--fg-2); pointer-events: none; }
+.agent-search > .input { padding-left: calc(var(--sp-3) + var(--icon-sm) + var(--sp-2)); }
 
 /* Status as text color */
 .agent-inner .t-ok { color: var(--ok); }

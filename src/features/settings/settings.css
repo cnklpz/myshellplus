@@ -1,22 +1,28 @@
-/* Settings page: quiet text nav + content column (max 680px).
-   Nav item text lines up with the page h1 (nav padding sp-4 + item padding sp-2 = sp-6). */
-.set-layout { display: grid; grid-template-columns: 176px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
+/* Settings page (shown inside PageModal): full-height bg-1 nav column + content column.
+   The nav carries the page title on the 64px header line; h1 and item text share one x
+   (nav padding --sp-3 + item padding --sp-3). Each section's title (.set-title) sits on the
+   same 64px line as the h1 and the modal close button; set-inner (max 680px) ends well
+   before the close button so title actions never collide with it. */
+.set-layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
 .set-nav {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: var(--sp-2) var(--sp-2) var(--sp-4) var(--sp-4); overflow: auto;
+  display: flex; flex-direction: column; gap: 2px; min-height: 0;
+  padding: 0 var(--sp-3) var(--sp-4); overflow: auto; background: var(--bg-1);
 }
+.set-nav-head { display: flex; align-items: center; height: 64px; padding: 0 var(--sp-3); flex: none; }
+.set-nav-head h1 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02em; }
 .set-nav > button {
-  display: flex; align-items: center; height: var(--h-md); padding: 0 var(--sp-2);
+  display: flex; align-items: center; height: var(--h-md); padding: 0 var(--sp-3); flex: none;
   border: none; border-radius: var(--radius-md); background: transparent; cursor: pointer; text-align: left;
   color: var(--fg-1); font-size: var(--fs-md); transition: color 0.12s, background 0.12s;
 }
-.set-nav > button:hover { color: var(--fg-0); }
+.set-nav > button:hover { color: var(--fg-0); background: var(--bg-2); }
 .set-nav > button.on { color: var(--fg-0); background: var(--bg-3); font-weight: 500; }
 
-.set-content { overflow: auto; min-height: 0; padding: var(--sp-2) var(--sp-6) var(--sp-8); }
+/* Right padding keeps title actions clear of the modal close button on narrow windows. */
+.set-content { overflow: auto; min-height: 0; padding: 0 64px var(--sp-8) var(--sp-8); }
 .set-inner { max-width: 680px; display: flex; flex-direction: column; gap: var(--sp-6); }
 
-.set-title { display: flex; align-items: center; gap: var(--sp-3); height: var(--h-md); }
+.set-title { display: flex; align-items: center; gap: var(--sp-3); height: 64px; flex: none; margin-bottom: calc(-1 * var(--sp-2)); }
 .set-title h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
 
 /* A block = optional small heading + one group card. */
@@ -26,12 +32,12 @@
 
 /* Group card: .field rows separated by an inset line. */
 .set-group { background: var(--bg-1); border-radius: var(--radius-lg); box-shadow: inset 0 0 0 1px var(--line); }
-.set-group > .field { grid-template-columns: 112px minmax(0, 1fr); min-height: 48px; padding: var(--sp-2) var(--sp-4); }
+.set-group > .field { grid-template-columns: 128px minmax(0, 1fr); min-height: 52px; padding: var(--sp-2) var(--sp-4); }
 .set-group > .field > label { text-align: left; color: var(--fg-1); font-size: var(--fs-md); }
 .set-group > .field + .field { box-shadow: inset 0 1px 0 var(--line); }
 /* Hint row from <Field hint>: sits tight under its field, no separator. */
 .set-group > .field:has(> .field-hint) { min-height: 0; padding-top: 0; margin-top: calc(-1 * var(--sp-1)); box-shadow: none; }
-.set-empty { display: flex; align-items: center; min-height: 48px; padding: 0 var(--sp-4); color: var(--fg-2); }
+.set-empty { display: flex; align-items: center; min-height: 52px; padding: 0 var(--sp-4); color: var(--fg-2); }
 
 .set-note { font-size: var(--fs-sm); color: var(--fg-2); }
 .set-path { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--fg-1); user-select: text; word-break: break-all; }
@@ -45,7 +51,7 @@
 }
 .theme-tile:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .theme-tile.on { box-shadow: inset 0 0 0 2px var(--accent); }
-.theme-preview { display: flex; gap: var(--sp-1); height: 64px; padding: var(--sp-1); border-radius: var(--radius-md); }
+.theme-preview { display: flex; gap: var(--sp-1); height: 72px; padding: var(--sp-1); border-radius: var(--radius-md); }
 .tp-side { width: 22%; }
 .tp-main { flex: 1; border-radius: var(--radius-sm); padding: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-1); }
 .tp-main > span { display: block; height: 4px; border-radius: 2px; }

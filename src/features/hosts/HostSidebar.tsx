@@ -174,8 +174,6 @@ export function HostSidebar() {
     window.addEventListener("mouseup", up);
   };
 
-  const connected = hosts.filter((h) => conn[h.id]?.state === "connected").length;
-
   return (
     <div className="hs">
       <div className="hs-bar">
@@ -183,7 +181,7 @@ export function HostSidebar() {
           <Search />
           <input
             ref={searchRef}
-            className="input sm"
+            className="input"
             placeholder="搜索  Ctrl+P"
             value={query}
             disabled={hosts.length === 0}
@@ -192,10 +190,10 @@ export function HostSidebar() {
             spellCheck={false}
           />
         </div>
-        <button className="icon-btn" title="新建服务器" onClick={() => openEditor("")}>
+        <button className="icon-btn md" title="新建服务器" onClick={() => openEditor("")}>
           <Plus />
         </button>
-        <button className="icon-btn" title="导入" onClick={() => setImportOpen(true)}>
+        <button className="icon-btn md" title="导入" onClick={() => setImportOpen(true)}>
           <Download />
         </button>
       </div>
@@ -261,10 +259,6 @@ export function HostSidebar() {
                 </div>
               );
             })}
-          </div>
-
-          <div className="hs-footer">
-            {hosts.length} 台 · {connected} 已连接
           </div>
         </>
       )}

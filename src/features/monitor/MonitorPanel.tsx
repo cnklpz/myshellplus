@@ -385,12 +385,12 @@ function ProcSection({ hostId, procs }: { hostId: string; procs: Proc[] }) {
       </div>
       <table className="table mon-procs">
         <colgroup>
-          <col style={{ width: 52 }} />
           <col style={{ width: 60 }} />
-          <col style={{ width: 44 }} />
-          <col style={{ width: 56 }} />
+          <col style={{ width: 64 }} />
+          <col style={{ width: 48 }} />
+          <col style={{ width: 64 }} />
           <col />
-          <col style={{ width: 24 }} />
+          <col style={{ width: 28 }} />
         </colgroup>
         <thead>
           <tr>

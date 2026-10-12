@@ -26,11 +26,11 @@ export function SettingsView() {
   const [section, setSection] = useState<Section>("ai");
   return (
     <div className="page">
-      <div className="page-header">
-        <h1>设置</h1>
-      </div>
       <div className="set-layout">
         <nav className="set-nav">
+          <div className="set-nav-head">
+            <h1>设置</h1>
+          </div>
           {SECTIONS.map((s) => (
             <button key={s.id} type="button" className={section === s.id ? "on" : ""} onClick={() => setSection(s.id)}>
               <span className="ellipsis">{s.label}</span>

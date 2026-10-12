@@ -30,7 +30,7 @@
 .imp-bar .count { font-size: var(--fs-sm); color: var(--fg-2); font-variant-numeric: tabular-nums; }
 
 /* Outer ring stays visible above the sticky header */
-.imp-table { background: var(--bg-1); border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--line); overflow: auto; max-height: 380px; }
+.imp-table { background: var(--bg-1); border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--line); overflow: auto; max-height: 400px; }
 .imp-table .table { table-layout: fixed; }
 .imp-table .table td { overflow: hidden; text-overflow: ellipsis; }
 .imp-table .table tr:last-child td { border-bottom: none; }
@@ -43,7 +43,7 @@
 /* Warnings / errors: short colored lines with a fixed icon column */
 .imp-msgs { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 120px; overflow: auto; }
 .imp-msgs.tall { max-height: 200px; }
-.imp-msgs > div { display: flex; align-items: center; gap: var(--sp-2); min-height: 20px; font-size: var(--fs-sm); color: var(--fg-1); }
+.imp-msgs > div { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--sp-6); font-size: var(--fs-sm); color: var(--fg-1); }
 .imp-msgs > div > svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; color: var(--warn); }
 .imp-msgs.err > div > svg { color: var(--err); }
 
