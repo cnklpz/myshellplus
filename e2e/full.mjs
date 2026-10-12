@@ -301,6 +301,167 @@ await run("import CSV", async () => {
   await page.locator(".sb-hosts").getByText("imported-1").waitFor();
 });
 
+// ---------------------------------------------------------------- batch 3
+const hostId = async (name) => (await invoke("host_list")).find((h) => h.name === name)?.id;
+const remote = async (cmd) => (await invoke("exec_run", { hostId: await hostId("e2e-box"), command: cmd })).stdout;
+
+await run("local echo overlay on slow link", async () => {
+  await backToTerm();
+  await page.evaluate(() => {
+    localStorage.setItem("localEcho", "on");
+    window.dispatchEvent(new Event("local-echo-change"));
+  });
+  await page.locator(".term-view:visible .xterm-helper-textarea").focus();
+  await page.keyboard.type("echo predicted", { delay: 5 });
+  const shown = await page.evaluate(() => {
+    const o = [...document.querySelectorAll(".local-echo")].find((e) => e.style.display !== "none");
+    return o ? o.textContent : "";
+  });
+  await page.keyboard.press("Enter");
+  await waitTerm("predicted");
+  await page.evaluate(() => {
+    localStorage.setItem("localEcho", "auto");
+    window.dispatchEvent(new Event("local-echo-change"));
+  });
+  if (!shown) throw new Error("no overlay while typing");
+  return `overlay "${shown}"`;
+});
+
+await run("files: create + edit + save", async () => {
+  await page.locator(".side-tabs button", { hasText: "文件" }).click();
+  await sleep(800);
+  const body = page.locator(".side-body");
+  await body.locator(".fp-list").click({ button: "right", position: { x: 60, y: 300 } });
+  await page.getByText("新建文件", { exact: true }).click();
+  await page.locator(".dialog").last().locator("input").first().fill("e2e.txt");
+  await page.keyboard.press("Enter");
+  await body.getByText("e2e.txt").dblclick();
+  const ed = page.locator(".dialog", { hasText: "e2e.txt" });
+  await ed.locator("textarea").fill("line-1\n中文内容\n");
+  await page.keyboard.press("Control+s");
+  await sleep(800);
+  await shot(page, "21-editor");
+  await page.keyboard.press("Escape");
+  const out = await remote("cat ~/e2e.txt; rm -f ~/e2e.txt");
+  if (!out.includes("中文内容")) throw new Error("saved content: " + out);
+});
+
+await run("upload via transfer + list refresh", async () => {
+  const fs = await import("node:fs");
+  fs.writeFileSync("D:/xm/msp-e2e/up.bin", Buffer.alloc(300000, 7));
+  const home = (await invoke("sftp_list", { hostId: await hostId("e2e-box"), path: "" })).path;
+  const id = await invoke("transfer_start", { hostId: await hostId("e2e-box"), direction: "upload", local: "D:\\xm\\msp-e2e\\up.bin", remote: home + "/up.bin" });
+  for (let i = 0; i < 30; i++) {
+    const t = (await invoke("transfer_list")).find((x) => x.id === id);
+    if (t && t.state !== "running") {
+      if (t.state !== "done") throw new Error(t.error);
+      break;
+    }
+    await sleep(200);
+  }
+  const size = (await remote("wc -c < ~/up.bin; rm -f ~/up.bin")).trim();
+  if (size !== "300000") throw new Error("size " + size);
+});
+
+await run("key manager: generate key", async () => {
+  await page.locator(".home-card, .sb-hosts .hs-host").first();
+  await page.locator(".sb-hosts").getByText("e2e-box").click({ button: "right" });
+  await page.getByText("编辑", { exact: true }).last().click();
+  const editor = page.locator(".he-main, .he-dialog, .overlay").last();
+  await editor.getByText("密钥", { exact: true }).first().click();
+  await editor.getByRole("button", { name: /管理/ }).first().click();
+  const km = page.locator(".dialog", { hasText: "密钥" }).last();
+  await km.getByRole("button", { name: /生成/ }).click();
+  await page.locator(".dialog").last().locator("input").first().fill("e2e-key");
+  await page.locator(".dialog").last().getByRole("button", { name: /生成/ }).last().click();
+  await page.getByText(/ssh-ed25519 AAAA/).first().waitFor();
+  await shot(page, "22-keygen");
+  for (let i = 0; i < 2; i++) await page.keyboard.press("Escape");
+  // leave the host on password auth: cancel the editor without saving
+  await page.getByRole("button", { name: "取消" }).last().click().catch(() => {});
+  await page.keyboard.press("Escape");
+  const keys = await invoke("key_list");
+  if (!keys.some((k) => k.name === "e2e-key" && k.publicKey.startsWith("ssh-ed25519"))) throw new Error("key not saved");
+});
+
+await run("dangerous batch needs confirm", async () => {
+  await backToTerm();
+  await page.locator(".term-toolbar .term-tool", { hasText: "批量执行" }).click();
+  const dlg = page.locator(".dialog", { hasText: "批量执行" });
+  await dlg.locator("textarea").fill("rm -rf /tmp/e2e-danger-test");
+  await dlg.getByRole("button", { name: /执行/ }).click();
+  await page.getByText("包含高风险命令").waitFor();
+  await shot(page, "23-danger");
+  await page.getByRole("button", { name: "取消" }).first().click();
+  await page.keyboard.press("Escape");
+});
+
+await run("snippet with variables", async () => {
+  await invoke("snippet_save", { snippet: { name: "打印变量", command: "echo var-{{word:abc}}", tags: [] } });
+  await page.locator(".side-tabs button", { hasText: "命令" }).click();
+  await page.locator(".side-body").getByText("打印变量").click();
+  const d = page.locator(".dialog").last();
+  await d.locator("input").first().fill("xyz");
+  await page.keyboard.press("Enter");
+  await sleep(300);
+  await page.keyboard.press("Enter");
+  await waitTerm("var-xyz");
+});
+
+await run("disconnect + reconnect", async () => {
+  await page.locator(".sb-hosts").getByText("e2e-box").click({ button: "right" });
+  await page.getByText("断开", { exact: true }).last().click();
+  await page.getByText("连接已断开").waitFor({ timeout: 10000 });
+  await shot(page, "24-disconnected");
+  await page.getByRole("button", { name: /重新连接/ }).click();
+  await sleep(2500);
+  await typeInTerm("echo back-$((2*21))\r");
+  await waitTerm("back-42");
+});
+
+await run("AI without key shows error", async () => {
+  await page.locator(".term-toolbar .term-tool", { hasText: "AI 命令" }).click();
+  await page.keyboard.type("列出当前目录");
+  await page.keyboard.press("Enter");
+  await page.getByText(/API Key|AI 服务/).first().waitFor({ timeout: 8000 });
+  await shot(page, "25-ai-nokey");
+  await page.keyboard.press("Escape");
+});
+
+await run("theme persists after reload", async () => {
+  await page.evaluate(() => localStorage.setItem("theme", "nord"));
+  await page.reload();
+  await page.getByText("首页").first().waitFor();
+  const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg-0").trim());
+  await page.evaluate(() => localStorage.setItem("theme", "graphite"));
+  if (bg !== "#2e3440") throw new Error("bg " + bg);
+});
+
+await run("sessions survive UI reload", async () => {
+  await page.reload();
+  await page.locator(".sb-item", { hasText: "终端" }).click();
+  await page.locator(".term-view:visible .xterm").waitFor();
+  await sleep(800);
+  await typeInTerm("echo alive-$((6*7))\r");
+  await waitTerm("alive-42");
+});
+
+await run("lock screen + unlock", async () => {
+  await invoke("vault_setup", { password: "e2e-password-2", remember: false });
+  await invoke("vault_lock");
+  await page.reload();
+  const pw = page.locator("input[type=password]").first();
+  await pw.waitFor();
+  await shot(page, "26-locked");
+  await pw.fill("wrong-password");
+  await page.keyboard.press("Enter");
+  await page.getByText(/错误/).first().waitFor();
+  await pw.fill("e2e-password-2");
+  await page.keyboard.press("Enter");
+  await page.locator(".sb-item", { hasText: "首页" }).waitFor();
+  await invoke("vault_disable_password", { password: "e2e-password-2" });
+});
+
 console.log("\nerrors:", errors.length ? errors.slice(0, 10) : "none");
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
