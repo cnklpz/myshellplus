@@ -59,3 +59,4 @@
 .theme-tile:not(.on) .theme-name { color: var(--fg-1); }
 .theme-dots { display: flex; gap: var(--sp-1); }
 .theme-dots > i { width: 8px; height: 8px; border-radius: 50%; }
+.set-err { color: var(--err); }

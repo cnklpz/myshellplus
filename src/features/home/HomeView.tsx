@@ -1,8 +1,21 @@
 // Home page: server overview — summary stats + grouped host cards.
-import { Copy, Download, Pencil, Plus, Search } from "lucide-react";
-import { type MouseEvent, useEffect, useMemo, useState } from "react";
-import { toast } from "../../components/ui";
-import { type AgentPolicy, api, errMsg, type Host } from "../../lib/api";
+import { listen } from "@tauri-apps/api/event";
+import {
+  Download,
+  Link,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  SquareTerminal,
+  Trash2,
+  Unplug,
+  Zap,
+} from "lucide-react";
+import { type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Confirm, toast } from "../../components/ui";
+import { api, errMsg, type Host } from "../../lib/api";
 import { useApp } from "../../store";
 import { openTerminal } from "../terminal/open";
 import "./home.css";
@@ -11,43 +24,23 @@ import { useLatencyHistory } from "./latencyHistory";
 const UNGROUPED = "未分组";
 const TUNNEL_POLL_MS = 5000;
 
-function matches(h: Host, q: string) {
+function matches(h: Host, q: string, os: string | undefined) {
   if (!q) return true;
-  const hay = [h.name, h.host, h.username, ...h.tags].join("\n").toLowerCase();
+  const hay = [h.name, h.host, h.username, h.notes, os ?? "", ...h.tags].join("\n").toLowerCase();
   return q.split(/\s+/).every((t) => hay.includes(t));
 }
 
 type ConnKind = "connected" | "connecting" | "error" | "disconnected";
-const CONN: Record<ConnKind, { dot: string; label: string }> = {
-  connected: { dot: "ok", label: "已连接" },
-  connecting: { dot: "warn", label: "连接中" },
-  error: { dot: "err", label: "错误" },
-  disconnected: { dot: "", label: "未连接" },
+const DOT: Record<ConnKind, string> = { connected: "ok", connecting: "warn", error: "err", disconnected: "" };
+const STATE_LABEL: Record<ConnKind, string> = {
+  connected: "已连接",
+  connecting: "连接中",
+  error: "错误",
+  disconnected: "未连接",
 };
-
-const POLICY: Record<AgentPolicy, string> = { deny: "禁止", readonly: "只读", ask: "询问", auto: "自动" };
 
 type Tier = "ok" | "warn" | "err";
 const tierOf = (ms: number | null): Tier => (ms === null || ms >= 200 ? "err" : ms >= 60 ? "warn" : "ok");
-/** Filled bars (of 5) for the signal meter. */
-const barsOf = (ms: number | null) =>
-  ms === null ? 0 : ms < 30 ? 5 : ms < 60 ? 4 : ms < 120 ? 3 : ms < 200 ? 2 : 1;
-
-/** Key id -> name, fetched once per mount. */
-function useKeyNames() {
-  const [names, setNames] = useState<Record<string, string>>({});
-  useEffect(() => {
-    let alive = true;
-    api
-      .keyList()
-      .then((list) => alive && setNames(Object.fromEntries(list.map((k) => [k.id, k.name]))))
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return names;
-}
 
 /** Running tunnel count, polled while the page is mounted. */
 function useRunningTunnels() {
@@ -69,6 +62,26 @@ function useRunningTunnels() {
   return count;
 }
 
+/** Remote OS name per host id: initial fetch + live "host-os" events (payload = full map). */
+function useHostOs() {
+  const [map, setMap] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let alive = true;
+    api
+      .hostOsMap()
+      .then((m) => alive && setMap(m))
+      .catch(() => {});
+    const un = listen<Record<string, string>>("host-os", (e) => {
+      if (alive) setMap(e.payload);
+    });
+    return () => {
+      alive = false;
+      un.then((f) => f()).catch(() => {});
+    };
+  }, []);
+  return map;
+}
+
 export function HomeView() {
   const hosts = useApp((s) => s.hosts);
   const conn = useApp((s) => s.conn);
@@ -76,14 +89,15 @@ export function HomeView() {
   const openEditor = useApp((s) => s.openEditor);
   const setImportOpen = useApp((s) => s.setImportOpen);
   const tunnels = useRunningTunnels();
-  const keyNames = useKeyNames();
+  const osMap = useHostOs();
   const [query, setQuery] = useState("");
+  const [deleting, setDeleting] = useState<Host | null>(null);
 
   const q = query.trim().toLowerCase();
   const groups = useMemo(() => {
     const map = new Map<string, Host[]>();
     for (const h of hosts) {
-      if (!matches(h, q)) continue;
+      if (!matches(h, q, osMap[h.id])) continue;
       const g = h.groupName.trim() || UNGROUPED;
       if (!map.has(g)) map.set(g, []);
       map.get(g)!.push(h);
@@ -94,7 +108,7 @@ export function HomeView() {
     }));
     list.sort((a, b) => (a.name === UNGROUPED ? 1 : b.name === UNGROUPED ? -1 : a.name.localeCompare(b.name, "zh-CN")));
     return list;
-  }, [hosts, q]);
+  }, [hosts, q, osMap]);
 
   const connected = hosts.filter((h) => conn[h.id]?.state === "connected").length;
 
@@ -118,7 +132,7 @@ export function HomeView() {
         <button className="btn" onClick={() => setImportOpen(true)}>
           <Download /> 导入
         </button>
-        <button className="btn primary" onClick={() => openEditor("")}>
+        <button className="btn" onClick={() => openEditor("")}>
           <Plus /> 新建
         </button>
       </div>
@@ -154,13 +168,33 @@ export function HomeView() {
               </div>
               <div className="home-grid">
                 {g.items.map((h) => (
-                  <HostCard key={h.id} host={h} keyNames={keyNames} />
+                  <HostCard key={h.id} host={h} os={osMap[h.id]} onDelete={() => setDeleting(h)} />
                 ))}
               </div>
             </section>
           ))
         )}
       </div>
+
+      {deleting && (
+        <Confirm
+          title="删除服务器"
+          message={`删除「${deleting.name}」及其保存的密码，并断开连接。`}
+          confirmText="删除"
+          danger
+          onCancel={() => setDeleting(null)}
+          onConfirm={async () => {
+            const h = deleting;
+            setDeleting(null);
+            try {
+              await api.hostDelete(h.id);
+              await useApp.getState().refreshHosts();
+            } catch (e) {
+              toast(errMsg(e), "error");
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -174,29 +208,11 @@ function Stat(props: { value: number | null; label: string }) {
   );
 }
 
-function Signal({ bars }: { bars: number }) {
-  return (
-    <svg className="home-signal" viewBox="0 0 19 12" aria-hidden>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <rect
-          key={i}
-          x={i * 4}
-          y={12 - (4 + i * 2)}
-          width={3}
-          height={4 + i * 2}
-          rx={0.5}
-          className={i < bars ? "on" : undefined}
-        />
-      ))}
-    </svg>
-  );
-}
-
-const SPARK_W = 100;
-const SPARK_H = 24;
+const SPARK_W = 48;
+const SPARK_H = 16;
 
 function Sparkline({ samples }: { samples: readonly (number | null)[] }) {
-  if (samples.length < 2) return <div className="home-spark" />;
+  if (samples.length < 2) return null;
   const vals = samples.filter((v): v is number => v !== null);
   const top = Math.max(60, ...vals) * 1.15;
   const step = SPARK_W / (samples.length - 1);
@@ -213,84 +229,74 @@ function Sparkline({ samples }: { samples: readonly (number | null)[] }) {
   );
 }
 
-function LatencyBlock({ hostId, connected }: { hostId: string; connected: boolean }) {
+/** Top-right latency readout: sparkline + value when connected, "—" otherwise. */
+function Latency({ hostId, connected }: { hostId: string; connected: boolean }) {
   const latency = useApp((s) => s.latency[hostId]);
   const samples = useLatencyHistory(hostId);
-  if (!connected || latency === undefined) {
-    return (
-      <div className="home-latency idle">
-        <span className="home-latency-value">—</span>
-      </div>
-    );
-  }
-  const tier = tierOf(latency);
+  if (!connected || latency === undefined) return <span className="home-latency idle">—</span>;
   return (
-    <div className={"home-latency " + tier}>
-      <span className="home-latency-value">
-        {latency === null ? (
-          "超时"
-        ) : (
-          <>
-            {Math.round(latency)}
-            <span className="home-latency-unit">ms</span>
-          </>
-        )}
-      </span>
-      <Signal bars={barsOf(latency)} />
+    <span className={"home-latency " + tierOf(latency)}>
       <Sparkline samples={samples} />
-    </div>
+      <span className="home-latency-value">{latency === null ? "超时" : `${Math.round(latency)} ms`}</span>
+    </span>
   );
 }
 
-function HostCard({ host: h, keyNames }: { host: Host; keyNames: Record<string, string> }) {
+function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefined; onDelete: () => void }) {
   const conn = useApp((s) => s.conn[h.id]);
-  const jumpName = useApp((s) => (h.jumpHostId ? s.hosts.find((x) => x.id === h.jumpHostId)?.name : undefined));
-  const sessions = useApp((s) => s.tabs.filter((t) => t.hostId === h.id && t.alive).length);
-  const openEditor = useApp((s) => s.openEditor);
+  const [menu, setMenu] = useState<DOMRect | null>(null);
   const kind: ConnKind = conn?.state ?? "disconnected";
-  const st = CONN[kind];
-  const addr = `${h.username}@${h.host}:${h.port}`;
-
-  const auth = h.authType === "key" ? (h.keyId && keyNames[h.keyId]) || "密钥" : "密码";
-  const meta = [
-    `认证 ${auth}`,
-    jumpName && `跳板 ${jumpName}`,
-    sessions > 0 && `${sessions} 个终端`,
-    `Agent ${POLICY[h.agentPolicy] ?? h.agentPolicy}`,
-  ].filter(Boolean) as string[];
-
-  const copyAddr = async () => {
-    try {
-      await navigator.clipboard.writeText(h.host);
-      toast("已复制", "success");
-    } catch (e) {
-      toast(errMsg(e), "error");
-    }
-  };
+  const addr = `${h.username}@${h.host}` + (h.port !== 22 ? `:${h.port}` : "");
+  const note = h.notes.trim().split("\n")[0];
   const stop = (e: MouseEvent) => e.stopPropagation();
+  const stateTitle = kind === "error" && conn?.error ? `${STATE_LABEL[kind]}：${conn.error}` : STATE_LABEL[kind];
 
   return (
     <div className="home-card" onDoubleClick={() => openTerminal(h.id)}>
-      {h.color && <span className="home-marker" style={{ background: h.color }} />}
       <div className="home-card-top">
-        <span className={"dot " + st.dot} />
+        <span
+          className="home-icon"
+          style={h.color ? { color: h.color, background: `color-mix(in srgb, ${h.color} 14%, var(--bg-2))` } : undefined}
+        >
+          <SquareTerminal />
+        </span>
+        <div className="spacer" />
+        <Latency hostId={h.id} connected={kind === "connected"} />
+        <button
+          className={"icon-btn home-more" + (menu ? " open" : "")}
+          title="更多"
+          onMouseDown={(e) => menu && e.stopPropagation()}
+          onClick={(e) => setMenu(menu ? null : e.currentTarget.getBoundingClientRect())}
+          onDoubleClick={stop}
+        >
+          <MoreHorizontal />
+        </button>
+      </div>
+
+      <div className="home-name-row">
         <span className="home-name ellipsis" title={h.name}>
           {h.name}
         </span>
-        <span className={"home-state " + kind} title={kind === "error" ? (conn?.error ?? undefined) : undefined}>
-          {st.label}
-        </span>
+        <span className="home-proto">SSH</span>
+        <span className={"dot " + DOT[kind]} title={stateTitle} />
       </div>
       <div className="home-addr mono ellipsis" title={addr}>
         {addr}
       </div>
 
-      <LatencyBlock hostId={h.id} connected={kind === "connected"} />
+      {os && (
+        <div className="home-os-row">
+          <span className="home-os ellipsis" title={os}>
+            {os}
+          </span>
+        </div>
+      )}
 
-      <div className="home-meta ellipsis" title={meta.join(" · ")}>
-        {meta.join(" · ")}
+      <div className={"home-notes ellipsis" + (note ? "" : " empty")} title={note ? h.notes : undefined}>
+        {note || "暂无备注"}
       </div>
-      {h.tags.length > 0 && (
+
+      {h.tags.length > 0 ? (
         <div className="home-tags">
           {h.tags.map((t) => (
             <span key={t} className="home-tag" title={t}>
@@ -298,24 +304,116 @@ function HostCard({ host: h, keyNames }: { host: Host; keyNames: Record<string, 
             </span>
           ))}
         </div>
-      )}
-      {h.notes.trim() && (
-        <div className="home-notes ellipsis" title={h.notes}>
-          {h.notes.trim().split("\n")[0]}
-        </div>
+      ) : (
+        <div className="home-tags-empty">无标签</div>
       )}
 
-      <div className="home-card-actions">
-        <button className="btn home-connect" onClick={() => openTerminal(h.id)} onDoubleClick={stop}>
-          连接
-        </button>
-        <button className="icon-btn" title="复制地址" onClick={copyAddr} onDoubleClick={stop}>
-          <Copy />
-        </button>
-        <button className="icon-btn" title="编辑" onClick={() => openEditor(h.id)} onDoubleClick={stop}>
-          <Pencil />
-        </button>
-      </div>
+      <button className="btn primary home-connect" onClick={() => openTerminal(h.id)} onDoubleClick={stop}>
+        <Zap /> 快速连接
+      </button>
+
+      {menu && (
+        <CardMenu
+          anchor={menu}
+          host={h}
+          connected={kind === "connected" || kind === "connecting"}
+          onClose={() => setMenu(null)}
+          onDelete={onDelete}
+        />
+      )}
     </div>
+  );
+}
+
+function CardMenu(props: {
+  anchor: DOMRect;
+  host: Host;
+  connected: boolean;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
+  const { anchor, host: h, onClose } = props;
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x: anchor.right, y: anchor.bottom + 4 });
+
+  useEffect(() => {
+    const onDown = (e: globalThis.MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("blur", onClose);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("blur", onClose);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+
+  // Right-align to the button; flip above it when there is no room below.
+  useLayoutEffect(() => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const below = anchor.bottom + 4;
+    setPos({
+      x: Math.max(4, anchor.right - r.width),
+      y: below + r.height > window.innerHeight - 4 ? Math.max(4, anchor.top - 4 - r.height) : below,
+    });
+  }, [anchor]);
+
+  const run = (fn: () => unknown) => async () => {
+    onClose();
+    try {
+      await fn();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+
+  return createPortal(
+    <div
+      className="home-menu"
+      ref={ref}
+      style={{ left: pos.x, top: pos.y }}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <button onClick={run(() => useApp.getState().openEditor(h.id))}>
+        <Pencil /> 编辑
+      </button>
+      <button
+        onClick={run(async () => {
+          const addr = `${h.username}@${h.host}`;
+          await navigator.clipboard.writeText(addr);
+          toast("已复制 " + addr, "success");
+        })}
+      >
+        <Link /> 复制地址
+      </button>
+      <button onClick={run(() => openTerminal(h.id))}>
+        <SquareTerminal /> 新建终端
+      </button>
+      {props.connected && (
+        <button onClick={run(() => api.connDisconnect(h.id))}>
+          <Unplug /> 断开
+        </button>
+      )}
+      <hr />
+      <button
+        className="danger"
+        onClick={() => {
+          onClose();
+          props.onDelete();
+        }}
+      >
+        <Trash2 /> 删除
+      </button>
+    </div>,
+    document.body,
   );
 }

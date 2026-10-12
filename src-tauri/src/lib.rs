@@ -53,8 +53,14 @@ fn after_unlock(ctx: &CtxRef) {
 #[tauri::command]
 async fn vault_setup(ctx: S<'_>, password: String, remember: bool) -> CmdResult<()> {
     let c = ctx.inner().clone();
-    tokio::task::spawn_blocking(move || c.vault.setup(&password, remember)).await??;
-    after_unlock(ctx.inner());
+    tokio::task::spawn_blocking(move || c.vault.enable_password(&password, remember)).await??;
+    Ok(())
+}
+
+#[tauri::command]
+async fn vault_disable_password(ctx: S<'_>, password: String) -> CmdResult<()> {
+    let c = ctx.inner().clone();
+    tokio::task::spawn_blocking(move || c.vault.disable_password(&password)).await??;
     Ok(())
 }
 
@@ -609,7 +615,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            vault_status, vault_setup, vault_unlock, vault_lock, vault_remember, vault_change_password,
+            vault_status, vault_setup, vault_disable_password, vault_unlock, vault_lock, vault_remember, vault_change_password,
             host_list, host_save, host_delete, key_list, key_import, key_generate, key_delete,
             conn_connect, conn_disconnect, conn_list, conn_latency, host_os_map,
             term_open, term_attach, term_write, term_resize, term_close, term_list, history_record, history_list, history_delete, exec_run,

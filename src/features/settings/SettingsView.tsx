@@ -315,6 +315,7 @@ function AiSection() {
 function SecuritySection() {
   const vault = useApp((s) => s.vault);
   const [changing, setChanging] = useState(false);
+  const [pwDialog, setPwDialog] = useState<"enable" | "disable" | null>(null);
 
   const remember = async (on: boolean) => {
     try {
@@ -333,30 +334,119 @@ function SecuritySection() {
     }
   };
 
+  const pwOn = !!vault?.passwordEnabled;
+
   return (
     <>
       <Title text="安全" />
       <div className="set-group">
-        <Field label="保险库">
-          <span className={"dot " + (vault?.unlocked ? "ok" : "warn")} />
-          <span>{vault?.unlocked ? "已解锁" : "已锁定"}</span>
-          <span className="spacer" />
-          <button className="btn" onClick={lock}>
-            <Lock />
-            锁定
-          </button>
+        <Field label="凭据加密">
+          <span className="dot ok" />
+          <span>已加密</span>
+          <span className="faint">{pwOn ? "主密码" : "Windows 账户"}</span>
         </Field>
-        <Field label="自动解锁">
-          <Toggle on={!!vault?.remembered} onChange={remember} />
+        <Field label="主密码保护">
+          <Toggle on={pwOn} onChange={(on) => setPwDialog(on ? "enable" : "disable")} />
         </Field>
-        <Field label="主密码">
-          <button className="btn" onClick={() => setChanging(true)}>
-            修改
-          </button>
-        </Field>
+        {pwOn && (
+          <>
+            <Field label="自动解锁">
+              <Toggle on={!!vault?.remembered} onChange={remember} />
+            </Field>
+            <Field label="主密码">
+              <button className="btn" onClick={() => setChanging(true)}>
+                修改
+              </button>
+              <span className="spacer" />
+              <button className="btn" onClick={lock}>
+                <Lock />
+                立即锁定
+              </button>
+            </Field>
+          </>
+        )}
       </div>
       {changing && <ChangePasswordDialog onClose={() => setChanging(false)} />}
+      {pwDialog && <PasswordModeDialog mode={pwDialog} onClose={() => setPwDialog(null)} />}
     </>
+  );
+}
+
+/** Turn master password protection on (set a password) or off (verify the current one). */
+function PasswordModeDialog(props: { mode: "enable" | "disable"; onClose: () => void }) {
+  const enable = props.mode === "enable";
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [remember, setRemember] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const tooShort = enable && pw !== "" && pw.length < 8;
+  const mismatch = enable && confirm !== "" && pw !== confirm;
+  const ok = !busy && pw !== "" && (!enable || (pw.length >= 8 && pw === confirm));
+
+  const submit = async () => {
+    if (!ok) return;
+    setBusy(true);
+    try {
+      if (enable) await api.vaultSetup(pw, remember);
+      else await api.vaultDisablePassword(pw);
+      await useApp.getState().refreshVault();
+      toast(enable ? "已开启主密码保护" : "已关闭主密码保护", "success");
+      props.onClose();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      title={enable ? "开启主密码保护" : "关闭主密码保护"}
+      width={440}
+      onClose={props.onClose}
+      footer={
+        <>
+          <button className="btn" onClick={props.onClose}>
+            取消
+          </button>
+          <button className={"btn " + (enable ? "primary" : "danger solid")} disabled={!ok} onClick={submit}>
+            {enable ? "开启" : "关闭"}
+          </button>
+        </>
+      }
+    >
+      <div className="stack gap-3">
+        <Field label={enable ? "主密码" : "当前主密码"}>
+          <input
+            className="input"
+            type="password"
+            autoFocus
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+          />
+        </Field>
+        {enable && (
+          <>
+            <Field label="确认">
+              <input
+                className="input"
+                type="password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+              />
+            </Field>
+            <Field label="自动解锁">
+              <Toggle on={remember} onChange={setRemember} />
+            </Field>
+            <div className={"field-hint " + (tooShort || mismatch ? "set-err" : "")} style={{ gridColumn: "auto" }}>
+              {tooShort ? "至少 8 位" : mismatch ? "两次输入不一致" : "开启后每次启动需要输入；主密码无法找回"}
+            </div>
+          </>
+        )}
+      </div>
+    </Dialog>
   );
 }
 

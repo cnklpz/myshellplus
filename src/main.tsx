@@ -16,9 +16,23 @@ async function start() {
     await import("./dev/mockTauri");
   }
   const { default: App } = await import("./App");
+  const { ErrorBoundary, reloadUi } = await import("./components/ErrorBoundary");
+  // Ctrl+Shift+R / F5: reload the UI (sessions survive in the backend).
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "r") || e.key === "F5") {
+        e.preventDefault();
+        reloadUi();
+      }
+    },
+    true,
+  );
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </React.StrictMode>,
   );
 }

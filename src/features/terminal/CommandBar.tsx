@@ -99,10 +99,14 @@ function savePref(key: string, v: string | number) {
   }
 }
 
-export function BatchDialog(props: { tab: TermTab; onClose: () => void }) {
+export function BatchDialog(props: { tab: TermTab; initialText?: string; onClose: () => void }) {
   const { tab } = props;
   const hostName = useApp((s) => s.hosts.find((h) => h.id === tab.hostId)?.name ?? tab.title);
-  const [text, setText] = useState(() => drafts.get(tab.id) ?? "");
+  const [text, setText] = useState(() => {
+    if (props.initialText === undefined) return drafts.get(tab.id) ?? "";
+    drafts.set(tab.id, props.initialText);
+    return props.initialText;
+  });
   const [mode, setMode] = useState<Mode>(() => loadPref<Mode>("cmdbar.mode", (v) => v === "line" || v === "paste", "line"));
   const [interval, setIntervalMs] = useState(() =>
     loadPref<number>("cmdbar.interval", (v) => INTERVALS.includes(Number(v)), 0),

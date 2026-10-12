@@ -10,6 +10,7 @@ use tauri::{AppHandle, Manager};
 use crate::util::now_ms;
 
 static LAST_BEAT: AtomicI64 = AtomicI64::new(0);
+// > 60s: background windows may only run timers once a minute.
 const STALE_MS: i64 = 90_000;
 
 pub fn beat() {

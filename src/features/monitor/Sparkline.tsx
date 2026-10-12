@@ -11,7 +11,7 @@ export interface SparkSeries {
 const W = 100;
 
 /** Midpoint-quadratic smoothing: passes near every point, never overshoots much. */
-function pathFor(pts: [number, number][]): string {
+export function pathFor(pts: [number, number][]): string {
   if (pts.length === 0) return "";
   if (pts.length === 1) return `M${pts[0][0]},${pts[0][1]}`;
   let d = `M${pts[0][0].toFixed(2)},${pts[0][1].toFixed(2)}`;

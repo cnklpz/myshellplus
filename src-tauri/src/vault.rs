@@ -3,7 +3,11 @@
 //! master password --Argon2id--> KEK --XChaCha20-Poly1305--> wraps a random 32-byte data key.
 //! Every secret (password, private key, API key) is encrypted with the data key. Only ciphertext
 //! touches disk, so cloud sync can upload the `secrets` table as-is (end-to-end encrypted).
-//! "Remember on this device" stores the data key protected by Windows DPAPI (current user only).
+//! Two modes:
+//! - device (default): no master password; the data key is protected by Windows DPAPI, so it only opens
+//!   for the current Windows user on this machine. Secrets are still only ciphertext on disk.
+//! - password (opt-in in 设置 → 安全): the data key is wrapped by a key derived from the master password;
+//!   "remember on this device" additionally keeps a DPAPI copy for auto-unlock.
 
 use std::sync::Arc;
 
@@ -76,43 +80,82 @@ pub struct VaultStatus {
     pub initialized: bool,
     pub unlocked: bool,
     pub remembered: bool,
+    /// Master password protection is on (otherwise device protection only).
+    pub password_enabled: bool,
 }
 
 impl Vault {
     pub fn new(db: Arc<Db>) -> Self {
         let v = Self { db, key: RwLock::new(None) };
-        // Auto-unlock if this device remembered the key.
+        // Device mode, or a password vault remembered on this device: open without asking.
         let _ = v.try_dpapi_unlock();
+        if !v.is_unlocked() && !v.password_enabled() {
+            if let Err(e) = v.init_device() {
+                log::error!("保险库初始化失败: {e:#}");
+            }
+        }
         v
     }
 
+    fn password_enabled(&self) -> bool {
+        self.db.meta_get(META_WRAPPED).ok().flatten().is_some()
+    }
+
+    /// First run: create the data key and protect it with the Windows account (no password).
+    fn init_device(&self) -> Result<()> {
+        if self.db.meta_get(META_DPAPI)?.is_some() {
+            bail!("设备密钥无法解开（Windows 账户已变化？）");
+        }
+        let mut data_key = Zeroizing::new([0u8; 32]);
+        rand::thread_rng().fill_bytes(data_key.as_mut());
+        let blob = dpapi::protect(data_key.as_ref())?;
+        self.db.meta_set(META_DPAPI, &blob)?;
+        *self.key.write() = Some(data_key);
+        Ok(())
+    }
+
     pub fn status(&self) -> Result<VaultStatus> {
+        let password_enabled = self.password_enabled();
         Ok(VaultStatus {
-            initialized: self.db.meta_get(META_WRAPPED)?.is_some(),
+            initialized: password_enabled || self.db.meta_get(META_DPAPI)?.is_some(),
             unlocked: self.key.read().is_some(),
-            remembered: self.db.meta_get(META_DPAPI)?.is_some(),
+            remembered: password_enabled && self.db.meta_get(META_DPAPI)?.is_some(),
+            password_enabled,
         })
     }
 
-    pub fn setup(&self, password: &str, remember: bool) -> Result<()> {
-        if self.db.meta_get(META_WRAPPED)?.is_some() {
-            bail!("保险库已初始化");
+    /// Turn on master password protection for the existing data key.
+    pub fn enable_password(&self, password: &str, remember: bool) -> Result<()> {
+        if self.password_enabled() {
+            bail!("已开启主密码");
         }
         if password.chars().count() < 8 {
             bail!("主密码至少 8 位");
         }
+        let key = self.data_key()?;
         let mut salt = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut salt);
-        let mut data_key = Zeroizing::new([0u8; 32]);
-        rand::thread_rng().fill_bytes(data_key.as_mut());
         let kek = derive_kek(password, &salt)?;
-        let (n, ct) = seal(&kek, data_key.as_ref())?;
+        let (n, ct) = seal(&kek, key.as_ref())?;
         self.db.meta_set(META_SALT, &salt)?;
         self.db.meta_set(META_WRAPPED, &pack(&n, &ct))?;
-        *self.key.write() = Some(data_key);
-        if remember {
-            self.remember(true)?;
+        if !remember {
+            self.db.meta_del(META_DPAPI)?;
         }
+        Ok(())
+    }
+
+    /// Back to device protection (requires the current master password).
+    pub fn disable_password(&self, password: &str) -> Result<()> {
+        if !self.password_enabled() {
+            return Ok(());
+        }
+        self.unlock(password, false)?;
+        let key = self.data_key()?;
+        let blob = dpapi::protect(key.as_ref())?;
+        self.db.meta_set(META_DPAPI, &blob)?;
+        self.db.meta_del(META_WRAPPED)?;
+        self.db.meta_del(META_SALT)?;
         Ok(())
     }
 
@@ -146,11 +189,17 @@ impl Vault {
         Ok(())
     }
 
+    /// Only meaningful with a master password; device mode has nothing to unlock with.
     pub fn lock(&self) {
-        *self.key.write() = None;
+        if self.password_enabled() {
+            *self.key.write() = None;
+        }
     }
 
     pub fn remember(&self, on: bool) -> Result<()> {
+        if !self.password_enabled() {
+            bail!("未开启主密码");
+        }
         if !on {
             return self.db.meta_del(META_DPAPI);
         }

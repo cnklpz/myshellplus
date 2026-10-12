@@ -1,7 +1,10 @@
 // Add/edit host dialog (driven by store.editingHost: "" = new, id = edit).
-import { Ban, Eye, EyeOff, KeyRound } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Dialog, Field, toast } from "../../components/ui";
+// Two panes: live preview + section nav on the left, scrolling form on the right.
+import {
+  Ban, Bot, CircleCheck, CircleX, Eye, EyeOff, KeyRound, LoaderCircle, Lock, Network, Palette, Server, X,
+} from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { toast, useEscClose } from "../../components/ui";
 import { api, errMsg, type AgentPolicy, type Host, type KeyEntry } from "../../lib/api";
 import { useApp } from "../../store";
 import { KeyManager } from "./KeyManager";
@@ -17,6 +20,15 @@ const POLICIES: { id: AgentPolicy; label: string; desc: string }[] = [
   { id: "auto", label: "自动", desc: "仅危险命令需确认" },
 ];
 
+type SecId = "basic" | "auth" | "net" | "look" | "agent";
+const SECTIONS: { id: SecId; label: string; icon: ReactNode }[] = [
+  { id: "basic", label: "基本信息", icon: <Server /> },
+  { id: "auth", label: "认证", icon: <KeyRound /> },
+  { id: "net", label: "网络", icon: <Network /> },
+  { id: "look", label: "外观与备注", icon: <Palette /> },
+  { id: "agent", label: "Agent 权限", icon: <Bot /> },
+];
+
 function blankHost(): Host {
   return {
     id: "", name: "", groupName: "", host: "", port: 22, username: "root", authType: "password",
@@ -25,7 +37,27 @@ function blankHost(): Host {
   };
 }
 
-type Errors = Partial<Record<"host" | "port" | "username" | "key", string>>;
+type ErrKey = "host" | "port" | "username" | "key";
+type Errors = Partial<Record<ErrKey, string>>;
+const ERR_SECTION: Record<ErrKey, SecId> = { host: "basic", port: "basic", username: "auth", key: "auth" };
+
+type TestState = { state: "idle" | "run" | "ok" | "err"; msg?: string };
+
+const splitTags = (s: string) => s.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
+const uniq = (a: string[]) => [...new Set(a)];
+
+function Label(props: { text: string; action?: ReactNode }) {
+  return (
+    <div className="he-label">
+      <span>{props.text}</span>
+      {props.action}
+    </div>
+  );
+}
+
+function Err(props: { text?: string }) {
+  return props.text ? <div className="he-err">{props.text}</div> : null;
+}
 
 export function HostEditor() {
   const editingId = useApp((s) => s.editingHost);
@@ -35,7 +67,8 @@ export function HostEditor() {
   const isNew = !existing;
 
   const [h, setH] = useState<Host>(() => (existing ? { ...existing } : blankHost()));
-  const [tags, setTags] = useState(() => (existing?.tags ?? []).join(", "));
+  const [tags, setTags] = useState<string[]>(() => existing?.tags ?? []);
+  const [tagDraft, setTagDraft] = useState("");
   const [port, setPort] = useState(() => String(existing?.port ?? 22));
   /** undefined = untouched (keep), "" = clear, other = new password */
   const [password, setPassword] = useState<string | undefined>(undefined);
@@ -44,6 +77,12 @@ export function HostEditor() {
   const [keyMgr, setKeyMgr] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState<"" | "save" | "test">("");
+  const [test, setTest] = useState<TestState>({ state: "idle" });
+  const [active, setActive] = useState<SecId>("basic");
+
+  const mainRef = useRef<HTMLFormElement>(null);
+  const secRefs = useRef<Partial<Record<SecId, HTMLElement | null>>>({});
+  const navLock = useRef(0);
 
   useEffect(() => {
     api.keyList().then(setKeys).catch((e) => toast(errMsg(e), "error"));
@@ -52,9 +91,67 @@ export function HostEditor() {
   const groups = useMemo(() => [...new Set(hosts.map((x) => x.groupName.trim()).filter(Boolean))].sort(), [hosts]);
   const jumpCandidates = hosts.filter((x) => x.id !== h.id);
   const set = <K extends keyof Host>(k: K, v: Host[K]) => setH((p) => ({ ...p, [k]: v }));
+  const clearErr = (k: ErrKey) => setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e));
   const close = () => openEditor(null);
   const hasSavedPw = !!existing?.passwordSecret;
-  const policy = POLICIES.find((p) => p.id === h.agentPolicy) ?? POLICIES[2];
+
+  useEscClose(close);
+
+  // A finished test result goes stale as soon as connection-relevant fields change.
+  useEffect(() => {
+    setTest((t) => (t.state === "run" || t.state === "idle" ? t : { state: "idle" }));
+  }, [h.host, port, h.username, h.authType, h.keyId, h.jumpHostId, password]);
+
+  // Highlight the nav item of the section at the top of the scroll pane.
+  useEffect(() => {
+    const root = mainRef.current;
+    if (!root) return;
+    const visible = new Set<string>();
+    const pick = () => {
+      if (Date.now() < navLock.current) return;
+      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) {
+        setActive(SECTIONS[SECTIONS.length - 1].id);
+        return;
+      }
+      const first = SECTIONS.find((s) => visible.has(s.id));
+      if (first) setActive(first.id);
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const id = (e.target as HTMLElement).dataset.sec!;
+          if (e.isIntersecting) visible.add(id);
+          else visible.delete(id);
+        }
+        pick();
+      },
+      { root, rootMargin: "0px 0px -60% 0px", threshold: 0 },
+    );
+    for (const s of SECTIONS) {
+      const el = secRefs.current[s.id];
+      if (el) io.observe(el);
+    }
+    root.addEventListener("scroll", pick, { passive: true });
+    return () => {
+      io.disconnect();
+      root.removeEventListener("scroll", pick);
+    };
+  }, []);
+
+  const goto = (id: SecId) => {
+    const root = mainRef.current;
+    const el = secRefs.current[id];
+    if (!root || !el) return;
+    navLock.current = Date.now() + 700;
+    setActive(id);
+    const pad = parseFloat(getComputedStyle(root).paddingTop) || 0;
+    root.scrollTo({ top: el.offsetTop - pad, behavior: "smooth" });
+  };
+
+  const addTags = (raw: string) => {
+    const add = splitTags(raw);
+    if (add.length) setTags((t) => uniq([...t, ...add]));
+  };
 
   const validate = (): Host | null => {
     const e: Errors = {};
@@ -65,7 +162,14 @@ export function HostEditor() {
     if (!h.username.trim()) e.username = "请填写用户名";
     if (h.authType === "key" && !h.keyId) e.key = "请选择密钥";
     setErrors(e);
-    if (Object.keys(e).length) return null;
+    const bad = Object.keys(e) as ErrKey[];
+    if (bad.length) {
+      goto(ERR_SECTION[bad[0]]);
+      return null;
+    }
+    const allTags = uniq([...tags, ...splitTags(tagDraft)]);
+    setTags(allTags);
+    setTagDraft("");
     return {
       ...h,
       name: h.name.trim() || h.host.trim(),
@@ -73,7 +177,7 @@ export function HostEditor() {
       host: h.host.trim(),
       username: h.username.trim(),
       port: p,
-      tags: tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean),
+      tags: allTags,
       keyId: h.keyId ?? null,
     };
   };
@@ -91,6 +195,7 @@ export function HostEditor() {
   };
 
   const onSave = async () => {
+    if (busy) return;
     setBusy("save");
     try {
       if (await save()) close();
@@ -102,172 +207,386 @@ export function HostEditor() {
   };
 
   const onTest = async () => {
+    if (busy) return;
     setBusy("test");
+    setTest({ state: "run" });
     try {
       const saved = await save();
-      if (!saved) return;
+      if (!saved) {
+        setTest({ state: "idle" });
+        return;
+      }
       await api.connConnect(saved.id);
-      toast(`已连接到 ${saved.name}`, "success");
+      setTest({ state: "ok" });
     } catch (e) {
-      toast("连接失败：" + errMsg(e), "error");
+      setTest({ state: "err", msg: errMsg(e) });
     } finally {
       setBusy("");
     }
   };
 
+  // Ctrl+S / Ctrl+Enter saves — only while no nested dialog (key manager) is on top.
+  const saveRef = useRef(onSave);
+  saveRef.current = onSave;
+  useEffect(() => {
+    if (keyMgr) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key === "s" || e.key === "S" || e.key === "Enter") {
+        e.preventDefault();
+        saveRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [keyMgr]);
+
   const pwPlaceholder = hasSavedPw && password === undefined ? "已保存" : password === "" && hasSavedPw ? "将清除" : "";
+  const secErr = (id: SecId) => (Object.keys(errors) as ErrKey[]).some((k) => errors[k] && ERR_SECTION[k] === id);
+  const secRef = (id: SecId) => (el: HTMLElement | null) => {
+    secRefs.current[id] = el;
+  };
+
+  // Preview
+  const pvName = h.name.trim() || h.host.trim();
+  const pvAddr = `${h.username.trim() || "root"}@${h.host.trim() || "host"}${port && port !== "22" ? `:${port}` : ""}`;
+  const tint = h.color ? { background: `color-mix(in srgb, ${h.color} 16%, transparent)`, color: h.color } : undefined;
 
   return (
     <>
-      <Dialog
-        title={isNew ? "新建服务器" : `编辑 ${existing?.name}`}
-        width={560}
-        onClose={keyMgr ? () => {} : close}
-        footer={
-          <>
-            <button className="btn" disabled={!!busy} onClick={onTest}>
-              {busy === "test" ? "连接中…" : "测试连接"}
+      <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+        <div className="he-dialog" role="dialog" aria-label={isNew ? "新建服务器" : "编辑服务器"}>
+          <header className="he-head">
+            <span className="grow ellipsis">{isNew ? "新建服务器" : `编辑 · ${existing?.name}`}</span>
+            <button className="icon-btn" onClick={close} title="关闭">
+              <X />
             </button>
-            <span className="spacer" />
+          </header>
+
+          <div className="he-body">
+            <aside className="he-side">
+              <div className="he-preview">
+                {h.color && <span className="he-preview-marker" style={{ background: h.color }} />}
+                <div className="he-tile" style={tint}>
+                  <Server />
+                </div>
+                <div className="he-preview-text">
+                  <div className={"he-preview-name ellipsis" + (pvName ? "" : " empty")}>{pvName || "新服务器"}</div>
+                  <div className="he-preview-addr mono ellipsis">{pvAddr}</div>
+                  <div className="he-preview-group ellipsis">{h.groupName.trim() || "未分组"}</div>
+                </div>
+              </div>
+
+              <nav className="he-nav">
+                {SECTIONS.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={"he-nav-item" + (active === s.id ? " on" : "")}
+                    onClick={() => goto(s.id)}
+                  >
+                    {s.icon}
+                    <span className="grow ellipsis">{s.label}</span>
+                    {secErr(s.id) && <span className="dot err" />}
+                  </button>
+                ))}
+              </nav>
+            </aside>
+
+            <form
+              className="he-main"
+              ref={mainRef}
+              onSubmit={(e) => {
+                e.preventDefault();
+                onSave();
+              }}
+            >
+              <section className="he-sec" data-sec="basic" ref={secRef("basic")}>
+                <h3 className="he-sec-title">基本信息</h3>
+                <div className="he-grid">
+                  <div className="he-field">
+                    <Label text="名称" />
+                    <input className="input" autoFocus value={h.name} onChange={(e) => set("name", e.target.value)} placeholder="web-01" />
+                  </div>
+                  <div className="he-field">
+                    <Label text="分组" />
+                    <input className="input" list="he-groups" value={h.groupName} onChange={(e) => set("groupName", e.target.value)} placeholder="生产" />
+                    <datalist id="he-groups">
+                      {groups.map((g) => (
+                        <option key={g} value={g} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+                <div className="he-grid addr">
+                  <div className="he-field">
+                    <Label text="地址" />
+                    <input
+                      className={"input mono" + (errors.host ? " invalid" : "")}
+                      value={h.host}
+                      onChange={(e) => {
+                        set("host", e.target.value);
+                        clearErr("host");
+                      }}
+                      placeholder="192.168.1.10"
+                      spellCheck={false}
+                    />
+                    <Err text={errors.host} />
+                  </div>
+                  <div className="he-field">
+                    <Label text="端口" />
+                    <input
+                      className={"input num mono" + (errors.port ? " invalid" : "")}
+                      value={port}
+                      inputMode="numeric"
+                      onChange={(e) => {
+                        setPort(e.target.value.replace(/\D/g, ""));
+                        clearErr("port");
+                      }}
+                    />
+                    <Err text={errors.port} />
+                  </div>
+                </div>
+              </section>
+
+              <section className="he-sec" data-sec="auth" ref={secRef("auth")}>
+                <h3 className="he-sec-title">认证</h3>
+                <div className="he-field">
+                  <Label text="用户名" />
+                  <input
+                    className={"input" + (errors.username ? " invalid" : "")}
+                    value={h.username}
+                    onChange={(e) => {
+                      set("username", e.target.value);
+                      clearErr("username");
+                    }}
+                    placeholder="root"
+                    spellCheck={false}
+                  />
+                  <Err text={errors.username} />
+                </div>
+                <div className="he-field">
+                  <Label text="认证方式" />
+                  <div className="he-grid">
+                    <button
+                      type="button"
+                      className={"he-choice" + (h.authType === "password" ? " on" : "")}
+                      aria-pressed={h.authType === "password"}
+                      onClick={() => set("authType", "password")}
+                    >
+                      <span className="he-choice-icon"><Lock /></span>
+                      密码
+                    </button>
+                    <button
+                      type="button"
+                      className={"he-choice" + (h.authType === "key" ? " on" : "")}
+                      aria-pressed={h.authType === "key"}
+                      onClick={() => set("authType", "key")}
+                    >
+                      <span className="he-choice-icon"><KeyRound /></span>
+                      密钥
+                    </button>
+                  </div>
+                </div>
+                {h.authType === "password" ? (
+                  <div className="he-field">
+                    <Label
+                      text="密码"
+                      action={
+                        hasSavedPw &&
+                        (password === undefined ? (
+                          <button type="button" className="link-btn" onClick={() => setPassword("")}>清除</button>
+                        ) : (
+                          <button type="button" className="link-btn" onClick={() => setPassword(undefined)}>撤销</button>
+                        ))
+                      }
+                    />
+                    <div className="pw-wrap">
+                      <input
+                        className="input"
+                        type={showPw ? "text" : "password"}
+                        value={password ?? ""}
+                        placeholder={pwPlaceholder}
+                        onChange={(e) => setPassword(e.target.value === "" ? undefined : e.target.value)}
+                        autoComplete="new-password"
+                      />
+                      <button type="button" className="icon-btn" title={showPw ? "隐藏" : "显示"} onClick={() => setShowPw(!showPw)}>
+                        {showPw ? <EyeOff /> : <Eye />}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="he-field">
+                    <Label text="密钥" />
+                    <div className="row">
+                      <select
+                        className={"select" + (errors.key ? " invalid" : "")}
+                        value={h.keyId ?? ""}
+                        onChange={(e) => {
+                          set("keyId", e.target.value || null);
+                          clearErr("key");
+                        }}
+                      >
+                        <option value="">{keys.length ? "选择密钥" : "无密钥"}</option>
+                        {keys.map((k) => (
+                          <option key={k.id} value={k.id}>{k.name}</option>
+                        ))}
+                      </select>
+                      <button type="button" className="btn" style={{ flex: "none" }} onClick={() => setKeyMgr(true)}>
+                        <KeyRound /> 管理
+                      </button>
+                    </div>
+                    <Err text={errors.key} />
+                  </div>
+                )}
+              </section>
+
+              <section className="he-sec" data-sec="net" ref={secRef("net")}>
+                <h3 className="he-sec-title">网络</h3>
+                <div className="he-field">
+                  <Label text="跳板机" />
+                  <select className="select" value={h.jumpHostId ?? ""} onChange={(e) => set("jumpHostId", e.target.value || null)}>
+                    <option value="">无</option>
+                    {jumpCandidates.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.name} ({x.host})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </section>
+
+              <section className="he-sec" data-sec="look" ref={secRef("look")}>
+                <h3 className="he-sec-title">外观与备注</h3>
+                <div className="he-field">
+                  <Label text="颜色" />
+                  <div className="he-swatches">
+                    <button type="button" className={"swatch none" + (!h.color ? " on" : "")} title="无" onClick={() => set("color", "")}>
+                      <Ban />
+                    </button>
+                    {COLORS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        className={"swatch" + (h.color === c ? " on" : "")}
+                        style={{ background: c }}
+                        onClick={() => set("color", c)}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="he-field">
+                  <Label text="标签" />
+                  <div className="he-chips" onMouseDown={(e) => {
+                    if (e.target === e.currentTarget) {
+                      e.preventDefault();
+                      (e.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus();
+                    }
+                  }}>
+                    {tags.map((t) => (
+                      <span className="he-chip" key={t}>
+                        <span className="ellipsis">{t}</span>
+                        <button type="button" title="移除" onClick={() => setTags((a) => a.filter((x) => x !== t))}>
+                          <X />
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      value={tagDraft}
+                      placeholder={tags.length ? "" : "prod"}
+                      spellCheck={false}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (/[,，]/.test(v)) {
+                          const parts = v.split(/[,，]/);
+                          addTags(parts.slice(0, -1).join(","));
+                          setTagDraft(parts[parts.length - 1]);
+                        } else setTagDraft(v);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && tagDraft.trim()) {
+                          e.preventDefault();
+                          addTags(tagDraft);
+                          setTagDraft("");
+                        } else if (e.key === "Backspace" && !tagDraft && tags.length) {
+                          e.preventDefault();
+                          setTags((a) => a.slice(0, -1));
+                        }
+                      }}
+                      onBlur={() => {
+                        if (tagDraft.trim()) {
+                          addTags(tagDraft);
+                          setTagDraft("");
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="he-field">
+                  <Label text="备注" />
+                  <textarea className="textarea" rows={3} value={h.notes} onChange={(e) => set("notes", e.target.value)} />
+                </div>
+              </section>
+
+              <section className="he-sec" data-sec="agent" ref={secRef("agent")}>
+                <div className="he-sec-head">
+                  <h3 className="he-sec-title">Agent 权限</h3>
+                  <div className="he-sec-caption">AI 助手在此服务器上可执行的操作</div>
+                </div>
+                <div className="he-options" role="radiogroup">
+                  {POLICIES.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={h.agentPolicy === p.id}
+                      className={"he-option" + (h.agentPolicy === p.id ? " on" : "")}
+                      onClick={() => set("agentPolicy", p.id)}
+                    >
+                      <span className="he-radio" />
+                      <span className="he-option-title">{p.label}</span>
+                      <span className="he-option-desc ellipsis">{p.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+              <button type="submit" hidden />
+            </form>
+          </div>
+
+          <footer className="he-foot">
+            <button className="btn" disabled={!!busy} onClick={onTest}>测试连接</button>
+            <span className={"he-test " + test.state} title={test.msg}>
+              {test.state === "run" && (
+                <>
+                  <LoaderCircle className="spin" /> 连接中…
+                </>
+              )}
+              {test.state === "ok" && (
+                <>
+                  <CircleCheck /> 连接成功
+                </>
+              )}
+              {test.state === "err" && (
+                <>
+                  <CircleX /> <span className="ellipsis selectable">{test.msg}</span>
+                </>
+              )}
+            </span>
             <button className="btn" onClick={close}>取消</button>
-            <button className="btn primary" disabled={!!busy} onClick={onSave}>
+            <button className="btn primary" disabled={!!busy} onClick={onSave} title="保存 (Ctrl+S)">
               {busy === "save" ? "保存中…" : "保存"}
             </button>
-          </>
-        }
-      >
-        <form
-          className="he-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSave();
-          }}
-        >
-          <Field label="名称">
-            <input className="input" autoFocus value={h.name} onChange={(e) => set("name", e.target.value)} placeholder="web-01" />
-          </Field>
-          <Field label="分组">
-            <input className="input" list="he-groups" value={h.groupName} onChange={(e) => set("groupName", e.target.value)} placeholder="生产" />
-            <datalist id="he-groups">
-              {groups.map((g) => (
-                <option key={g} value={g} />
-              ))}
-            </datalist>
-          </Field>
-          <Field label="地址" hint={errors.host || errors.port ? <span className="he-err">{errors.host ?? errors.port}</span> : undefined}>
-            <input
-              className="input mono"
-              value={h.host}
-              onChange={(e) => set("host", e.target.value)}
-              placeholder="192.168.1.10"
-              spellCheck={false}
-            />
-            <span className="he-port">端口</span>
-            <input
-              className="input num he-port-input"
-              value={port}
-              inputMode="numeric"
-              onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))}
-            />
-          </Field>
-          <Field label="用户名" hint={errors.username && <span className="he-err">{errors.username}</span>}>
-            <input className="input" value={h.username} onChange={(e) => set("username", e.target.value)} placeholder="root" spellCheck={false} />
-          </Field>
-          <Field label="认证方式">
-            <div className="seg">
-              <button type="button" className={h.authType === "password" ? "on" : ""} onClick={() => set("authType", "password")}>
-                密码
-              </button>
-              <button type="button" className={h.authType === "key" ? "on" : ""} onClick={() => set("authType", "key")}>
-                密钥
-              </button>
-            </div>
-          </Field>
-          {h.authType === "password" ? (
-            <Field label="密码">
-              <div className="pw-wrap">
-                <input
-                  className="input"
-                  type={showPw ? "text" : "password"}
-                  value={password ?? ""}
-                  placeholder={pwPlaceholder}
-                  onChange={(e) => setPassword(e.target.value === "" ? undefined : e.target.value)}
-                  autoComplete="new-password"
-                />
-                <button type="button" className="icon-btn" title={showPw ? "隐藏" : "显示"} onClick={() => setShowPw(!showPw)}>
-                  {showPw ? <EyeOff /> : <Eye />}
-                </button>
-              </div>
-              {hasSavedPw && password === undefined && (
-                <button type="button" className="link-btn" onClick={() => setPassword("")}>清除</button>
-              )}
-              {hasSavedPw && password !== undefined && (
-                <button type="button" className="link-btn" onClick={() => setPassword(undefined)}>撤销</button>
-              )}
-            </Field>
-          ) : (
-            <Field label="密钥" hint={errors.key && <span className="he-err">{errors.key}</span>}>
-              <select className="select" value={h.keyId ?? ""} onChange={(e) => set("keyId", e.target.value || null)}>
-                <option value="">{keys.length ? "选择密钥" : "无密钥"}</option>
-                {keys.map((k) => (
-                  <option key={k.id} value={k.id}>{k.name}</option>
-                ))}
-              </select>
-              <button type="button" className="btn" style={{ flex: "none" }} onClick={() => setKeyMgr(true)}>
-                <KeyRound /> 管理
-              </button>
-            </Field>
-          )}
-          <Field label="跳板机">
-            <select className="select" value={h.jumpHostId ?? ""} onChange={(e) => set("jumpHostId", e.target.value || null)}>
-              <option value="">无</option>
-              {jumpCandidates.map((x) => (
-                <option key={x.id} value={x.id}>
-                  {x.name} ({x.host})
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="颜色">
-            <div className="he-swatches">
-              <button type="button" className={"swatch none" + (!h.color ? " on" : "")} title="无" onClick={() => set("color", "")}>
-                <Ban />
-              </button>
-              {COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={"swatch" + (h.color === c ? " on" : "")}
-                  style={{ background: c }}
-                  onClick={() => set("color", c)}
-                />
-              ))}
-            </div>
-          </Field>
-          <Field label="标签">
-            <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="prod, web" />
-          </Field>
-          <Field label="备注" top>
-            <textarea className="textarea" rows={2} value={h.notes} onChange={(e) => set("notes", e.target.value)} />
-          </Field>
-          <Field label="Agent 权限" hint={policy.desc}>
-            <div className="seg">
-              {POLICIES.map((p) => (
-                <button key={p.id} type="button" className={h.agentPolicy === p.id ? "on" : ""} onClick={() => set("agentPolicy", p.id)}>
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </Field>
-          <button type="submit" hidden />
-        </form>
-      </Dialog>
+          </footer>
+        </div>
+      </div>
 
       {keyMgr && (
         <KeyManager
           onClose={() => setKeyMgr(false)}
           onChanged={(list, created) => {
             setKeys(list);
+            if (created) clearErr("key");
             setH((p) =>
               created ? { ...p, keyId: created.id } : p.keyId && !list.some((k) => k.id === p.keyId) ? { ...p, keyId: null } : p,
             );

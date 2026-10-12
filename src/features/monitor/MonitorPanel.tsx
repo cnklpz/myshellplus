@@ -1,14 +1,32 @@
 // Server status dashboard for one host (side panel).
 import { listen } from "@tauri-apps/api/event";
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { Bar, Dialog, Empty, toast } from "../../components/ui";
 import { api, errMsg, type Proc, type Sample, type SysInfo } from "../../lib/api";
 import { fmtBytes, fmtPct, fmtRate, fmtUptime } from "../../lib/format";
+import { type DetailKind, MonitorDetail } from "./MonitorDetail";
 import { Sparkline } from "./Sparkline";
 import "./monitor.css";
 
 const MAX = 60;
+
+/** Props that make a block open a detail dialog (click or Enter/Space). */
+function linkProps(open: () => void) {
+  return {
+    role: "button" as const,
+    tabIndex: 0,
+    onClick: open,
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        open();
+      }
+    },
+  };
+}
+
+const Go = () => <ChevronRight className="mon-go" />;
 
 interface MonitorEvent {
   hostId: string;
@@ -88,6 +106,7 @@ export function MonitorPanel({ hostId }: { hostId: string }) {
   const { history, info, error, loading } = useMonitor(hostId, gen);
   const cur = history[history.length - 1];
   const retry = () => setGen((g) => g + 1);
+  const [detail, setDetail] = useState<DetailKind | null>(null);
 
   if (!cur) {
     if (error)
@@ -133,13 +152,16 @@ export function MonitorPanel({ hostId }: { hostId: string }) {
           </div>
         )}
         {info && <HostInfo info={info} sample={cur} />}
-        <Gauges history={history} cur={cur} />
-        {cur.cores.length > 1 && <Cores cores={cur.cores} />}
-        <NetSection history={history} cur={cur} />
-        <DiskIoSection history={history} cur={cur} />
-        <DisksSection cur={cur} />
-        <ProcSection hostId={hostId} procs={cur.procs} />
+        <Gauges history={history} cur={cur} onOpen={setDetail} />
+        {cur.cores.length > 1 && <Cores cores={cur.cores} onOpen={() => setDetail("cpu")} />}
+        <NetSection history={history} cur={cur} onOpen={() => setDetail("net")} />
+        <DiskIoSection history={history} cur={cur} onOpen={() => setDetail("io")} />
+        <DisksSection cur={cur} onOpen={() => setDetail("disk")} />
+        <ProcSection hostId={hostId} procs={cur.procs} onOpen={() => setDetail("proc")} />
       </div>
+      {detail && (
+        <MonitorDetail kind={detail} hostId={hostId} history={history} info={info} onClose={() => setDetail(null)} />
+      )}
     </div>
   );
 }
@@ -177,7 +199,7 @@ function HostInfo({ info, sample }: { info: SysInfo; sample?: Sample }) {
   );
 }
 
-function Gauges({ history, cur }: { history: Sample[]; cur: Sample }) {
+function Gauges({ history, cur, onOpen }: { history: Sample[]; cur: Sample; onOpen: (k: DetailKind) => void }) {
   const memPct = cur.memTotal ? (cur.memUsed / cur.memTotal) * 100 : 0;
   const swapPct = cur.swapTotal ? (cur.swapUsed / cur.swapTotal) * 100 : 0;
   const cpuS = useMemo(() => history.map((s) => s.cpu), [history]);
@@ -185,14 +207,15 @@ function Gauges({ history, cur }: { history: Sample[]; cur: Sample }) {
   const swapS = useMemo(() => history.map((s) => (s.swapTotal ? (s.swapUsed / s.swapTotal) * 100 : 0)), [history]);
   return (
     <div className="mon-gauges">
-      <Tile label="CPU" pct={cur.cpu} sub={`负载 ${cur.load[0].toFixed(2)}`} values={cpuS} color="var(--chart-1)" />
-      <Tile label="内存" pct={memPct} sub={`${fmtBytes(cur.memUsed)} / ${fmtBytes(cur.memTotal)}`} values={memS} color="var(--chart-2)" />
+      <Tile label="CPU" pct={cur.cpu} sub={`负载 ${cur.load[0].toFixed(2)}`} values={cpuS} color="var(--chart-1)" onOpen={() => onOpen("cpu")} />
+      <Tile label="内存" pct={memPct} sub={`${fmtBytes(cur.memUsed)} / ${fmtBytes(cur.memTotal)}`} values={memS} color="var(--chart-2)" onOpen={() => onOpen("mem")} />
       <Tile
         label="Swap"
         pct={swapPct}
         sub={cur.swapTotal ? `${fmtBytes(cur.swapUsed)} / ${fmtBytes(cur.swapTotal)}` : "未启用"}
         values={swapS}
         color="var(--chart-3)"
+        onOpen={() => onOpen("mem")}
       />
     </div>
   );
@@ -202,10 +225,13 @@ function pctColor(p: number) {
   return p >= 90 ? "var(--err)" : p >= 75 ? "var(--warn)" : undefined;
 }
 
-function Tile(props: { label: string; pct: number; sub: string; values: number[]; color: string }) {
+function Tile(props: { label: string; pct: number; sub: string; values: number[]; color: string; onOpen: () => void }) {
   return (
-    <div className="mon-tile">
-      <span className="lbl">{props.label}</span>
+    <div className="mon-tile link" {...linkProps(props.onOpen)}>
+      <span className="lbl">
+        {props.label}
+        <Go />
+      </span>
       <span className="big" style={{ color: pctColor(props.pct) }}>
         {props.pct.toFixed(0)}
         <small>%</small>
@@ -216,11 +242,12 @@ function Tile(props: { label: string; pct: number; sub: string; values: number[]
   );
 }
 
-function Cores({ cores }: { cores: number[] }) {
+function Cores({ cores, onOpen }: { cores: number[]; onOpen: () => void }) {
   return (
-    <div className="mon-sec">
+    <div className="mon-sec link" {...linkProps(onOpen)}>
       <div className="section-title">
         核心 <span className="count">{cores.length}</span>
+        <Go />
       </div>
       <div className="mon-cores">
         {cores.map((c, i) => (
@@ -234,14 +261,15 @@ function Cores({ cores }: { cores: number[] }) {
   );
 }
 
-function NetSection({ history, cur }: { history: Sample[]; cur: Sample }) {
+function NetSection({ history, cur, onOpen }: { history: Sample[]; cur: Sample; onOpen: () => void }) {
   const [open, setOpen] = useState(false);
   const rx = useMemo(() => history.map((s) => s.rxRate), [history]);
   const tx = useMemo(() => history.map((s) => s.txRate), [history]);
   return (
-    <div className="mon-sec">
+    <div className="mon-sec link" {...linkProps(onOpen)}>
       <div className="section-title">
         网络
+        <Go />
         <span className="meta">TCP {cur.tcpConns}</span>
       </div>
       <div className="mon-rate">
@@ -262,7 +290,13 @@ function NetSection({ history, cur }: { history: Sample[]; cur: Sample }) {
       </div>
       {cur.nets.length > 0 && (
         <>
-          <div className="list-row mon-toggle" onClick={() => setOpen(!open)}>
+          <div
+            className="list-row mon-toggle"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(!open);
+            }}
+          >
             {open ? <ChevronDown /> : <ChevronRight />}
             <span className="grow">
               网卡 <span className="count">{cur.nets.length}</span>
@@ -290,12 +324,15 @@ function NetSection({ history, cur }: { history: Sample[]; cur: Sample }) {
   );
 }
 
-function DiskIoSection({ history, cur }: { history: Sample[]; cur: Sample }) {
+function DiskIoSection({ history, cur, onOpen }: { history: Sample[]; cur: Sample; onOpen: () => void }) {
   const rd = useMemo(() => history.map((s) => s.readRate), [history]);
   const wr = useMemo(() => history.map((s) => s.writeRate), [history]);
   return (
-    <div className="mon-sec">
-      <div className="section-title">磁盘 IO</div>
+    <div className="mon-sec link" {...linkProps(onOpen)}>
+      <div className="section-title">
+        磁盘 IO
+        <Go />
+      </div>
       <div className="mon-rate">
         <span className="k c2">读</span>
         <span className="ellipsis">{fmtRate(cur.readRate)}</span>
@@ -316,11 +353,14 @@ function DiskIoSection({ history, cur }: { history: Sample[]; cur: Sample }) {
   );
 }
 
-function DisksSection({ cur }: { cur: Sample }) {
+function DisksSection({ cur, onOpen }: { cur: Sample; onOpen: () => void }) {
   if (!cur.disks.length) return null;
   return (
-    <div className="mon-sec">
-      <div className="section-title">磁盘</div>
+    <div className="mon-sec link" {...linkProps(onOpen)}>
+      <div className="section-title">
+        磁盘
+        <Go />
+      </div>
       <div>
         {cur.disks.map((d) => {
           const pct = d.total ? (d.used / d.total) * 100 : 0;
@@ -342,7 +382,7 @@ function DisksSection({ cur }: { cur: Sample }) {
   );
 }
 
-function ProcSection({ hostId, procs }: { hostId: string; procs: Proc[] }) {
+function ProcSection({ hostId, procs, onOpen }: { hostId: string; procs: Proc[]; onOpen: () => void }) {
   const [target, setTarget] = useState<Proc | null>(null);
   const [killed, setKilled] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -380,8 +420,9 @@ function ProcSection({ hostId, procs }: { hostId: string; procs: Proc[] }) {
   const rows = procs.filter((p) => !killed.has(p.pid));
   return (
     <div className="mon-sec">
-      <div className="section-title">
+      <div className="section-title link" {...linkProps(onOpen)}>
         进程 <span className="count">{rows.length}</span>
+        <Go />
       </div>
       <table className="table mon-procs">
         <colgroup>

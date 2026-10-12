@@ -57,7 +57,10 @@ pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
     let mut host_id = String::new();
 
     step!("vault setup + unlock", async {
-        ctx.vault.setup("selftest-password", false)?;
+        if !ctx.vault.is_unlocked() {
+            bail!("device mode should auto-unlock");
+        }
+        ctx.vault.enable_password("selftest-password", false)?;
         ctx.vault.lock();
         if ctx.vault.unlock("wrong-password!", false).is_ok() {
             bail!("wrong password accepted");

@@ -30,7 +30,7 @@ export interface TunnelDef {
   bindAddr: string; bindPort: number; targetHost: string; targetPort: number; autoStart: boolean; updatedAt: number;
 }
 export interface TunnelStatus { id: string; running: boolean; up: number; down: number; active: number; error?: string | null }
-export interface VaultStatus { initialized: boolean; unlocked: boolean; remembered: boolean }
+export interface VaultStatus { initialized: boolean; unlocked: boolean; remembered: boolean; passwordEnabled: boolean }
 export interface TermInfo { id: string; hostId: string; created: number; alive: boolean }
 export interface ExecResult { stdout: string; stderr: string; exitCode: number | null; durationMs: number; truncated: boolean; timedOut: boolean }
 
@@ -83,7 +83,9 @@ export interface ImportResult { hosts: number; keys: number; snippets: number; t
 export const api = {
   // vault
   vaultStatus: () => invoke<VaultStatus>("vault_status"),
+  /** Turn on master password protection (default is Windows-account protection, no password). */
   vaultSetup: (password: string, remember: boolean) => invoke<void>("vault_setup", { password, remember }),
+  vaultDisablePassword: (password: string) => invoke<void>("vault_disable_password", { password }),
   vaultUnlock: (password: string, remember: boolean) => invoke<void>("vault_unlock", { password, remember }),
   vaultLock: () => invoke<void>("vault_lock"),
   vaultRemember: (on: boolean) => invoke<void>("vault_remember", { on }),

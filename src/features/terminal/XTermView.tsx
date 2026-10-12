@@ -7,18 +7,40 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Layers, ListChecks, Network, RotateCw, ScrollText, Search, Sparkles, Unplug } from "lucide-react";
+import {
+  AtSign,
+  BookmarkPlus,
+  ClipboardPaste,
+  Copy,
+  Eraser,
+  History,
+  Layers,
+  ListChecks,
+  Network,
+  RotateCcw,
+  RotateCw,
+  ScrollText,
+  Search,
+  Sparkles,
+  SquarePlus,
+  TextCursorInput,
+  TextSelect,
+  Unplug,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "../../components/ui";
 import { api, errMsg } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
-import { type TermTab, useApp } from "../../store";
+import { hostById, type TermTab, useApp } from "../../store";
 import { AiBar, ExplainCard } from "./AiBar";
 import { BatchDialog, useBatchRun } from "./CommandBar";
+import { ContextMenu, type MenuItem } from "./ContextMenu";
+import { HistoryDialog, SaveSnippetDialog } from "./HistoryDialog";
 import { onThemeChange, termTheme } from "../../lib/themes";
 import { refreshAiPredict, savedFontSize, TERM_OPTIONS } from "./config";
 import { LocalEcho } from "./localEcho";
-import { reopenTerminal } from "./open";
+import { openTerminal, reopenTerminal } from "./open";
 import { PredictPopup } from "./PredictPopup";
 import { type PopupState, Predictor } from "./predictor";
 import { SearchBox } from "./SearchBox";
@@ -30,6 +52,8 @@ interface Inst {
   fit: () => void;
   copy: () => void;
   paste: () => void;
+  /** Clear the screen (keeps the prompt line) or fully reset the emulator. */
+  clear: (full: boolean) => void;
 }
 
 export function XTermView(props: {
@@ -48,13 +72,24 @@ export function XTermView(props: {
   const [explain, setExplain] = useState<string | null>(null);
   const [hasSel, setHasSel] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
-  const [batchOpen, setBatchOpen] = useState(false);
+  // undefined = closed; string = open (prefilled with that text when non-empty)
+  const [batchOpen, setBatchOpen] = useState<string | undefined>(undefined);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [saveText, setSaveText] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
   const batchRun = useBatchRun(tab.id);
 
   // Latest props/actions for handlers registered once at mount.
-  const live = useRef({ props, alive: tab.alive, explainSel: () => {}, reconnect: () => {} });
+  const live = useRef({
+    props,
+    alive: tab.alive,
+    overlay: false,
+    explainSel: () => {},
+    reconnect: () => {},
+  });
   live.current.props = props;
   live.current.alive = tab.alive;
+  live.current.overlay = popup !== null || aiOpen;
 
   const reconnect = async () => {
     if (reconnecting) return;
@@ -148,7 +183,14 @@ export function XTermView(props: {
         .catch(() => toast("无法读取剪贴板", "error"));
     };
 
-    inst.current = { term, search, predictor, fit, copy, paste };
+    const clear = (full: boolean) => {
+      predictor.reset();
+      echo.clear();
+      if (full) term.reset();
+      else term.clear();
+    };
+
+    inst.current = { term, search, predictor, fit, copy, paste, clear };
 
     // Fit before attaching so the replayed buffer is laid out at the real width.
     fit();
@@ -202,6 +244,11 @@ export function XTermView(props: {
           paste();
           return false;
         }
+        if (k === "h" && !L.overlay) {
+          ev.preventDefault();
+          setHistoryOpen(true);
+          return false;
+        }
         if (k === "e") {
           ev.preventDefault();
           L.explainSel();
@@ -236,11 +283,16 @@ export function XTermView(props: {
 
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      if (term.hasSelection()) {
-        copy();
-        term.clearSelection();
-      } else paste();
-      term.focus();
+      // Shift+right-click: quick copy-or-paste.
+      if (e.shiftKey) {
+        if (term.hasSelection()) {
+          copy();
+          term.clearSelection();
+        } else paste();
+        term.focus();
+        return;
+      }
+      setMenu({ x: e.clientX, y: e.clientY, sel: term.getSelection() });
     };
     hostEl.addEventListener("contextmenu", onContextMenu);
 
@@ -304,6 +356,51 @@ export function XTermView(props: {
 
   const focusTerm = () => inst.current?.term.focus();
   const i = inst.current;
+
+  const menuItems = (sel: string): MenuItem[] => {
+    const has = sel.trim().length > 0;
+    const t = inst.current?.term;
+    const host = hostById(tab.hostId);
+    const alive = tab.alive;
+    const copyText = (text: string, ok?: string) =>
+      navigator.clipboard
+        .writeText(text)
+        .then(() => ok && toast(ok, "success"))
+        .catch(() => toast("复制失败", "error"));
+    return [
+      { label: "复制", icon: <Copy />, hint: "Ctrl+Shift+C", disabled: !has, onSelect: () => copyText(sel) },
+      { label: "粘贴", icon: <ClipboardPaste />, hint: "Ctrl+Shift+V", disabled: !alive, onSelect: () => inst.current?.paste() },
+      has && { label: "粘贴选中内容", icon: <TextCursorInput />, disabled: !alive, onSelect: () => t?.paste(sel) },
+      { label: "全选", icon: <TextSelect />, onSelect: () => t?.selectAll() },
+      "sep",
+      { label: "搜索", icon: <Search />, hint: "Ctrl+F", onSelect: () => setSearchOpen(true) },
+      { label: "清屏", icon: <Eraser />, onSelect: () => inst.current?.clear(false) },
+      { label: "清除缓冲区并重置", icon: <RotateCcw />, onSelect: () => inst.current?.clear(true) },
+      "sep",
+      has && {
+        label: "AI 解释",
+        icon: <Sparkles />,
+        hint: "Ctrl+Shift+E",
+        onSelect: () => {
+          const s = sel.trim();
+          setExplain(s.length > 4000 ? s.slice(-4000) : s);
+        },
+      },
+      has && { label: "发送到批量执行", icon: <ListChecks />, onSelect: () => setBatchOpen(sel.replace(/\s+$/, "")) },
+      has && { label: "加入命令", icon: <BookmarkPlus />, onSelect: () => setSaveText(sel) },
+      "sep",
+      { label: "命令历史", icon: <History />, hint: "Ctrl+Shift+H", onSelect: () => setHistoryOpen(true) },
+      host && {
+        label: "复制主机地址",
+        icon: <AtSign />,
+        onSelect: () => copyText(`${host.username}@${host.host}`, "已复制"),
+      },
+      "sep",
+      { label: "新建同主机终端", icon: <SquarePlus />, onSelect: () => void openTerminal(tab.hostId) },
+      { label: "重新连接", icon: <RotateCw />, disabled: reconnecting, onSelect: () => void reconnect() },
+      { label: "关闭终端", icon: <X />, hint: "Ctrl+W", onSelect: () => props.onClose() },
+    ];
+  };
 
   return (
     <div className="term-view" style={{ display: active ? "flex" : "none" }}>
@@ -382,7 +479,7 @@ export function XTermView(props: {
         )}
       </div>
       <div className="term-toolbar">
-        <button className="term-tool" onClick={() => setBatchOpen(true)} title="多行命令发送到此终端">
+        <button className="term-tool" onClick={() => setBatchOpen("")} title="多行命令发送到此终端">
           <ListChecks />
           <span>批量执行</span>
           {batchRun && (
@@ -398,6 +495,10 @@ export function XTermView(props: {
         <button className="term-tool" onClick={() => useApp.getState().setModal("snippets")}>
           <ScrollText />
           <span>命令</span>
+        </button>
+        <button className="term-tool" title="Ctrl+Shift+H" onClick={() => setHistoryOpen(true)}>
+          <History />
+          <span>历史</span>
         </button>
         <button className="term-tool" onClick={() => useApp.getState().setModal("tunnels")}>
           <Network />
@@ -420,12 +521,42 @@ export function XTermView(props: {
           <span>搜索</span>
         </button>
       </div>
-      {batchOpen && (
+      {batchOpen !== undefined && (
         <BatchDialog
           tab={tab}
+          initialText={batchOpen || undefined}
           onClose={() => {
-            setBatchOpen(false);
+            setBatchOpen(undefined);
             inst.current?.term.focus();
+          }}
+        />
+      )}
+      {historyOpen && (
+        <HistoryDialog
+          tab={tab}
+          onClose={() => {
+            setHistoryOpen(false);
+            focusTerm();
+          }}
+        />
+      )}
+      {saveText !== null && (
+        <SaveSnippetDialog
+          text={saveText}
+          onClose={() => {
+            setSaveText(null);
+            focusTerm();
+          }}
+        />
+      )}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems(menu.sel)}
+          onClose={(refocus) => {
+            setMenu(null);
+            if (refocus) focusTerm();
           }}
         />
       )}
