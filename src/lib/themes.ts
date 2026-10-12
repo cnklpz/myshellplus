@@ -13,6 +13,8 @@ export interface Theme {
   id: string;
   name: string;
   dark: boolean;
+  /** "classic" = color scheme borrowed from a well-known editor / terminal (ANSI palette kept as published) */
+  group?: "classic";
   ui: Palette;
   /** 16 ANSI colors: black red green yellow blue magenta cyan white, then bright variants */
   ansi: string[];
@@ -98,6 +100,128 @@ export const THEMES: Theme[] = [
     },
     ansi: ["#3a3029", "#c4413a", "#4f8a3b", "#a8700e", "#3e6fa8", "#8a5aa8", "#2f8a86", "#cfc5b8",
            "#7a6d61", "#d65a52", "#64a34e", "#c48a22", "#5585bd", "#a173bf", "#43a19c", "#ebe5dd"],
+  },
+
+  // ---- classic schemes from well-known editors / terminals
+  {
+    id: "vscode-dark", name: "VS Code 深色", dark: true, group: "classic",
+    ui: {
+      chrome: "#181818", bg0: "#1f1f1f", bg1: "#252526", bg2: "#2b2b2b", bg3: "#313131", bg4: "#3c3c3c",
+      fg0: "#d4d4d4", fg1: "#9d9d9d", fg2: "#6e6e6e", accent: "#0078d4", accentFg: "#ffffff",
+      ok: "#23d18b", warn: "#cca700", err: "#f14c4c", charts: ["#3b8eea", "#23d18b", "#d670d6", "#cca700"],
+    },
+    ansi: ["#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
+           "#666666", "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#e5e5e5"],
+  },
+  {
+    id: "vscode-light", name: "VS Code 浅色", dark: false, group: "classic",
+    ui: {
+      chrome: "#ececec", bg0: "#ffffff", bg1: "#f8f8f8", bg2: "#ffffff", bg3: "#f0f0f0", bg4: "#e4e4e4",
+      fg0: "#1f1f1f", fg1: "#616161", fg2: "#8b8b8b", accent: "#005fb8", accentFg: "#ffffff",
+      ok: "#388a34", warn: "#bf8803", err: "#e51400", charts: ["#005fb8", "#388a34", "#bc05bc", "#bf8803"],
+    },
+    ansi: ["#000000", "#cd3131", "#00bc00", "#949800", "#0451a5", "#bc05bc", "#0598bc", "#555555",
+           "#666666", "#cd3131", "#14ce14", "#b5ba00", "#0451a5", "#bc05bc", "#0598bc", "#a5a5a5"],
+  },
+  {
+    id: "one-dark", name: "One Dark", dark: true, group: "classic",
+    ui: {
+      chrome: "#1b1d23", bg0: "#282c34", bg1: "#2c313a", bg2: "#323842", bg3: "#383e4a", bg4: "#3e4451",
+      fg0: "#dcdfe4", fg1: "#abb2bf", fg2: "#6b717d", accent: "#61afef", accentFg: "#1b1d23",
+      ok: "#98c379", warn: "#e5c07b", err: "#e06c75", charts: ["#61afef", "#98c379", "#c678dd", "#e5c07b"],
+    },
+    ansi: ["#3f4451", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#abb2bf",
+           "#5c6370", "#e06c75", "#98c379", "#d19a66", "#61afef", "#c678dd", "#56b6c2", "#ffffff"],
+  },
+  {
+    id: "dracula", name: "Dracula", dark: true, group: "classic",
+    ui: {
+      chrome: "#191a21", bg0: "#282a36", bg1: "#2d2f3d", bg2: "#343746", bg3: "#3c3f51", bg4: "#44475a",
+      fg0: "#f8f8f2", fg1: "#b6b9cf", fg2: "#6272a4", accent: "#bd93f9", accentFg: "#191a21",
+      ok: "#50fa7b", warn: "#ffb86c", err: "#ff5555", charts: ["#bd93f9", "#50fa7b", "#ff79c6", "#ffb86c"],
+    },
+    ansi: ["#21222c", "#ff5555", "#50fa7b", "#f1fa8c", "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
+           "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5", "#d6acff", "#ff92df", "#a4ffff", "#ffffff"],
+  },
+  {
+    id: "monokai", name: "Monokai", dark: true, group: "classic",
+    ui: {
+      chrome: "#1e1f1c", bg0: "#272822", bg1: "#2d2e27", bg2: "#34352d", bg3: "#3b3c34", bg4: "#49483e",
+      fg0: "#f8f8f2", fg1: "#c2c1b4", fg2: "#75715e", accent: "#a6e22e", accentFg: "#1e1f1c",
+      ok: "#a6e22e", warn: "#e6db74", err: "#f92672", charts: ["#66d9ef", "#a6e22e", "#ae81ff", "#e6db74"],
+    },
+    ansi: ["#3e3d32", "#f92672", "#a6e22e", "#f4bf75", "#66d9ef", "#ae81ff", "#a1efe4", "#f8f8f2",
+           "#75715e", "#f92672", "#a6e22e", "#f4bf75", "#66d9ef", "#ae81ff", "#a1efe4", "#f9f8f5"],
+  },
+  {
+    id: "github-dark", name: "GitHub 深色", dark: true, group: "classic",
+    ui: {
+      chrome: "#010409", bg0: "#0d1117", bg1: "#151b23", bg2: "#1c2229", bg3: "#212830", bg4: "#2a313c",
+      fg0: "#e6edf3", fg1: "#9198a1", fg2: "#656c76", accent: "#4493f8", accentFg: "#ffffff",
+      ok: "#3fb950", warn: "#d29922", err: "#f85149", charts: ["#4493f8", "#3fb950", "#bc8cff", "#d29922"],
+    },
+    ansi: ["#484f58", "#ff7b72", "#3fb950", "#d29922", "#58a6ff", "#bc8cff", "#39c5cf", "#b1bac4",
+           "#6e7681", "#ffa198", "#56d364", "#e3b341", "#79c0ff", "#d2a8ff", "#56d4dd", "#ffffff"],
+  },
+  {
+    id: "solarized-dark", name: "Solarized 深色", dark: true, group: "classic",
+    ui: {
+      chrome: "#00212b", bg0: "#002b36", bg1: "#04313d", bg2: "#073642", bg3: "#0d3f4c", bg4: "#154956",
+      fg0: "#a7b4b4", fg1: "#839496", fg2: "#586e75", accent: "#268bd2", accentFg: "#fdf6e3",
+      ok: "#859900", warn: "#b58900", err: "#dc322f", charts: ["#268bd2", "#859900", "#d33682", "#b58900"],
+    },
+    ansi: ["#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+           "#586e75", "#cb4b16", "#859900", "#b58900", "#268bd2", "#6c71c4", "#2aa198", "#fdf6e3"],
+  },
+  {
+    id: "solarized-light", name: "Solarized 浅色", dark: false, group: "classic",
+    ui: {
+      chrome: "#e8e1cc", bg0: "#fdf6e3", bg1: "#f7f0dc", bg2: "#fffbef", bg3: "#eee8d5", bg4: "#e4ddc8",
+      fg0: "#3b4d54", fg1: "#657b83", fg2: "#93a1a1", accent: "#268bd2", accentFg: "#ffffff",
+      ok: "#859900", warn: "#b58900", err: "#dc322f", charts: ["#268bd2", "#859900", "#d33682", "#b58900"],
+    },
+    ansi: ["#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#93a1a1",
+           "#586e75", "#cb4b16", "#859900", "#b58900", "#268bd2", "#6c71c4", "#2aa198", "#657b83"],
+  },
+  {
+    id: "campbell", name: "Campbell", dark: true, group: "classic",
+    ui: {
+      chrome: "#080808", bg0: "#0c0c0c", bg1: "#151515", bg2: "#1c1c1c", bg3: "#242424", bg4: "#2e2e2e",
+      fg0: "#d9d9d9", fg1: "#9a9a9a", fg2: "#666666", accent: "#3b78ff", accentFg: "#ffffff",
+      ok: "#16c60c", warn: "#c19c00", err: "#e74856", charts: ["#3b78ff", "#16c60c", "#b4009e", "#c19c00"],
+    },
+    ansi: ["#0c0c0c", "#c50f1f", "#13a10e", "#c19c00", "#0037da", "#881798", "#3a96dd", "#cccccc",
+           "#767676", "#e74856", "#16c60c", "#f9f1a5", "#3b78ff", "#b4009e", "#61d6d6", "#f2f2f2"],
+  },
+  {
+    id: "gruvbox", name: "Gruvbox", dark: true, group: "classic",
+    ui: {
+      chrome: "#1d2021", bg0: "#282828", bg1: "#2e2c2b", bg2: "#32302f", bg3: "#3c3836", bg4: "#504945",
+      fg0: "#ebdbb2", fg1: "#bdae93", fg2: "#7c6f64", accent: "#fabd2f", accentFg: "#1d2021",
+      ok: "#b8bb26", warn: "#fabd2f", err: "#fb4934", charts: ["#83a598", "#b8bb26", "#d3869b", "#fabd2f"],
+    },
+    ansi: ["#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
+           "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2"],
+  },
+  {
+    id: "tokyo-night", name: "Tokyo Night", dark: true, group: "classic",
+    ui: {
+      chrome: "#16161e", bg0: "#1a1b26", bg1: "#1f2030", bg2: "#24283b", bg3: "#292e42", bg4: "#343a55",
+      fg0: "#c0caf5", fg1: "#a9b1d6", fg2: "#565f89", accent: "#7aa2f7", accentFg: "#16161e",
+      ok: "#9ece6a", warn: "#e0af68", err: "#f7768e", charts: ["#7aa2f7", "#9ece6a", "#bb9af7", "#e0af68"],
+    },
+    ansi: ["#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
+           "#414868", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5"],
+  },
+  {
+    id: "catppuccin", name: "Catppuccin", dark: true, group: "classic",
+    ui: {
+      chrome: "#11111b", bg0: "#1e1e2e", bg1: "#232334", bg2: "#28283b", bg3: "#313244", bg4: "#45475a",
+      fg0: "#cdd6f4", fg1: "#a6adc8", fg2: "#6c7086", accent: "#cba6f7", accentFg: "#11111b",
+      ok: "#a6e3a1", warn: "#f9e2af", err: "#f38ba8", charts: ["#89b4fa", "#a6e3a1", "#cba6f7", "#f9e2af"],
+    },
+    ansi: ["#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
+           "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8"],
   },
 ];
 

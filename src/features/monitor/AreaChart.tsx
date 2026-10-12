@@ -1,6 +1,6 @@
 // Larger area chart for the detail dialogs: measured width (ResizeObserver) so text and strokes
 // stay crisp, y-axis labels in a fixed gutter, faint gridlines, hover crosshair with a tooltip.
-import { useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { type Pt, useChartTween } from "../../lib/motion";
 import { pathFor } from "./Sparkline";
 
@@ -48,6 +48,8 @@ export function AreaChart(props: {
   axisFmt?: (v: number) => string;
   /** Label for the left end of the time axis, e.g. "3 分钟". */
   span?: string;
+  /** Right end of the legend row, e.g. a series picker. */
+  extra?: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(0);
@@ -122,6 +124,7 @@ export function AreaChart(props: {
             </span>
           );
         })}
+        {props.extra && <span className="mon-legend-extra">{props.extra}</span>}
       </div>
       <div className="mon-area-plot" ref={ref} style={{ height: h }}>
         {w > 0 && (

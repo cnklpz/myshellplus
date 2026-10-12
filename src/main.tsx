@@ -6,6 +6,14 @@ import { applyTheme, currentTheme } from "./lib/themes";
 
 async function start() {
   applyTheme(currentTheme().id);
+  if ("__TAURI_INTERNALS__" in window) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    if (getCurrentWindow().label === "switcher") {
+      const { Switcher } = await import("./features/switcher/Switcher");
+      ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<Switcher />);
+      return;
+    }
+  }
   // xterm measures glyphs once at startup: make sure the bundled mono font is ready first.
   await Promise.race([
     document.fonts.load('14px "JetBrains Mono Variable"').catch(() => {}),

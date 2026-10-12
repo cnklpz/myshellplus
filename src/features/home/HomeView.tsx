@@ -13,12 +13,15 @@ import {
   SquareTerminal,
   Trash2,
   Unplug,
+  X,
   Zap,
 } from "lucide-react";
 import { type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Confirm, toast } from "../../components/ui";
+import { sortByGroupOrder, useGroupOrder } from "../../lib/groupOrder";
 import { ExportDialog } from "../settings/SettingsView";
+import { GroupTabs } from "./GroupTabs";
 import { api, errMsg, type Host } from "../../lib/api";
 import { useApp } from "../../store";
 import { openTerminal } from "../terminal/open";
@@ -122,6 +125,7 @@ export function HomeView() {
   const probing = useProbing();
 
   const q = query.trim().toLowerCase();
+  const groupOrder = useGroupOrder();
   /** Every group with its host count (unfiltered), for the tab bar. */
   const groupTabs = useMemo(() => {
     const counts = new Map<string, number>();
@@ -129,10 +133,11 @@ export function HomeView() {
       const g = h.groupName.trim() || UNGROUPED;
       counts.set(g, (counts.get(g) ?? 0) + 1);
     }
-    return [...counts.entries()]
+    const list = [...counts.entries()]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => (a.name === UNGROUPED ? 1 : b.name === UNGROUPED ? -1 : a.name.localeCompare(b.name, "zh-CN")));
-  }, [hosts]);
+    return sortByGroupOrder(list, groupOrder);
+  }, [hosts, groupOrder]);
   const activeGroup = groupTabs.some((g) => g.name === group) ? group : ALL;
 
   const groups = useMemo(() => {
@@ -149,8 +154,8 @@ export function HomeView() {
       items: items.sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name, "zh-CN")),
     }));
     list.sort((a, b) => (a.name === UNGROUPED ? 1 : b.name === UNGROUPED ? -1 : a.name.localeCompare(b.name, "zh-CN")));
-    return list;
-  }, [hosts, q, osMap, activeGroup]);
+    return sortByGroupOrder(list, groupOrder);
+  }, [hosts, q, osMap, activeGroup, groupOrder]);
 
   const connected = hosts.filter((h) => conn[h.id]?.state === "connected").length;
 
@@ -198,20 +203,7 @@ export function HomeView() {
         </div>
 
         {groupTabs.length > 1 && (
-          <div className="home-tabs" role="tablist">
-            {[{ name: ALL, count: hosts.length }, ...groupTabs].map((g) => (
-              <button
-                key={g.name || "*"}
-                role="tab"
-                aria-selected={g.name === activeGroup}
-                className={"home-tab" + (g.name === activeGroup ? " on" : "")}
-                onClick={() => setGroup(g.name)}
-              >
-                <span className="ellipsis">{g.name || "全部"}</span>
-                <span className="home-tab-count">{g.count}</span>
-              </button>
-            ))}
-          </div>
+          <GroupTabs allCount={hosts.length} tabs={groupTabs} active={activeGroup} onSelect={setGroup} />
         )}
 
         {hosts.length === 0 ? (
@@ -336,6 +328,35 @@ function Latency({ hostId, connected }: { hostId: string; connected: boolean }) 
   );
 }
 
+/** "14:03" today, else "10-11 14:03". */
+function fmtWhen(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  return d.toDateString() === new Date().toDateString() ? hm : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
+}
+
+/** Last failed connect, kept until the host connects again; click to dismiss. */
+function FailMark({ hostId }: { hostId: string }) {
+  const fail = useApp((s) => s.failures[hostId]);
+  if (!fail) return null;
+  const dismiss = (e: MouseEvent) => {
+    e.stopPropagation();
+    const { failures, setFailures } = useApp.getState();
+    const { [hostId]: _, ...rest } = failures;
+    setFailures(rest);
+    api.connFailureDismiss(hostId).catch(() => {});
+  };
+  return (
+    <button className="home-fail" title={`${fail.error}
+点击忽略`} onClick={dismiss} onDoubleClick={(e) => e.stopPropagation()}>
+      <span className="dot err" />
+      <span className="ellipsis grow">上次连接失败 · {fmtWhen(fail.at)}</span>
+      <X className="home-fail-x" />
+    </button>
+  );
+}
+
 function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefined; onDelete: () => void }) {
   const conn = useApp((s) => s.conn[h.id]);
   const [menu, setMenu] = useState<DOMRect | null>(null);
@@ -387,6 +408,8 @@ function HostCard({ host: h, os, onDelete }: { host: Host; os: string | undefine
           </span>
         </div>
       )}
+
+      <FailMark hostId={h.id} />
 
       <div className={"home-notes ellipsis" + (note ? "" : " is-empty")} title={note ? h.notes : undefined}>
         {note || "暂无备注"}

@@ -1,15 +1,17 @@
 // Second-level detail dialogs for the status panel. Live charts come from the panel's sample
 // history (passed down, so they update every 3s); extra facts are fetched with execRun and
 // refreshed every 5s while the dialog is open.
-import { ChevronDown, ChevronUp, FolderSearch, LoaderCircle, RefreshCw, Skull, X } from "lucide-react";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { ChartLine, ChevronDown, ChevronUp, Copy, FolderOpen, FolderSearch, Info, LoaderCircle, RefreshCw, Skull, X } from "lucide-react";
+import { createContext, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Select } from "../../components/Select";
-import { Bar, Confirm, Dialog, toast } from "../../components/ui";
+import { Bar, Dialog } from "../../components/ui";
 import { api, errMsg, type Sample, type SysInfo } from "../../lib/api";
 import { fmtBytes, fmtPct, fmtRate } from "../../lib/format";
 import { reducedMotion } from "../../lib/motion";
 import { useApp } from "../../store";
+import { useContextMenu } from "../terminal/ContextMenu";
 import { AreaChart } from "./AreaChart";
+import { copyText, useProcActions } from "./procMenu";
 
 export type DetailKind = "cpu" | "mem" | "net" | "io" | "disk" | "proc";
 
@@ -223,6 +225,10 @@ function CpuView({ history, cur, info }: { history: Sample[]; cur: Sample; info:
   const ts = useSeries(history, (s) => s.ts);
   const cpu = useSeries(history, (s) => s.cpu);
   const ls = useExec("LC_ALL=C lscpu", parseKv, { once: true });
+  const top = useExec("ps -eo pid,ppid,user:32,pcpu,pmem,rss,etime,stat,args --sort=-pcpu | head -11", parsePs);
+  const { hostId, refresh } = useContext(DetailCtx);
+  const menu = useContextMenu();
+  const acts = useProcActions(hostId, refresh);
   const ncores = cur.cores.length || info?.cores || 1;
 
   const facts = useMemo(() => {
@@ -276,6 +282,39 @@ function CpuView({ history, cur, info }: { history: Sample[]; cur: Sample; info:
           </div>
         </Sec>
       )}
+      <Sec title="CPU 占用最高" meta={top.data?.length ?? ""} error={top.error}>
+        <table className="table mon-d-table mon-d-procs">
+          <colgroup>
+            <col style={{ width: 72 }} />
+            <col style={{ width: 96 }} />
+            <col style={{ width: 64 }} />
+            <col style={{ width: 64 }} />
+            <col />
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="num">PID</th>
+              <th>用户</th>
+              <th className="num">CPU</th>
+              <th className="num">内存</th>
+              <th>命令</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(top.data ?? []).map((p) => (
+              <tr key={p.pid} onContextMenu={(e) => menu.open(e, acts.items({ pid: p.pid, user: p.user, command: p.args, stat: p.stat }))}>
+                <td className="num mono faint">{p.pid}</td>
+                <td className="ellipsis-cell" title={p.user}>{p.user}</td>
+                <td className="num" style={{ color: pctColor(p.cpu) }}>{p.cpu.toFixed(1)}</td>
+                <td className="num">{p.mem.toFixed(1)}</td>
+                <td className="mono ellipsis-cell" title={p.args}>{p.args}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {menu.node}
+        {acts.node}
+      </Sec>
       <Sec title="处理器" error={ls.error}>
         <dl className="mon-kv selectable">
           {facts.map(([k, v]) => (
@@ -322,6 +361,9 @@ function MemView({ history, cur }: { history: Sample[]; cur: Sample }) {
   const swap = useSeries(history, (s) => (s.swapTotal ? (s.swapUsed / s.swapTotal) * 100 : 0));
   const r = useExec(MEM_CMD, parseMem);
   const kv = r.data?.kv;
+  const { hostId, refresh } = useContext(DetailCtx);
+  const menu = useContextMenu();
+  const acts = useProcActions(hostId, refresh);
 
   const total = kv?.MemTotal ?? cur.memTotal;
   const free = kv?.MemFree ?? 0;
@@ -401,7 +443,7 @@ function MemView({ history, cur }: { history: Sample[]; cur: Sample }) {
           </thead>
           <tbody>
             {(r.data?.top ?? []).map((p) => (
-              <tr key={p.pid}>
+              <tr key={p.pid} onContextMenu={(e) => menu.open(e, acts.items({ pid: p.pid, user: p.user, command: p.comm }))}>
                 <td className="num mono faint">{p.pid}</td>
                 <td className="ellipsis-cell" title={p.user}>{p.user}</td>
                 <td className="num">{fmtBytes(p.rss)}</td>
@@ -411,6 +453,8 @@ function MemView({ history, cur }: { history: Sample[]; cur: Sample }) {
             ))}
           </tbody>
         </table>
+        {menu.node}
+        {acts.node}
       </Sec>
     </>
   );
@@ -488,58 +532,53 @@ function parseNet(out: string): NetData {
   return { summary, listen };
 }
 
+/** Chart NIC choice, kept while the app runs. */
+let netNic = "";
+
 function NetView({ history, cur }: { history: Sample[]; cur: Sample }) {
+  const { hostId, refresh } = useContext(DetailCtx);
+  const [nic, setNic] = useState(netNic);
+  const pickNic = (n: string) => {
+    netNic = n;
+    setNic(n);
+  };
+  const shown = nic && cur.nets.some((n) => n.name === nic) ? nic : "";
   const ts = useSeries(history, (s) => s.ts);
-  const rx = useSeries(history, (s) => s.rxRate);
-  const tx = useSeries(history, (s) => s.txRate);
+  const rx = useMemo(() => history.map((s) => (shown ? s.nets.find((n) => n.name === shown)?.rxRate ?? 0 : s.rxRate)), [history, shown]);
+  const tx = useMemo(() => history.map((s) => (shown ? s.nets.find((n) => n.name === shown)?.txRate ?? 0 : s.txRate)), [history, shown]);
   const r = useExec(NET_CMD, parseNet);
   const sum = r.data?.summary;
+  const menu = useContextMenu();
+  const acts = useProcActions(hostId, refresh);
+
+  const nicMenu = (e: ReactMouseEvent, name: string) =>
+    menu.open(e, [
+      { label: shown === name ? "图表显示全部" : "在图表中显示", icon: <ChartLine />, onSelect: () => pickNic(shown === name ? "" : name) },
+      "sep",
+      { label: "复制名称", icon: <Copy />, onSelect: () => copyText(name, "名称") },
+    ]);
+
+  const listenMenu = (e: ReactMouseEvent, x: Listen) => {
+    const m = /^([^,(]+)\((\d+)\)/.exec(x.proc);
+    const proc = m ? { pid: Number(m[2]), command: m[1] } : null;
+    const host = x.addr.includes(":") ? `[${x.addr}]` : x.addr;
+    menu.open(e, [
+      { label: "复制地址", icon: <Copy />, onSelect: () => copyText(`${host}:${x.port}`, "地址") },
+      { label: "复制端口", icon: <Copy />, onSelect: () => copyText(String(x.port), "端口") },
+      ...(proc
+        ? ([
+            "sep",
+            { label: `进程详情（${proc.pid}）`, icon: <Info />, onSelect: () => acts.showDetail(proc) },
+            { label: "结束进程…", icon: <X />, danger: true, onSelect: () => acts.confirmKill(proc) },
+          ] as const)
+        : []),
+    ]);
+  };
 
   return (
     <>
-      <AreaChart
-        series={[
-          { label: "下行", values: rx, color: "var(--chart-2)" },
-          { label: "上行", values: tx, color: "var(--chart-1)" },
-        ]}
-        ts={ts}
-        floor={1024}
-        bytes
-        fmt={fmtRate}
-        axisFmt={rateAxis}
-        span={SPAN}
-      />
-      <Sec title="网卡" meta={cur.nets.length}>
-        <table className="table mon-d-table">
-          <colgroup>
-            <col />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 120 }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th className="num">下行</th>
-              <th className="num">上行</th>
-              <th className="num">总接收</th>
-              <th className="num">总发送</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cur.nets.map((n) => (
-              <tr key={n.name}>
-                <td className="mono ellipsis-cell">{n.name}</td>
-                <td className="num">{fmtRate(n.rxRate)}</td>
-                <td className="num">{fmtRate(n.txRate)}</td>
-                <td className="num faint">{fmtBytes(n.rxTotal)}</td>
-                <td className="num faint">{fmtBytes(n.txTotal)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Sec>
+      {menu.node}
+      {acts.node}
       <Sec title="连接" error={r.error}>
         {sum && (sum.total !== undefined || sum.tcp !== undefined) ? (
           <>
@@ -575,6 +614,60 @@ function NetView({ history, cur }: { history: Sample[]; cur: Sample }) {
           <pre className="mon-d-pre selectable">{sum.raw.join("\n")}</pre>
         ) : null}
       </Sec>
+      <AreaChart
+        series={[
+          { label: "下行", values: rx, color: "var(--chart-2)" },
+          { label: "上行", values: tx, color: "var(--chart-1)" },
+        ]}
+        ts={ts}
+        floor={1024}
+        bytes
+        fmt={fmtRate}
+        axisFmt={rateAxis}
+        span={SPAN}
+        extra={
+          cur.nets.length > 1 && (
+            <Select
+              size="sm"
+              width={160}
+              value={shown}
+              options={[{ value: "", label: "全部网卡" }, ...cur.nets.map((n) => ({ value: n.name, label: n.name }))]}
+              onChange={pickNic}
+            />
+          )
+        }
+      />
+      <Sec title="网卡" meta={cur.nets.length}>
+        <table className="table mon-d-table">
+          <colgroup>
+            <col />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 120 }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th className="num">下行</th>
+              <th className="num">上行</th>
+              <th className="num">总接收</th>
+              <th className="num">总发送</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cur.nets.map((n) => (
+              <tr key={n.name} className={n.name === shown ? "on" : undefined} onContextMenu={(e) => nicMenu(e, n.name)} onDoubleClick={() => pickNic(n.name === shown ? "" : n.name)}>
+                <td className="mono ellipsis-cell">{n.name}</td>
+                <td className="num">{fmtRate(n.rxRate)}</td>
+                <td className="num">{fmtRate(n.txRate)}</td>
+                <td className="num faint">{fmtBytes(n.rxTotal)}</td>
+                <td className="num faint">{fmtBytes(n.txTotal)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Sec>
       <Sec title="监听端口" meta={r.data ? r.data.listen.length : undefined}>
         <table className="table mon-d-table">
           <colgroup>
@@ -593,7 +686,7 @@ function NetView({ history, cur }: { history: Sample[]; cur: Sample }) {
           </thead>
           <tbody>
             {(r.data?.listen ?? []).map((x, i) => (
-              <tr key={i}>
+              <tr key={i} onContextMenu={(e) => listenMenu(e, x)}>
                 <td className="faint">{x.proto}</td>
                 <td className="mono ellipsis-cell" title={x.addr}>{x.addr}</td>
                 <td className="num mono">{x.port}</td>
@@ -653,6 +746,7 @@ function IoView({ history }: { history: Sample[] }) {
   const wr = useSeries(history, (s) => s.writeRate);
   const r = useExec(IO_CMD, parseIo);
   const { refresh } = useContext(DetailCtx);
+  const menu = useContextMenu();
   const [pair, setPair] = useState<{ prev: IoSnap | null; cur: IoSnap | null }>({ prev: null, cur: null });
 
   useEffect(() => {
@@ -721,7 +815,7 @@ function IoView({ history }: { history: Sample[] }) {
           </thead>
           <tbody>
             {rows.map((d) => (
-              <tr key={d.name}>
+              <tr key={d.name} onContextMenu={(e) => menu.open(e, [{ label: "复制设备名", icon: <Copy />, onSelect: () => copyText(`/dev/${d.name}`, "设备名") }])}>
                 <td className="mono">{d.name}</td>
                 <td className="num">{n(d.rps, (x) => x.toFixed(1))}</td>
                 <td className="num">{n(d.wps, (x) => x.toFixed(1))}</td>
@@ -732,6 +826,7 @@ function IoView({ history }: { history: Sample[] }) {
             ))}
           </tbody>
         </table>
+        {menu.node}
       </Sec>
     </>
   );
@@ -796,12 +891,14 @@ function DiskView() {
   const [duBusy, setDuBusy] = useState(false);
   const [duErr, setDuErr] = useState<string | null>(null);
   const target = sel || mounts.find((m) => m.mount === "/")?.mount || mounts[0]?.mount || "/";
+  const menu = useContextMenu();
+  const openFiles = (path: string) => useApp.getState().openFilesAt(hostId, path);
 
-  const scan = async () => {
+  const scan = async (path = target) => {
     setDuBusy(true);
     setDuErr(null);
     try {
-      const res = await api.execRun(hostId, `du -xh --max-depth=1 ${shq(target)} 2>/dev/null | sort -rh | head -20`, 60);
+      const res = await api.execRun(hostId, `du -xh --max-depth=1 ${shq(path)} 2>/dev/null | sort -rh | head -20`, 60);
       if (res.timedOut) setDuErr("执行超时");
       const rows = lines(res.stdout).map((l) => {
         const i = l.search(/\s/);
@@ -809,7 +906,7 @@ function DiskView() {
         return { size, bytes: parseHuman(size), path: l.slice(i).trim() };
       });
       if (!rows.length && !res.timedOut) setDuErr((res.stderr || "无结果").trim().split("\n")[0]);
-      setDu({ mount: target, rows });
+      setDu({ mount: path, rows });
     } catch (e) {
       setDuErr(errMsg(e));
     } finally {
@@ -846,7 +943,18 @@ function DiskView() {
             {mounts.map((m) => {
               const used = m.used + m.avail ? (m.used / (m.used + m.avail)) * 100 : 0;
               return (
-                <tr key={m.mount + m.fs}>
+                <tr
+                  key={m.mount + m.fs}
+                  onContextMenu={(e) =>
+                    menu.open(e, [
+                      { label: "打开目录", icon: <FolderOpen />, onSelect: () => openFiles(m.mount) },
+                      { label: "查找大文件", icon: <FolderSearch />, disabled: duBusy, onSelect: () => (setSel(m.mount), scan(m.mount)) },
+                      "sep",
+                      { label: "复制路径", icon: <Copy />, onSelect: () => copyText(m.mount, "路径") },
+                      { label: "复制设备", icon: <Copy />, onSelect: () => copyText(m.fs, "设备") },
+                    ])
+                  }
+                >
                   <td className="mono ellipsis-cell" title={`${m.fs} → ${m.mount}`}>{m.mount}</td>
                   <td className="faint ellipsis-cell">{m.type}</td>
                   <td className="num">{fmtBytes(m.total)}</td>
@@ -877,17 +985,37 @@ function DiskView() {
             onChange={setSel}
             disabled={duBusy}
           />
-          <button className="btn sm" disabled={duBusy || !mounts.length} onClick={scan}>
+          <button className="btn sm" disabled={duBusy || !mounts.length} onClick={() => scan()}>
             {duBusy ? <LoaderCircle className="mon-spin" /> : <FolderSearch />}
             查找大文件
           </button>
           {duBusy && <span className="faint mon-d-hint">最长 60 秒</span>}
         </div>
         {duErr && <div className="mon-d-err selectable">{duErr}</div>}
+        {du && du.mount !== target && (
+          <div className="row mon-d-hint">
+            <span className="mono ellipsis">{du.mount}</span>
+            <button className="btn sm ghost" disabled={duBusy} onClick={() => scan(du.mount.replace(/\/[^/]+\/?$/, "") || "/")}>
+              上一级
+            </button>
+          </div>
+        )}
         {du && du.rows.length > 0 && (
           <div className="mon-du selectable">
             {du.rows.map((x) => (
-              <div className="mon-du-row" key={x.path}>
+              <div
+                className="mon-du-row"
+                key={x.path}
+                onContextMenu={(e) =>
+                  menu.open(e, [
+                    { label: "打开目录", icon: <FolderOpen />, onSelect: () => openFiles(x.path) },
+                    { label: "分析此目录", icon: <FolderSearch />, disabled: duBusy || x.path === du.mount, onSelect: () => scan(x.path) },
+                    "sep",
+                    { label: "复制路径", icon: <Copy />, onSelect: () => copyText(x.path, "路径") },
+                  ])
+                }
+                onDoubleClick={() => !duBusy && x.path !== du.mount && scan(x.path)}
+              >
                 <span className="num">{x.size}</span>
                 <div className="mon-du-bar">
                   <i style={{ width: `${Math.min(100, (x.bytes / maxBytes) * 100)}%` }} />
@@ -897,6 +1025,7 @@ function DiskView() {
             ))}
           </div>
         )}
+        {menu.node}
       </Sec>
     </>
   );
@@ -966,15 +1095,29 @@ function ProcView() {
   const r = useExec(PS_CMD, parsePs);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "cpu", desc: true });
-  const [target, setTarget] = useState<{ p: PRow; force: boolean } | null>(null);
   const [gone, setGone] = useState<Set<number>>(new Set());
+  const menu = useContextMenu();
+  const acts = useProcActions(
+    hostId,
+    useCallback(
+      (pid: number, sig: string) => {
+        if (sig === "TERM" || sig === "KILL") setGone((g) => new Set(g).add(pid));
+        window.setTimeout(refresh, 600);
+      },
+      [refresh],
+    ),
+  );
+  const ref = (p: PRow) => ({ pid: p.pid, user: p.user, command: p.args, stat: p.stat });
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    const ppid = /^ppid:(\d+)$/.exec(needle);
     const list = (r.data ?? []).filter(
       (p) =>
         !gone.has(p.pid) &&
-        (!needle || p.args.toLowerCase().includes(needle) || p.user.toLowerCase().includes(needle) || String(p.pid) === needle),
+        (ppid
+          ? String(p.ppid) === ppid[1]
+          : !needle || p.args.toLowerCase().includes(needle) || p.user.toLowerCase().includes(needle) || String(p.pid) === needle),
     );
     const k = sort.key;
     list.sort((a, b) => {
@@ -990,24 +1133,6 @@ function ProcView() {
 
   const clickHead = (key: SortKey, num?: boolean) =>
     setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: !!num }));
-
-  const kill = async () => {
-    if (!target) return;
-    const { p, force } = target;
-    setTarget(null);
-    try {
-      const res = await api.execRun(hostId, `kill ${force ? "-9 " : ""}${p.pid}`, 10);
-      if (res.exitCode !== 0) {
-        toast((res.stderr || res.stdout || `退出码 ${res.exitCode}`).trim(), "error");
-      } else {
-        toast(`已向 ${p.pid} 发送 ${force ? "SIGKILL" : "SIGTERM"}`, "success");
-        setGone((g) => new Set(g).add(p.pid));
-        window.setTimeout(refresh, 600);
-      }
-    } catch (e) {
-      toast(errMsg(e), "error");
-    }
-  };
 
   return (
     <Sec
@@ -1043,7 +1168,18 @@ function ProcView() {
         </thead>
         <tbody>
           {rows.map((p) => (
-            <tr key={p.pid}>
+            <tr
+              key={p.pid}
+              onContextMenu={(e) =>
+                menu.open(e, [
+                  ...acts.items(ref(p)),
+                  "sep",
+                  { label: `只看 ${p.user}`, onSelect: () => setQ(p.user) },
+                  { label: `只看子进程`, onSelect: () => setQ(`ppid:${p.pid}`) },
+                ])
+              }
+              onDoubleClick={() => acts.showDetail(ref(p))}
+            >
               <td className="num mono faint">{p.pid}</td>
               <td className="num mono faint">{p.ppid}</td>
               <td className="ellipsis-cell" title={p.user}>{p.user}</td>
@@ -1054,10 +1190,10 @@ function ProcView() {
               <td className="mono faint">{p.stat}</td>
               <td className="mono ellipsis-cell" title={p.args}>{p.args}</td>
               <td className="act">
-                <button className="icon-btn" title="结束" onClick={() => setTarget({ p, force: false })}>
+                <button className="icon-btn" title="结束" onClick={() => acts.confirmKill(ref(p))}>
                   <X />
                 </button>
-                <button className="icon-btn" title="强制结束" onClick={() => setTarget({ p, force: true })}>
+                <button className="icon-btn" title="强制结束" onClick={() => acts.confirmKill(ref(p), true)}>
                   <Skull />
                 </button>
               </td>
@@ -1065,21 +1201,8 @@ function ProcView() {
           ))}
         </tbody>
       </table>
-      {target && (
-        <Confirm
-          title={target.force ? "强制结束进程" : "结束进程"}
-          danger
-          confirmText={target.force ? "强制结束" : "结束"}
-          message={
-            <>
-              {target.force ? "发送 SIGKILL 给" : "发送 SIGTERM 给"} <span className="mono">{target.p.args.slice(0, 120)}</span>（PID{" "}
-              <span className="mono">{target.p.pid}</span>）？
-            </>
-          }
-          onConfirm={kill}
-          onCancel={() => setTarget(null)}
-        />
-      )}
+      {menu.node}
+      {acts.node}
     </Sec>
   );
 }

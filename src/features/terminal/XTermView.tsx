@@ -39,6 +39,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { HistoryDialog, SaveSnippetDialog } from "./HistoryDialog";
 import { onThemeChange, termTheme } from "../../lib/themes";
 import { refreshAiPredict, savedFontSize, TERM_OPTIONS } from "./config";
+import { Highlighter } from "./highlight";
 import { LocalEcho } from "./localEcho";
 import { openTerminal, reopenTerminal } from "./open";
 import { PredictPopup } from "./PredictPopup";
@@ -142,6 +143,7 @@ export function XTermView(props: {
     term.open(hostEl);
     const echo = new LocalEcho(term);
     echo.mount();
+    const highlighter = new Highlighter(term);
     echo.setNetworkLatency(useApp.getState().latency[hostId] ?? null);
     const unLatency = useApp.subscribe((s) => echo.setNetworkLatency(s.latency[hostId] ?? null));
     try {
@@ -333,6 +335,7 @@ export function XTermView(props: {
       unregister();
       predictor.dispose();
       echo.dispose();
+      highlighter.dispose();
       unLatency();
       unTheme();
       window.removeEventListener("term-font-change", onFont);
@@ -361,6 +364,11 @@ export function XTermView(props: {
     });
     return () => cancelAnimationFrame(raf);
   }, [active]);
+
+  // Session gone (disconnected or its host deleted): drop any open prediction.
+  useEffect(() => {
+    if (!tab.alive) inst.current?.predictor.reset();
+  }, [tab.alive]);
 
   const focusTerm = () => inst.current?.term.focus();
   const i = inst.current;
@@ -426,7 +434,7 @@ export function XTermView(props: {
       <div className="term-wrap" ref={wrapRef}>
         <div className="term-host" ref={hostRef} />
 
-        {popup && i && (
+        {popup && i && tab.alive && (
           <PredictPopup state={popup} onPick={(n) => i.predictor.accept(n)} onHover={(n) => i.predictor.select(n)} />
         )}
 

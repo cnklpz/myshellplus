@@ -4,7 +4,7 @@ import { chromium } from "playwright-core";
 export const SSH = { host: "127.0.0.1", port: "2222", user: "tester", pass: "Test12345" };
 
 export async function connect() {
-  const browser = await chromium.connectOverCDP("http://127.0.0.1:9333");
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${9333 + Number(process.env.MSP_E2E_SLOT || 0)}`);
   const ctx = browser.contexts()[0];
   let page = ctx.pages().find((p) => p.url().includes("1420") || p.url().startsWith("http://tauri"));
   for (let i = 0; !page && i < 40; i++) {

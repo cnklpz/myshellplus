@@ -12,14 +12,16 @@ import { BatchView } from "./features/batch/BatchView";
 import { FilesPanel } from "./features/files/FilesPanel";
 import { HostEditor } from "./features/hosts/HostEditor";
 import { HomeView } from "./features/home/HomeView";
+import { OverviewView } from "./features/overview/OverviewView";
 import { ImportDialog } from "./features/import/ImportDialog";
 import { MonitorPanel } from "./features/monitor/MonitorPanel";
 import { SettingsView } from "./features/settings/SettingsView";
 import { SnippetsPanel } from "./features/snippets/SnippetsPanel";
+import { startSwitcherSync } from "./features/switcher/sync";
 import { TerminalArea } from "./features/terminal/TerminalArea";
 import { TunnelsView } from "./features/tunnels/TunnelsView";
 import { VaultGate } from "./features/vault/VaultGate";
-import { api, type ConnState, type Latency } from "./lib/api";
+import { api, type ConnFailure, type ConnState, type ConnStep, type Latency } from "./lib/api";
 import { type SidePanel, type ToolModal, useApp } from "./store";
 import "./App.css";
 
@@ -35,7 +37,8 @@ async function bootstrap() {
   await s.refreshVault();
   await s.refreshHosts();
   for (const id of await api.connList()) s.setConn({ hostId: id, state: "connected" });
-  for (const l of await api.connLatency()) s.setLatency(l.hostId, l.ms);
+  for (const l of await api.connLatency()) s.setLatency(l.hostId, l.ms, l.since);
+  s.setFailures((await api.connFailures()) ?? {});
   const hosts = useApp.getState().hosts;
   const sessions = await api.termList();
   for (const t of sessions) {
@@ -60,13 +63,17 @@ export default function App() {
     // Watchdog heartbeat: the backend reloads the webview if this stops while the window is visible.
     api.uiHeartbeat();
     const beat = setInterval(() => api.uiHeartbeat().catch(() => {}), 5000);
+    const stopSwitcher = startSwitcherSync();
     const un = [
       listen<ConnState>("conn-state", (e) => useApp.getState().setConn(e.payload)),
-      listen<Latency>("latency", (e) => useApp.getState().setLatency(e.payload.hostId, e.payload.ms)),
+      listen<ConnStep>("conn-step", (e) => useApp.getState().pushConnStep(e.payload)),
+      listen<Record<string, ConnFailure>>("conn-failures", (e) => useApp.getState().setFailures(e.payload)),
+      listen<Latency>("latency", (e) => useApp.getState().setLatency(e.payload.hostId, e.payload.ms, e.payload.since)),
       listen<string>("term-exit", (e) => useApp.getState().updateTab(e.payload, { alive: false })),
     ];
     return () => {
       clearInterval(beat);
+      stopSwitcher();
       un.forEach((p) => p.then((f) => f()));
     };
   }, []);
@@ -93,6 +100,11 @@ export default function App() {
           {view === "home" && (
             <div className="view" style={{ display: "flex" }}>
               <HomeView />
+            </div>
+          )}
+          {view === "overview" && (
+            <div className="view" style={{ display: "flex" }}>
+              <OverviewView />
             </div>
           )}
         </main>

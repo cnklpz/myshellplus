@@ -103,10 +103,11 @@ pub struct Host {
     pub host: String,
     pub port: u16,
     pub username: String,
-    /// password | key
+    /// password | key | agent
     pub auth_type: String,
     #[serde(default)]
     pub password_secret: Option<String>,
+    /// key: id in `keys`; agent: SHA256 fingerprint of the agent key (None = any)
     #[serde(default)]
     pub key_id: Option<String>,
     #[serde(default)]

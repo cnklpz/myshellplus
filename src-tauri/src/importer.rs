@@ -710,10 +710,11 @@ struct Backup {
     tunnel_hosts: Vec<String>,
 }
 
-/// Export everything. With a password, secrets are included and the payload is encrypted;
-/// without one, the file contains no passwords or keys.
-pub fn export_backup(ctx: &Ctx, path: &str, password: Option<&str>) -> Result<usize> {
-    let with_secrets = password.is_some_and(|p| !p.is_empty());
+/// Export everything. `secrets` includes passwords and keys; a non-empty password encrypts the payload
+/// (without one, included secrets are stored in plain text).
+pub fn export_backup(ctx: &Ctx, path: &str, secrets: bool, password: Option<&str>) -> Result<usize> {
+    let with_secrets = secrets;
+    let encrypt = password.is_some_and(|p| !p.is_empty());
     if with_secrets && !ctx.vault.is_unlocked() {
         bail!("请先解锁保险库");
     }
@@ -753,7 +754,7 @@ pub fn export_backup(ctx: &Ctx, path: &str, password: Option<&str>) -> Result<us
         "tunnels": tunnels,
     });
     let body = serde_json::to_vec(&payload)?;
-    let file = if with_secrets {
+    let file = if encrypt {
         let mut salt = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut salt);
         let kek = vault::derive_kek(password.unwrap(), &salt)?;
@@ -764,7 +765,11 @@ pub fn export_backup(ctx: &Ctx, path: &str, password: Option<&str>) -> Result<us
         json!({ "format": "myshellplus-backup", "version": 1, "encrypted": false, "data": payload })
     };
     std::fs::write(path, serde_json::to_vec_pretty(&file)?)?;
-    let _ = ctx.db.audit("user", None, "export", path, if with_secrets { "with secrets" } else { "no secrets" });
+    let _ = ctx.db.audit("user", None, "export", path, match (with_secrets, encrypt) {
+        (false, _) => "no secrets",
+        (true, true) => "with secrets, encrypted",
+        (true, false) => "with secrets, plain text",
+    });
     Ok(hosts.len())
 }
 

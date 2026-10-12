@@ -90,5 +90,4 @@
 .fp-chmod > span { font-size: var(--fs-sm); color: var(--fg-1); }
 .fp-chmod > .hd { color: var(--fg-2); font-size: var(--fs-xs); text-align: center; }
 .fp-chmod > label { display: flex; justify-content: center; }
-.fp-chmod input[type="checkbox"] { width: var(--icon-md); height: var(--icon-md); accent-color: var(--accent); margin: 0; }
 .fp-octal { width: 112px; flex: none; }

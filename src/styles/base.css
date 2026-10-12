@@ -249,6 +249,23 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .toggle.on { background: var(--accent); }
 .toggle.on::after { transform: translateX(16px); background: #fff; }
 
+/* Checkbox: one look app-wide, drawn from theme tokens */
+input[type="checkbox"] {
+  appearance: none; flex: none; display: inline-grid; place-content: center; vertical-align: middle;
+  width: 16px; height: 16px; margin: 0; border-radius: 4px; cursor: pointer;
+  background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--line-strong); transition: background-color 0.12s, box-shadow 0.12s;
+}
+input[type="checkbox"]:hover:not(:disabled) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg-2) 60%, transparent); }
+input[type="checkbox"]::after {
+  content: ""; width: 9px; height: 5px; margin-top: -2px; transform: rotate(-45deg) scale(0.4); opacity: 0;
+  border: solid var(--accent-fg); border-width: 0 0 2px 2px; transition: transform 0.12s, opacity 0.12s;
+}
+input[type="checkbox"]:checked, input[type="checkbox"]:indeterminate { background: var(--accent); box-shadow: none; }
+input[type="checkbox"]:checked::after { opacity: 1; transform: rotate(-45deg) scale(1); }
+input[type="checkbox"]:indeterminate::after { opacity: 1; transform: none; width: 8px; height: 0; margin: 0; border-width: 0 0 2px 0; }
+input[type="checkbox"]:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; }
+input[type="checkbox"]:disabled { opacity: 0.45; cursor: default; }
+
 /* Progress bar */
 .bar { height: 6px; border-radius: 3px; background: var(--bg-4); overflow: hidden; flex: none; }
 .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1), background-color 0.2s; }
@@ -264,6 +281,28 @@ input, textarea, select, button { font: inherit; color: inherit; }
 }
 .toast.error { border-color: var(--err); }
 .toast.success { border-color: var(--ok); }
+/* Drop-slot box for sortable drags (lib/dragSlot.ts); the offsetParent must be positioned. */
+.drop-slot {
+  position: absolute; z-index: 1; pointer-events: none; box-sizing: border-box;
+  border: 1px dashed color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  transition: left 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), top 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.16s, height 0.16s;
+}
+/* Discard ghost (lib/dragSlot.ts): a dragged item outside its area, released = cancelled. */
+.drag-discard.drag-discard {
+  position: fixed; left: 0; top: 0; z-index: 300; margin: 0; padding: 0; display: block;
+  overflow: visible; pointer-events: none; will-change: transform; background: none; box-shadow: none;
+}
+.drag-discard-item { margin: 0 !important; visibility: hidden; }
+.drag-discard-label {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: var(--sp-1);
+  background: color-mix(in srgb, var(--err) 16%, var(--bg-2)); box-shadow: inset 0 0 0 1px var(--err), var(--shadow);
+  color: var(--err); font-size: var(--fs-sm); font-weight: 600;
+  animation: drag-discard-in 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.drag-discard-label svg { width: var(--icon-md); height: var(--icon-md); }
+@keyframes drag-discard-in { from { opacity: 0; } }
+.toast-action { flex: none; margin-right: calc(-1 * var(--sp-2)); color: var(--accent); }
 
 kbd { font-family: var(--font-mono); font-size: var(--fs-xs); padding: 1px var(--sp-1); border: 1px solid var(--line-strong); border-radius: 3px; background: var(--bg-2); color: var(--fg-1); }
 
@@ -376,3 +415,27 @@ h1, h2, h3, .page-header h1, .dialog-header, .panel-header { font-weight: 600; l
   *, *::before, *::after { transition-duration: 0s !important; }
   .overlay, .dialog, .select-menu, .pal-overlay, .pal, .ctx-menu.gctx { animation: none !important; }
 }
+
+/* Markdown (AI output). Spacing on the 4px grid; code/quote/table separated by tone, not borders. */
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md blockquote, .md .md-table { margin: 0 0 var(--sp-2); }
+.md h3, .md h4, .md h5, .md h6 { margin: var(--sp-3) 0 var(--sp-1); font-weight: 600; line-height: 1.4; color: var(--fg-0); }
+.md h3 { font-size: var(--fs-lg); }
+.md h4, .md h5, .md h6 { font-size: var(--fs-md); }
+.md ul, .md ol { padding-left: var(--sp-5); }
+.md li { margin: var(--sp-1) 0 0; }
+.md li > ul, .md li > ol, .md li > p, .md li > pre { margin: var(--sp-1) 0 0; }
+.md li::marker { color: var(--fg-2); }
+.md strong { font-weight: 600; color: var(--fg-0); }
+.md a { color: var(--accent); text-decoration: none; cursor: pointer; }
+.md a:hover { text-decoration: underline; }
+.md code { font-family: var(--font-mono); font-size: 0.9em; padding: 1px var(--sp-1); border-radius: 4px; background: var(--bg-2); }
+.md pre { padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--bg-2); overflow-x: auto; line-height: 1.5; }
+.md pre code { padding: 0; background: none; font-size: var(--fs-sm); white-space: pre; }
+.md blockquote { padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bg-2) 60%, transparent); box-shadow: inset 2px 0 0 var(--line-strong); color: var(--fg-1); }
+.md hr { height: 1px; margin: var(--sp-3) 0; border: 0; background: var(--line); }
+.md .md-table { overflow-x: auto; }
+.md table { border-collapse: collapse; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.md th, .md td { padding: var(--sp-1) var(--sp-3); text-align: left; box-shadow: inset 0 -1px 0 var(--line); }
+.md th { font-weight: 600; background: var(--bg-2); }

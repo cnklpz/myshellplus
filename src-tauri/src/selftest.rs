@@ -324,7 +324,7 @@ pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
 
     step!("backup export/import", async {
         let p = std::env::temp_dir().join("msp_selftest_backup.json");
-        let n = importer::export_backup(&ctx, &p.to_string_lossy(), Some("backup-pass"))?;
+        let n = importer::export_backup(&ctx, &p.to_string_lossy(), true, Some("backup-pass"))?;
         let pv = importer::preview(&ctx, "backup", &p.to_string_lossy(), Some("backup-pass"))?;
         if pv.hosts.len() != n || pv.hosts[0].password.as_deref() != Some(pass.as_str()) || !pv.hosts[0].duplicate {
             bail!("backup preview wrong");
@@ -332,7 +332,13 @@ pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
         if importer::preview(&ctx, "backup", &p.to_string_lossy(), Some("wrong")).is_ok() {
             bail!("wrong backup password accepted");
         }
-        Ok::<_, anyhow::Error>(format!("{n} hosts, encrypted"))
+        // Credentials without a backup password: plain text, importable without a password.
+        importer::export_backup(&ctx, &p.to_string_lossy(), true, None)?;
+        let pv = importer::preview(&ctx, "backup", &p.to_string_lossy(), None)?;
+        if pv.hosts.len() != n || pv.hosts[0].password.as_deref() != Some(pass.as_str()) {
+            bail!("plain-text backup preview wrong");
+        }
+        Ok::<_, anyhow::Error>(format!("{n} hosts, encrypted + plain text"))
     });
 
     ctx.pool.disconnect(&host_id).await;

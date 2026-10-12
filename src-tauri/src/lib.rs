@@ -3,9 +3,11 @@ mod batch;
 mod db;
 mod error;
 mod guard;
+mod hotkey;
 mod importer;
 mod mcp;
 mod monitor;
+mod onepass;
 mod predict;
 mod prompts;
 mod selftest;
@@ -190,6 +192,28 @@ fn key_delete(ctx: S, id: String) -> CmdResult<()> {
     Ok(ctx.db.delete_key(&id)?)
 }
 
+// ---------------- SSH agent / 1Password ----------------
+
+#[tauri::command]
+async fn agent_keys() -> CmdResult<Vec<onepass::AgentKey>> {
+    Ok(onepass::agent_keys().await?)
+}
+
+#[tauri::command]
+async fn op_status() -> CmdResult<onepass::OpStatus> {
+    Ok(onepass::status().await)
+}
+
+#[tauri::command]
+async fn op_items(account: Option<String>) -> CmdResult<Vec<onepass::OpItem>> {
+    Ok(onepass::items(account).await?)
+}
+
+#[tauri::command]
+async fn op_item(reference: String, account: Option<String>) -> CmdResult<onepass::OpHost> {
+    Ok(onepass::item(reference, account).await?)
+}
+
 // ---------------- connections & terminals ----------------
 
 #[tauri::command]
@@ -210,6 +234,17 @@ async fn conn_disconnect(ctx: S<'_>, host_id: String) -> CmdResult<()> {
 #[tauri::command]
 fn conn_list(ctx: S) -> Vec<String> {
     ctx.pool.connected_ids()
+}
+
+/// host id -> last connect failure (cleared on the next successful connect).
+#[tauri::command]
+fn conn_failures(ctx: S) -> HashMap<String, ssh::Failure> {
+    ssh::failures(ctx.inner())
+}
+
+#[tauri::command]
+fn conn_failure_dismiss(ctx: S, host_id: String) {
+    ssh::set_failure(ctx.inner(), &host_id, None);
 }
 
 /// host id -> remote OS name, learned on connect.
@@ -251,7 +286,17 @@ fn term_attach(ctx: S, id: String, sink: Channel<Response>) -> CmdResult<term::T
 #[tauri::command]
 async fn term_write(ctx: S<'_>, id: String, data: String) -> CmdResult<()> {
     ctx.terms.get(&id)?.write(data.as_bytes()).await?;
+    // Lets the files panel re-check the shell's directory after a command runs.
+    if data.contains('\r') {
+        use tauri::Emitter;
+        let _ = ctx.app.emit("term-enter", &id);
+    }
     Ok(())
+}
+
+#[tauri::command]
+async fn term_cwd(ctx: S<'_>, id: String) -> CmdResult<Option<String>> {
+    Ok(term::cwd(ctx.inner().clone(), &id).await?)
 }
 
 #[tauri::command]
@@ -285,9 +330,18 @@ fn history_delete(ctx: S, host_id: String, command: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
-async fn exec_run(ctx: S<'_>, host_id: String, command: String, timeout_secs: Option<u64>) -> CmdResult<ssh::exec::ExecResult> {
+async fn exec_run(
+    ctx: S<'_>,
+    host_id: String,
+    command: String,
+    timeout_secs: Option<u64>,
+    quiet: Option<bool>,
+) -> CmdResult<ssh::exec::ExecResult> {
     let c = ssh::get_conn(ctx.inner().clone(), host_id.clone()).await?;
-    let _ = ctx.db.audit("user", Some(&host_id), "exec", &command, "run");
+    // Monitor cards poll their command; only the first run of a card is audited.
+    if !quiet.unwrap_or(false) {
+        let _ = ctx.db.audit("user", Some(&host_id), "exec", &command, "run");
+    }
     Ok(ssh::exec::run(&c, &command, Duration::from_secs(timeout_secs.unwrap_or(60))).await?)
 }
 
@@ -547,6 +601,50 @@ fn local_write_text(path: String, content: String) -> CmdResult<()> {
     Ok(std::fs::write(&path, content)?)
 }
 
+// ---------------- global hotkeys ----------------
+
+#[tauri::command]
+fn hotkey_get(ctx: S) -> Value {
+    json!({ "settings": hotkey::settings(&ctx.db), "status": hotkey::status() })
+}
+
+// async: registering runs on the main thread and must not be called from it.
+#[tauri::command]
+async fn hotkey_save(ctx: S<'_>, settings: hotkey::HotkeySettings) -> CmdResult<hotkey::HotkeyStatus> {
+    ctx.db.set_setting("hotkeys", &settings)?;
+    Ok(hotkey::apply(&ctx.app, &settings))
+}
+
+#[tauri::command]
+async fn hotkey_suspend(ctx: S<'_>, on: bool) -> CmdResult<()> {
+    hotkey::suspend(&ctx.app, &ctx.db, on);
+    Ok(())
+}
+
+#[tauri::command]
+fn switcher_pending() -> Option<Value> {
+    hotkey::pending()
+}
+
+#[tauri::command]
+async fn switcher_present(app: tauri::AppHandle, height: f64) {
+    hotkey::present(&app, height);
+}
+
+#[tauri::command]
+async fn switcher_hide(app: tauri::AppHandle) {
+    hotkey::hide_switcher(&app);
+}
+
+/// Pick from the switcher: `{ tabId }` focuses an open terminal, `{ hostId }` opens a new one.
+#[tauri::command]
+async fn switcher_pick(app: tauri::AppHandle, target: Value) {
+    use tauri::Emitter;
+    hotkey::hide_switcher(&app);
+    hotkey::show_main(&app);
+    let _ = app.emit_to("main", "switcher-pick", target);
+}
+
 // ---------------- import / export ----------------
 
 #[tauri::command]
@@ -574,9 +672,9 @@ async fn import_apply(
 }
 
 #[tauri::command]
-async fn export_backup(ctx: S<'_>, path: String, password: Option<String>) -> CmdResult<usize> {
+async fn export_backup(ctx: S<'_>, path: String, secrets: bool, password: Option<String>) -> CmdResult<usize> {
     let c = ctx.inner().clone();
-    Ok(tokio::task::spawn_blocking(move || importer::export_backup(&c, &path, password.as_deref())).await??)
+    Ok(tokio::task::spawn_blocking(move || importer::export_backup(&c, &path, secrets, password.as_deref())).await??)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -587,17 +685,20 @@ pub fn run() {
     if !isolated {
         // One window only: launching again brings the existing window to the front.
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
+            hotkey::show_main(app);
         }));
     }
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .plugin(hotkey::plugin())
+        // The hidden switcher window must not keep the app alive.
+        .on_window_event(|w, e| {
+            if w.label() == "main" && matches!(e, tauri::WindowEvent::Destroyed) {
+                w.app_handle().exit(0);
+            }
+        })
+        .setup(move |app| {
             // MYSHELL_DATA_DIR: portable mode / isolated test data.
             let dir = match std::env::var_os("MYSHELL_DATA_DIR") {
                 Some(d) => std::path::PathBuf::from(d),
@@ -642,6 +743,9 @@ pub fn run() {
                 });
                 return Ok(());
             }
+            if !isolated {
+                hotkey::apply(app.handle(), &hotkey::settings(&ctx.db));
+            }
             let c2 = ctx.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = mcp::restart(c2.clone(), server).await {
@@ -656,8 +760,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             vault_status, vault_setup, vault_disable_password, vault_unlock, vault_lock, vault_remember, vault_change_password,
             host_list, host_save, host_delete, key_list, key_import, key_generate, key_delete,
-            conn_connect, conn_disconnect, conn_list, conn_latency, host_probe, host_os_map,
-            term_open, term_attach, term_write, term_resize, term_close, term_list, history_record, history_list, history_delete, exec_run,
+            agent_keys, op_status, op_items, op_item,
+            conn_connect, conn_disconnect, conn_list, conn_failures, conn_failure_dismiss, conn_latency, host_probe, host_os_map,
+            term_open, term_attach, term_write, term_resize, term_close, term_list, term_cwd, history_record, history_list, history_delete, exec_run,
             monitor_subscribe, monitor_unsubscribe,
             sftp_list, sftp_read, sftp_write, sftp_mkdir, sftp_rename, sftp_remove, sftp_chmod,
             transfer_start, transfer_list, transfer_cancel, transfer_clear,
@@ -667,6 +772,7 @@ pub fn run() {
             mcp_settings_get, mcp_settings_save, mcp_new_token, prompt_list, prompt_answer, audit_list,
             import_default_path, import_preview, import_apply, export_backup,
             ui_heartbeat, local_read_text, local_write_text,
+            hotkey_get, hotkey_save, hotkey_suspend, switcher_pending, switcher_present, switcher_hide, switcher_pick,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

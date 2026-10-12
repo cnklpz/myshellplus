@@ -1,10 +1,11 @@
 // Command history of a terminal's host (or all hosts): search, insert, run, copy, delete.
-import { Copy, CornerDownLeft, Play, Search, Trash2 } from "lucide-react";
+import { Copy, CornerDownLeft, Play, Search, Star, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Dialog, toast } from "../../components/ui";
 import { api, errMsg, type HistoryHit } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
 import { type TermTab, useApp } from "../../store";
+import { useContextMenu } from "./ContextMenu";
 
 type Scope = "host" | "all";
 const LIMIT = 500;
@@ -39,6 +40,7 @@ export function HistoryDialog(props: { tab: TermTab; onClose: () => void }) {
   const [items, setItems] = useState<HistoryHit[] | null>(null);
   const [sel, setSel] = useState(0);
   const [nonce, setNonce] = useState(0);
+  const [fav, setFav] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
   const first = useRef(true);
@@ -114,6 +116,8 @@ export function HistoryDialog(props: { tab: TermTab; onClose: () => void }) {
       })
       .catch((e) => toast(errMsg(e), "error"));
 
+  const menu = useContextMenu();
+
   const onKey = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
     const list = items ?? [];
@@ -171,6 +175,19 @@ export function HistoryDialog(props: { tab: TermTab; onClose: () => void }) {
               className={"hist-row" + (i === sel ? " selected" : "")}
               onMouseMove={() => i !== sel && setSel(i)}
               onDoubleClick={() => !dead && insert(it.command)}
+              onContextMenu={(e) => {
+                setSel(i);
+                menu.open(e, [
+                  { label: "插入", icon: <CornerDownLeft />, hint: "Enter", disabled: dead, onSelect: () => insert(it.command) },
+                  { label: "执行", icon: <Play />, hint: "Ctrl+Enter", disabled: dead, onSelect: () => run(it.command) },
+                  { label: "复制", icon: <Copy />, onSelect: () => copy(it.command) },
+                  "sep",
+                  { label: "收藏到命令…", icon: <Star />, onSelect: () => setFav(it.command) },
+                  { label: "搜索相似", icon: <Search />, onSelect: () => setQ(it.command.split(/\s+/)[0]) },
+                  "sep",
+                  { label: "删除", icon: <Trash2 />, danger: true, onSelect: () => remove(it.command) },
+                ]);
+              }}
             >
               <span className="hist-cmd mono ellipsis" title={it.command}>
                 {it.command}
@@ -189,6 +206,9 @@ export function HistoryDialog(props: { tab: TermTab; onClose: () => void }) {
                 <button className="icon-btn" title="复制" onClick={() => copy(it.command)}>
                   <Copy />
                 </button>
+                <button className="icon-btn" title="收藏到命令" onClick={() => setFav(it.command)}>
+                  <Star />
+                </button>
                 <button className="icon-btn danger" title="删除" onClick={() => remove(it.command)}>
                   <Trash2 />
                 </button>
@@ -197,6 +217,8 @@ export function HistoryDialog(props: { tab: TermTab; onClose: () => void }) {
           ))}
         </div>
       </div>
+      {menu.node}
+      {fav !== null && <SaveSnippetDialog text={fav} onClose={() => setFav(null)} />}
     </Dialog>
   );
 }

@@ -1,5 +1,6 @@
 import { Copy, CornerDownLeft, LoaderCircle, Play, Sparkles, TextCursorInput, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Markdown } from "../../components/Markdown";
 import { toast } from "../../components/ui";
 import { api, errMsg, type NlCommand } from "../../lib/api";
 
@@ -87,7 +88,7 @@ export function AiBar(props: {
               }
             }}
           />
-          {result.explanation && <div className="ai-expl muted selectable">{result.explanation}</div>}
+          {result.explanation && <Markdown className="ai-expl muted selectable" text={result.explanation} />}
           <div className="row">
             {result.dangerous && (
               <span className="row gap-1 ai-risk">
@@ -195,7 +196,7 @@ export function ExplainCard(props: { hostId: string; text: string; onClose: () =
             分析中…
           </div>
         ) : (
-          <div className="explain-text">{out}</div>
+          <Markdown className="explain-text" text={out} />
         )}
       </div>
     </div>

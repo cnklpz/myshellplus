@@ -1,9 +1,10 @@
 // Command snippets list (side panel); click inserts into the active terminal.
-import { CornerDownLeft, Pencil, Play, Plus, ScrollText, Search, Sparkles, Trash2 } from "lucide-react";
+import { Copy, CopyPlus, CornerDownLeft, Pencil, Play, Plus, ScrollText, Search, Sparkles, Tag, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Confirm, Dialog, Empty, Field, toast } from "../../components/ui";
 import { api, errMsg, type Snippet } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
+import { useContextMenu } from "../terminal/ContextMenu";
 import "./snippets.css";
 
 // {{name}} or {{name:default}}
@@ -32,6 +33,13 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
   const [editing, setEditing] = useState<Partial<Snippet> | null>(null);
   const [deleting, setDeleting] = useState<Snippet | null>(null);
   const [asking, setAsking] = useState<{ snippet: Snippet; mode: Mode } | null>(null);
+
+  const menu = useContextMenu();
+  const copyCmd = (text: string) =>
+    navigator.clipboard.writeText(text).then(
+      () => toast("已复制命令", "success"),
+      () => toast("复制失败", "error"),
+    );
 
   const refresh = useCallback(async () => {
     try {
@@ -121,7 +129,25 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
           <Empty text="无匹配" />
         ) : (
           shown.map((s) => (
-            <div key={s.id} className="sn-item" onClick={() => use(s, "paste")} title="点击插入">
+            <div
+              key={s.id}
+              className="sn-item"
+              onClick={() => use(s, "paste")}
+              title="点击插入"
+              onContextMenu={(e) =>
+                menu.open(e, [
+                  { label: "运行", icon: <Play />, onSelect: () => use(s, "run") },
+                  { label: "插入", icon: <CornerDownLeft />, onSelect: () => use(s, "paste") },
+                  { label: "复制命令", icon: <Copy />, onSelect: () => copyCmd(s.command) },
+                  "sep",
+                  { label: "编辑…", icon: <Pencil />, onSelect: () => setEditing({ ...s }) },
+                  { label: "创建副本…", icon: <CopyPlus />, onSelect: () => setEditing({ ...s, id: undefined, name: `${s.name} 副本` }) },
+                  ...s.tags.map((t) => ({ label: `只看「${t}」`, icon: <Tag />, onSelect: () => setTag(t) })),
+                  "sep",
+                  { label: "删除…", icon: <Trash2 />, danger: true, onSelect: () => setDeleting(s) },
+                ])
+              }
+            >
               <div className="sn-line">
                 <span className="grow ellipsis sn-name">{s.name || "未命名"}</span>
                 {s.tags.length > 0 && <span className="ellipsis sn-tagline">{s.tags.join(" · ")}</span>}
@@ -146,6 +172,7 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
         )}
       </div>
 
+      {menu.node}
       {editing && (
         <SnippetEditor
           initial={editing}

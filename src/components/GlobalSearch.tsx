@@ -1,7 +1,7 @@
 // Global search (Ctrl+P): a centered palette over servers, terminals, saved commands, history,
 // tunnels, settings and app actions. The sidebar shows a trigger that opens it.
 import {
-  Activity, ArrowRight, Bot, Clock, Cloud, Database, Download, FolderOpen, House, Info, KeyRound, Layers, ListChecks,
+  Activity, ArrowRight, Bot, Clock, Cloud, Database, Download, FolderOpen, House, Info, KeyRound, Layers, LayoutDashboard, ListChecks,
   Lock, Network, Palette, Plus, ScrollText, Search, Server, Settings, ShieldCheck, Sparkles, SquareTerminal, Type,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -182,6 +182,7 @@ function SearchPalette(props: { initial: string; onClose: () => void }) {
 
     const actions: Item[] = [
       { key: "a:home", group: "操作", icon: <House />, title: "首页", run: () => s.setView("home") },
+      { key: "a:overview", group: "操作", icon: <LayoutDashboard />, title: "概览", keywords: "监控 大屏 dashboard", run: () => s.setView("overview") },
       { key: "a:term", group: "操作", icon: <SquareTerminal />, title: "终端", run: () => s.setView("terminal") },
       { key: "a:new", group: "操作", icon: <Plus />, title: "新建服务器", keywords: "添加 主机", run: () => s.openEditor("") },
       { key: "a:import", group: "操作", icon: <Download />, title: "导入服务器", keywords: "ssh config putty xshell csv", run: () => s.setImportOpen(true) },

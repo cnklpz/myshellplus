@@ -1,23 +1,35 @@
-// Settings page: AI providers, security, appearance, backup/import, sync, about.
+// Settings page: AI providers, security, appearance, shortcuts, backup/import, sync, about.
 import { getVersion } from "@tauri-apps/api/app";
 import { appDataDir } from "@tauri-apps/api/path";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Lock, Trash2, Zap } from "lucide-react";
+import { Lock, Plus, Trash2, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Select } from "../../components/Select";
 import { Dialog, Field, Toggle, toast } from "../../components/ui";
-import { type AiProvider, type AiSettings, api, errMsg } from "../../lib/api";
+import { type AiProvider, type AiSettings, api, errMsg, type HotkeySettings, type HotkeyStatus } from "../../lib/api";
 import { useApp } from "../../store";
 import "./settings.css";
-import { applyTheme, currentTheme, THEMES } from "../../lib/themes";
+import { applyTheme, currentTheme, type Theme, THEMES } from "../../lib/themes";
+import {
+  compileRule,
+  HL_COLORS,
+  type HlRule,
+  type HlSettings,
+  hlColor,
+  highlightSettings,
+  HL_PRESETS,
+  presetRules,
+  saveHighlightSettings,
+} from "../terminal/highlight";
 import { type EchoMode, echoSettings, saveEchoSettings } from "../terminal/localEcho";
 
-type Section = "ai" | "security" | "appearance" | "backup" | "sync" | "about";
+type Section = "ai" | "security" | "appearance" | "keys" | "backup" | "sync" | "about";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "ai", label: "AI 服务" },
   { id: "security", label: "安全" },
   { id: "appearance", label: "外观" },
+  { id: "keys", label: "快捷键" },
   { id: "backup", label: "备份" },
   { id: "sync", label: "云同步" },
   { id: "about", label: "关于" },
@@ -50,6 +62,7 @@ export function SettingsView() {
             {section === "ai" && <AiSection />}
             {section === "security" && <SecuritySection />}
             {section === "appearance" && <AppearanceSection />}
+            {section === "keys" && <KeysSection />}
             {section === "backup" && <BackupSection />}
             {section === "sync" && <SyncSection />}
             {section === "about" && <AboutSection />}
@@ -600,30 +613,33 @@ function AppearanceSection() {
   return (
     <>
       <Title text="外观" />
-      <Block title="主题">
-        <div className="theme-grid">
-          {THEMES.map((t) => (
-            <button key={t.id} className={"theme-tile" + (t.id === themeId ? " on" : "")} onClick={() => pick(t.id)}>
-              <div className="theme-preview" style={{ background: t.ui.chrome }}>
-                <div className="tp-side" />
-                <div className="tp-main" style={{ background: t.ui.bg0 }}>
-                  <span style={{ background: t.ansi[2], width: "38%" }} />
-                  <span style={{ background: t.ui.fg2, width: "62%" }} />
-                  <span style={{ background: t.ansi[4], width: "48%" }} />
-                  <span style={{ background: t.ui.accent, width: "22%" }} />
-                </div>
-              </div>
-              <div className="theme-name">
-                <span>{t.name}</span>
-                <span className="theme-dots">
-                  {[t.ui.accent, t.ansi[1], t.ansi[2], t.ansi[3]].map((c, i) => (
-                    <i key={i} style={{ background: c }} />
-                  ))}
+      <Block
+        title="主题"
+        actions={
+          <Select
+            size="sm"
+            width={176}
+            value={THEMES.some((t) => t.id === themeId && t.group === "classic") ? themeId : ""}
+            placeholder="经典配色"
+            options={THEMES.filter((t) => t.group === "classic").map((t) => ({
+              value: t.id,
+              text: t.name,
+              label: (
+                <span className="theme-opt">
+                  <span className="ellipsis">{t.name}</span>
+                  <span className="theme-dots">
+                    {[t.ui.bg0, t.ui.accent, t.ansi[1], t.ansi[2], t.ansi[3]].map((c, i) => (
+                      <i key={i} style={{ background: c }} />
+                    ))}
+                  </span>
                 </span>
-              </div>
-            </button>
-          ))}
-        </div>
+              ),
+            }))}
+            onChange={pick}
+          />
+        }
+      >
+        <ThemeGrid themes={THEMES.filter((t) => !t.group)} value={themeId} onPick={pick} />
       </Block>
       <Block title="终端">
         <div className="set-group">
@@ -658,7 +674,129 @@ function AppearanceSection() {
           )}
         </div>
       </Block>
+      <HighlightBlock themeId={themeId} />
     </>
+  );
+}
+
+function ThemeGrid(props: { themes: Theme[]; value: string; onPick: (id: string) => void }) {
+  return (
+    <div className="theme-grid">
+      {props.themes.map((t) => (
+        <button key={t.id} className={"theme-tile" + (t.id === props.value ? " on" : "")} onClick={() => props.onPick(t.id)}>
+          <div className="theme-preview" style={{ background: t.ui.chrome }}>
+            <div className="tp-side" />
+            <div className="tp-main" style={{ background: t.ui.bg0 }}>
+              <span style={{ background: t.ansi[2], width: "38%" }} />
+              <span style={{ background: t.ui.fg2, width: "62%" }} />
+              <span style={{ background: t.ansi[4], width: "48%" }} />
+              <span style={{ background: t.ui.accent, width: "22%" }} />
+            </div>
+          </div>
+          <div className="theme-name">
+            <span className="ellipsis">{t.name}</span>
+            <span className="theme-dots">
+              {[t.ui.accent, t.ansi[1], t.ansi[2], t.ansi[3]].map((c, i) => (
+                <i key={i} style={{ background: c }} />
+              ))}
+            </span>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function HighlightBlock(props: { themeId: string }) {
+  const [hl, setHlState] = useState<HlSettings>(highlightSettings);
+  const setHl = (v: HlSettings) => {
+    setHlState(v);
+    saveHighlightSettings(v);
+  };
+  /** Any edit to the rules turns them into the custom set (a template stays as shipped). */
+  const setRules = (rules: HlRule[]) => setHl({ ...hl, preset: "custom", rules, custom: rules });
+  const setRule = (id: string, patch: Partial<HlRule>) => setRules(hl.rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const add = () =>
+    setRules([...hl.rules, { id: "r" + Date.now().toString(36), pattern: "", regex: false, color: "magenta", on: true }]);
+  const pickPreset = (id: string) =>
+    setHl({ ...hl, enabled: true, preset: id, rules: id === "custom" ? (hl.custom ?? []) : presetRules(id) });
+  const theme = THEMES.find((t) => t.id === props.themeId) ?? currentTheme();
+
+  return (
+    <Block
+      title="高亮"
+      actions={
+        <>
+          <Select
+            size="sm"
+            width={112}
+            value={hl.preset}
+            placeholder="模板"
+            options={[
+              ...HL_PRESETS.map((p) => ({ value: p.id, label: p.label })),
+              ...(hl.custom ? [{ value: "custom", label: "自定义" }] : []),
+            ]}
+            onChange={pickPreset}
+          />
+          <button className="btn sm" onClick={add}>
+            <Plus />
+            添加
+          </button>
+        </>
+      }
+    >
+      <div className="set-group">
+        <Field label="关键词高亮">
+          <Toggle on={hl.enabled} onChange={(enabled) => setHl({ ...hl, enabled })} />
+        </Field>
+        {hl.enabled && hl.rules.length === 0 && <div className="set-empty">未添加规则</div>}
+        {hl.enabled &&
+          hl.rules.map((r) => {
+            const bad = r.pattern !== "" && !compileRule(r);
+            return (
+              <div key={r.id} className="hl-rule">
+                <Toggle on={r.on} onChange={(on) => setRule(r.id, { on })} />
+                <input
+                  className={"input sm mono" + (bad ? " set-err" : "")}
+                  style={bad ? undefined : { color: hlColor(r.color, theme) }}
+                  value={r.pattern}
+                  placeholder={r.regex ? "\\bERROR\\b" : "timeout"}
+                  spellCheck={false}
+                  title={bad ? "正则无效" : undefined}
+                  onChange={(e) => setRule(r.id, { pattern: e.target.value })}
+                />
+                <Seg
+                  value={r.regex ? "re" : "text"}
+                  options={[
+                    { value: "text", label: "文本" },
+                    { value: "re", label: "正则" },
+                  ]}
+                  onChange={(v) => setRule(r.id, { regex: v === "re" })}
+                />
+                <Select
+                  size="sm"
+                  width={96}
+                  value={r.color}
+                  options={HL_COLORS.map((c) => ({
+                    value: c.value,
+                    text: c.label,
+                    label: (
+                      <span className="hl-color">
+                        <i style={{ background: theme.ansi[c.ansi] }} />
+                        {c.label}
+                      </span>
+                    ),
+                  }))}
+                  onChange={(color) => setRule(r.id, { color })}
+                />
+                <button className="icon-btn" title="删除" onClick={() => setRules(hl.rules.filter((x) => x.id !== r.id))}>
+                  <Trash2 />
+                </button>
+              </div>
+            );
+          })}
+      </div>
+    </Block>
   );
 }
 
@@ -688,10 +826,12 @@ function BackupSection() {
 
 export function ExportDialog(props: { onClose: () => void }) {
   const [secrets, setSecrets] = useState(false);
+  const [encrypt, setEncrypt] = useState(true);
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [busy, setBusy] = useState(false);
-  const ok = !busy && (!secrets || (pw !== "" && pw === pw2));
+  const usePw = secrets && encrypt;
+  const ok = !busy && (!usePw || (pw !== "" && pw === pw2));
 
   const run = async () => {
     if (!ok) return;
@@ -699,7 +839,7 @@ export function ExportDialog(props: { onClose: () => void }) {
       const path = await save({ defaultPath: "myshellplus-backup.json", filters: [{ name: "MyShell+ 备份", extensions: ["json"] }] });
       if (!path) return;
       setBusy(true);
-      const n = await api.exportBackup(path, secrets ? pw : undefined);
+      const n = await api.exportBackup(path, secrets, usePw ? pw : undefined);
       toast(`已导出 ${n} 台服务器`, "success");
       props.onClose();
     } catch (e) {
@@ -730,6 +870,11 @@ export function ExportDialog(props: { onClose: () => void }) {
           <Toggle on={secrets} onChange={setSecrets} />
         </Field>
         {secrets && (
+          <Field label="加密备份" hint={encrypt ? undefined : "密码密钥将以明文保存"}>
+            <Toggle on={encrypt} onChange={setEncrypt} />
+          </Field>
+        )}
+        {usePw && (
           <>
             <Field label="备份密码" hint="遗失后无法解密备份">
               <input className="input" type="password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} />
@@ -753,6 +898,199 @@ function SyncSection() {
       <div className="set-group">
         <div className="set-empty">即将推出</div>
       </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- shortcuts
+
+// Mirrors the handlers in main.tsx, GlobalSearch, XTermView, predictor, AiBar, CommandBar,
+// HostEditor and FileDialogs — keep in sync when a binding changes.
+const KEY_GROUPS: { title: string; keys: [string, string][] }[] = [
+  {
+    title: "全局",
+    keys: [
+      ["搜索", "Ctrl+P"],
+      ["搜索（备用）", "Ctrl+Shift+F"],
+      ["重新加载界面", "Ctrl+Shift+R"],
+      ["重新加载界面（备用）", "F5"],
+    ],
+  },
+  {
+    title: "终端",
+    keys: [
+      ["复制", "Ctrl+Shift+C"],
+      ["粘贴", "Ctrl+Shift+V"],
+      ["复制或粘贴", "Shift+右键"],
+      ["终端内搜索", "Ctrl+F"],
+      ["AI 生成命令", "Ctrl+K"],
+      ["AI 解释选中内容", "Ctrl+Shift+E"],
+      ["命令历史", "Ctrl+Shift+H"],
+      ["下一个终端", "Ctrl+Tab"],
+      ["上一个终端", "Ctrl+Shift+Tab"],
+      ["关闭终端", "Ctrl+W"],
+    ],
+  },
+  {
+    title: "命令补全",
+    keys: [
+      ["AI 补全", "Ctrl+Space"],
+      ["选择候选", "↑/↓"],
+      ["采用候选", "Tab"],
+      ["采用第一个候选", "→"],
+      ["中文描述转命令", "Enter"],
+      ["关闭候选", "Esc"],
+    ],
+  },
+  {
+    title: "编辑与对话框",
+    keys: [
+      ["执行命令", "Ctrl+Enter"],
+      ["上一条/下一条历史", "Ctrl+↑/↓"],
+      ["保存服务器/文件", "Ctrl+S"],
+      ["关闭", "Esc"],
+    ],
+  },
+];
+
+function Keys(props: { combo: string }) {
+  return (
+    <span className="set-keys">
+      {props.combo.split("+").map((k, i) => (
+        <kbd key={i}>{k}</kbd>
+      ))}
+    </span>
+  );
+}
+
+const CODE_LABELS: Record<string, string> = {
+  Backquote: "`", Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]", Backslash: "\\",
+  Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/",
+  ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Escape: "Esc",
+};
+
+/** "Ctrl+Alt+KeyM" -> "Ctrl+Alt+M" */
+function hotkeyLabel(spec: string): string {
+  return spec
+    .split("+")
+    .map((k) => CODE_LABELS[k] ?? k.replace(/^Key|^Digit/, "").replace(/^Numpad/, "Num ").replace("Super", "Win"))
+    .join("+");
+}
+
+const MOD_CODES = /^(Control|Alt|Shift|Meta|OS)(Left|Right)?$/;
+
+/** Global hotkey in the global-shortcut syntax, or null while only modifiers are held. */
+function hotkeyFromEvent(e: KeyboardEvent): string | null {
+  if (MOD_CODES.test(e.code) || !e.code) return null;
+  const mods = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Super"].filter(Boolean);
+  return [...mods, e.code].join("+");
+}
+
+/** Click, then press a combination. Esc cancels, Backspace clears. */
+function HotkeyInput(props: { value: string; onChange: (v: string) => void }) {
+  const [rec, setRec] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!rec) return;
+    // Saving re-registers the hotkeys itself; otherwise resume them when recording ends.
+    let saved = false;
+    const done = (v: string) => {
+      saved = true;
+      setRec(false);
+      props.onChange(v);
+    };
+    void api.hotkeySuspend(true);
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const plain = !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
+      if (plain && e.code === "Escape") return setRec(false);
+      if (plain && (e.code === "Backspace" || e.code === "Delete")) return done("");
+      const spec = hotkeyFromEvent(e);
+      if (!spec) return;
+      if (!/^F\d+$/.test(e.code) && !e.ctrlKey && !e.altKey && !e.metaKey) return setErr("需要 Ctrl、Alt 或 Win");
+      done(spec);
+    };
+    const stop = () => setRec(false);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", stop);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", stop);
+      setErr("");
+      if (!saved) void api.hotkeySuspend(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec]);
+  return (
+    <>
+      <button type="button" className={"btn sm hotkey-input" + (rec ? " rec" : "")} onClick={() => setRec(!rec)}>
+        {rec ? <span className="faint">{err || "按下组合键"}</span> : props.value ? <Keys combo={hotkeyLabel(props.value)} /> : <span className="faint">未设置</span>}
+      </button>
+      {props.value && !rec && (
+        <button type="button" className="btn sm ghost" onClick={() => props.onChange("")}>
+          清除
+        </button>
+      )}
+    </>
+  );
+}
+
+function GlobalHotkeys() {
+  const [s, setS] = useState<HotkeySettings | null>(null);
+  const [status, setStatus] = useState<HotkeyStatus>({});
+  useEffect(() => {
+    api.hotkeyGet().then((r) => {
+      setS(r.settings);
+      setStatus(r.status);
+    }, (e) => toast(errMsg(e), "error"));
+  }, []);
+  if (!s) return null;
+  const save = async (patch: Partial<HotkeySettings>) => {
+    const next = { ...s, ...patch };
+    setS(next);
+    try {
+      setStatus(await api.hotkeySave(next));
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const errHint = (e?: string | null) => (e ? <span className="set-err">{e}</span> : undefined);
+  return (
+    <div className="set-block">
+      <div className="set-block-head">系统</div>
+      <div className="set-group set-keys-group">
+        <Field label="显示/隐藏主界面" hint={errHint(status.toggleError)}>
+          <HotkeyInput value={s.toggle} onChange={(toggle) => save({ toggle })} />
+        </Field>
+        <Field label="切换终端" hint={errHint(status.switcherError)}>
+          <HotkeyInput value={s.switcher} onChange={(switcher) => save({ switcher })} />
+        </Field>
+        <Field label="只显示已打开的终端">
+          <Toggle on={s.openOnly} onChange={(openOnly) => save({ openOnly })} disabled={!s.switcher} />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+function KeysSection() {
+  return (
+    <>
+      <Title text="快捷键" />
+      <GlobalHotkeys />
+      {KEY_GROUPS.map((g) => (
+        <div key={g.title} className="set-block">
+          <div className="set-block-head">{g.title}</div>
+          <div className="set-group set-keys-group">
+            {g.keys.map(([label, combo]) => (
+              <Field key={label} label={label}>
+                <Keys combo={combo} />
+              </Field>
+            ))}
+          </div>
+        </div>
+      ))}
     </>
   );
 }

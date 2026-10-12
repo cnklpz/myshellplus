@@ -15,7 +15,7 @@ use tauri::Emitter;
 use tauri::ipc::{Channel, Response};
 use tokio::sync::Notify;
 
-use crate::ssh::get_conn;
+use crate::ssh::{emit_step, get_conn};
 use crate::state::Ctx;
 use crate::util::{new_id, now_ms};
 
@@ -32,6 +32,8 @@ pub struct TermSession {
     notify: Notify,
     sink: Mutex<Option<Channel<Response>>>,
     alive: AtomicBool,
+    /// Remote pid of the login shell, found via the LC_MYSHELL_TID marker (cached after first lookup).
+    shell_pid: Mutex<Option<u32>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -114,8 +116,13 @@ impl Terms {
 }
 
 pub async fn open(ctx: Arc<Ctx>, host_id: String, cols: u32, rows: u32) -> Result<TermInfo> {
+    if ctx.pool.existing(&host_id).is_some() {
+        emit_step(&ctx, &host_id, "复用已有连接", None);
+    }
     let conn = get_conn(ctx.clone(), host_id.clone()).await?;
+    emit_step(&ctx, &host_id, "打开会话通道", None);
     let ch = conn.handle.channel_open_session().await?;
+    emit_step(&ctx, &host_id, "申请终端", Some(format!("{cols}×{rows}")));
     ch.request_pty(
         true,
         "xterm-256color",
@@ -128,11 +135,15 @@ pub async fn open(ctx: Arc<Ctx>, host_id: String, cols: u32, rows: u32) -> Resul
     .await?;
     let _ = ch.set_env(false, "LANG", "en_US.UTF-8").await;
     let _ = ch.set_env(false, "COLORTERM", "truecolor").await;
+    // Marks the shell so term_cwd can find its pid; sshd's default AcceptEnv passes LC_*.
+    let id = new_id();
+    let _ = ch.set_env(false, CWD_MARKER, id.as_str()).await;
+    emit_step(&ctx, &host_id, "启动 Shell", None);
     ch.request_shell(true).await?;
     let (mut reader, writer) = ch.split();
 
     let s = Arc::new(TermSession {
-        id: new_id(),
+        id,
         host_id,
         created: now_ms(),
         writer,
@@ -141,6 +152,7 @@ pub async fn open(ctx: Arc<Ctx>, host_id: String, cols: u32, rows: u32) -> Resul
         notify: Notify::new(),
         sink: Mutex::new(None),
         alive: AtomicBool::new(true),
+        shell_pid: Mutex::new(None),
     });
     ctx.terms.map.lock().insert(s.id.clone(), s.clone());
 
@@ -192,6 +204,40 @@ pub fn attach(ctx: &Ctx, id: &str, sink: Channel<Response>) -> Result<TermInfo> 
     }
     *s.sink.lock() = Some(sink);
     Ok(s.info())
+}
+
+const CWD_MARKER: &str = "LC_MYSHELL_TID";
+
+/// Current directory of the terminal's foreground process (the innermost shell when at a prompt).
+/// Linux only (/proc); None when the shell can't be located, e.g. the server dropped the marker env.
+pub async fn cwd(ctx: Arc<Ctx>, id: &str) -> Result<Option<String>> {
+    let s = ctx.terms.get(id)?;
+    let conn = get_conn(ctx.clone(), s.host_id.clone()).await?;
+    let cached = s.shell_pid.lock().map(|p| p.to_string()).unwrap_or_default();
+    let script = format!(
+        r#"M="{CWD_MARKER}={id}"
+has() {{ tr '\0' '\n' 2>/dev/null < /proc/$1/environ | grep -qx "$M"; }}
+st() {{ set -- $(sed 's/.*) //' /proc/$1/stat 2>/dev/null); echo "$2 $6"; }}
+P={cached}
+if [ -z "$P" ] || ! has "$P"; then
+  P=
+  for d in /proc/[0-9]*; do
+    p=${{d#/proc/}}
+    [ -O "$d" ] && has "$p" || continue
+    set -- $(st "$p"); has "$1" || {{ P=$p; break; }}
+  done
+fi
+[ -n "$P" ] || exit 3
+set -- $(st "$P")
+echo "$P"
+{{ has "$2" && readlink "/proc/$2/cwd"; }} 2>/dev/null || readlink "/proc/$P/cwd""#
+    );
+    let r = crate::ssh::exec::run(&conn, &format!("sh -c {}", crate::util::sh_quote(&script)), Duration::from_secs(10)).await?;
+    let mut lines = r.stdout.lines();
+    let pid = lines.next().and_then(|l| l.trim().parse::<u32>().ok());
+    *s.shell_pid.lock() = pid;
+    let dir = lines.next().map(str::trim).filter(|d| d.starts_with('/'));
+    Ok(pid.and(dir).map(str::to_string))
 }
 
 pub async fn resize(ctx: &Ctx, id: &str, cols: u32, rows: u32) -> Result<()> {

@@ -1,16 +1,19 @@
 // Upload/download progress strip shown at the bottom of the files panel.
 import { listen } from "@tauri-apps/api/event";
-import { ArrowDownToLine, ArrowUpFromLine, Check, X } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Check, Copy, FolderOpen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Bar, toast } from "../../components/ui";
 import { api, errMsg, type TransferInfo } from "../../lib/api";
 import { fmtBytes, fmtRate } from "../../lib/format";
+import { useApp } from "../../store";
+import { useContextMenu } from "../terminal/ContextMenu";
 
 const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 
 /** Subscribes to transfer events; `onFinished` fires once per transfer that reaches "done". */
 export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo) => void }) {
   const [map, setMap] = useState<Record<string, TransferInfo>>({});
+  const menu = useContextMenu();
   const finishedCb = useRef(props.onFinished);
   finishedCb.current = props.onFinished;
   const seen = useRef(new Map<string, TransferInfo["state"]>());
@@ -48,6 +51,13 @@ export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo
     };
   }, [props.hostId]);
 
+  const copy = (text: string) =>
+    navigator.clipboard.writeText(text).then(
+      () => toast("已复制路径", "success"),
+      () => toast("复制失败", "error"),
+    );
+  const cancel = (id: string) => api.transferCancel(id).catch((e) => toast(errMsg(e), "error"));
+
   const list = Object.values(map).sort((a, b) => (a.state === "running" ? 0 : 1) - (b.state === "running" ? 0 : 1));
   if (list.length === 0) return null;
   const running = list.filter((t) => t.state === "running").length;
@@ -75,14 +85,31 @@ export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo
         const pct = t.total ? Math.min(100, (t.done / t.total) * 100) : t.state === "done" ? 100 : 0;
         const Icon = t.direction === "upload" ? ArrowUpFromLine : ArrowDownToLine;
         return (
-          <div className="fp-tx-item" key={t.id} title={`${t.local}\n${t.remote}`}>
+          <div
+            className="fp-tx-item"
+            key={t.id}
+            title={`${t.local}\n${t.remote}`}
+            onContextMenu={(e) =>
+              menu.open(e, [
+                t.state === "running" && { label: "取消", icon: <X />, danger: true, onSelect: () => cancel(t.id) },
+                t.state === "running" && "sep",
+                {
+                  label: "打开远程目录",
+                  icon: <FolderOpen />,
+                  onSelect: () => useApp.getState().openFilesAt(props.hostId, t.remote.replace(/\/[^/]*$/, "") || "/"),
+                },
+                { label: "复制远程路径", icon: <Copy />, onSelect: () => copy(t.remote) },
+                { label: "复制本地路径", icon: <Copy />, onSelect: () => copy(t.local) },
+              ])
+            }
+          >
             <Icon />
             <span className="ellipsis">{name}</span>
             <span className="meta num">
               {t.state === "running" || t.state === "done" ? fmtBytes(t.total) : t.state === "cancelled" ? "已取消" : ""}
             </span>
             {t.state === "running" ? (
-              <button className="icon-btn" title="取消" onClick={() => api.transferCancel(t.id).catch((e) => toast(errMsg(e), "error"))}>
+              <button className="icon-btn" title="取消" onClick={() => cancel(t.id)}>
                 <X />
               </button>
             ) : t.state === "done" ? (
@@ -105,6 +132,7 @@ export function Transfers(props: { hostId: string; onFinished?: (t: TransferInfo
           </div>
         );
       })}
+      {menu.node}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 import { X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
 import { useTweenText } from "../lib/motion";
-import { useApp } from "../store";
+import { useApp, type Toast, type ToastAction } from "../store";
 
 // Open dialogs, innermost last: only the topmost one reacts to Esc.
 const dialogStack: symbol[] = [];
@@ -117,6 +117,18 @@ export function Toasts() {
       {toasts.map((t) => (
         <div key={t.id} className={"toast " + t.kind} onClick={() => dismiss(t.id)}>
           <span className="grow selectable">{t.text}</span>
+          {t.action && (
+            <button
+              className="btn sm ghost toast-action"
+              onClick={(e) => {
+                e.stopPropagation();
+                dismiss(t.id);
+                t.action!.run();
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>
@@ -151,4 +163,4 @@ export function Confirm(props: {
   );
 }
 
-export const toast = (text: string, kind?: "info" | "success" | "error") => useApp.getState().toast(text, kind);
+export const toast = (text: string, kind?: Toast["kind"], action?: ToastAction) => useApp.getState().toast(text, kind, action);

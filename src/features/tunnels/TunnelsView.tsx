@@ -1,12 +1,13 @@
 // Tunnel (port forwarding) management page.
 import { listen } from "@tauri-apps/api/event";
-import { Network, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
+import { Copy, CopyPlus, Network, Pencil, Play, Plus, Power, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Select } from "../../components/Select";
 import { Confirm, Dialog, Empty, Field, Toggle, toast } from "../../components/ui";
 import { api, errMsg, type TunnelDef, type TunnelStatus } from "../../lib/api";
 import { fmtBytes } from "../../lib/format";
 import { useApp } from "../../store";
+import { type MenuItem, useContextMenu } from "../terminal/ContextMenu";
 import "./tunnels.css";
 
 type Kind = TunnelDef["kind"];
@@ -80,6 +81,28 @@ export function TunnelsView() {
     }
   };
 
+  const menu = useContextMenu();
+  const copy = (text: string) =>
+    navigator.clipboard.writeText(text).then(
+      () => toast("已复制", "success"),
+      () => toast("复制失败", "error"),
+    );
+  const rowMenu = (t: TunnelDef): MenuItem[] => {
+    const running = !!status[t.id]?.running;
+    const bind = `${t.bindAddr}:${t.bindPort}`;
+    return [
+      { label: running ? "停止" : "启动", icon: running ? <Square /> : <Play />, disabled: busy[t.id], onSelect: () => toggleRun(t) },
+      { label: "编辑…", icon: <Pencil />, onSelect: () => setEditing({ ...t }) },
+      { label: "复制隧道", icon: <CopyPlus />, onSelect: () => setEditing({ ...t, id: undefined, name: t.name ? `${t.name} 副本` : "", autoStart: false }) },
+      "sep",
+      { label: t.kind === "remote" ? "复制远程地址" : "复制本地地址", icon: <Copy />, onSelect: () => copy(bind) },
+      t.kind !== "dynamic" && { label: "复制目标地址", icon: <Copy />, onSelect: () => copy(`${t.targetHost}:${t.targetPort}`) },
+      { label: t.autoStart ? "关闭自启" : "打开自启", icon: <Power />, onSelect: () => setAuto(t, !t.autoStart) },
+      "sep",
+      { label: "删除…", icon: <Trash2 />, danger: true, onSelect: () => setDeleting(t) },
+    ];
+  };
+
   const newTunnel = () =>
     setEditing({ name: "", hostId: hosts[0]?.id ?? "", kind: "local", bindAddr: "127.0.0.1", bindPort: 8080, targetHost: "127.0.0.1", targetPort: 80, autoStart: false });
 
@@ -122,7 +145,7 @@ export function TunnelsView() {
               const running = !!st?.running;
               const dot = st?.error ? "err" : running ? "ok" : "";
               return (
-                <div key={t.id} className="tn-item">
+                <div key={t.id} className="tn-item" onContextMenu={(e) => menu.open(e, rowMenu(t))} onDoubleClick={(e) => !(e.target as Element).closest("button, input") && setEditing({ ...t })}>
                   <div className="tn-grid tn-row">
                     <span className={"dot " + dot} title={st?.error ? "出错" : running ? "运行中" : "已停止"} />
                     <div className="tn-main">
@@ -157,6 +180,7 @@ export function TunnelsView() {
         )}
       </div>
 
+      {menu.node}
       {editing && (
         <TunnelEditor
           initial={editing}

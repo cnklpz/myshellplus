@@ -36,7 +36,7 @@
 .imp-table .table tr:last-child td { border-bottom: none; }
 .imp-table .table tr.off td { color: var(--fg-2); }
 .imp-table .table tr:not(.off) { cursor: pointer; }
-.imp-table input[type="checkbox"] { margin: 0; vertical-align: middle; accent-color: var(--accent); }
+
 .imp-table .st-dup { color: var(--warn); }
 .imp-table .st-new { color: var(--ok); }
 

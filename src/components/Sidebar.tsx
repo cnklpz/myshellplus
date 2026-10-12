@@ -1,11 +1,12 @@
 // Left sidebar: search on top, then page links (首页 / 终端), the host list, and Agent / 设置 at the bottom.
-import { Bot, House, Settings, SquareTerminal } from "lucide-react";
+import { Bot, House, LayoutDashboard, Settings, SquareTerminal } from "lucide-react";
 import { HostSidebar } from "../features/hosts/HostSidebar";
 import { type ToolModal, type View, useApp } from "../store";
 
 const PAGES: { view: View; label: string; icon: typeof House }[] = [
   { view: "home", label: "首页", icon: House },
   { view: "terminal", label: "终端", icon: SquareTerminal },
+  { view: "overview", label: "概览", icon: LayoutDashboard },
 ];
 
 const TOOLS: { modal: ToolModal; label: string; icon: typeof House }[] = [{ modal: "agent", label: "Agent", icon: Bot }];

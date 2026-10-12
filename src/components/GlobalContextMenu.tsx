@@ -3,11 +3,10 @@
 // everything else gets this menu: edit actions in text fields, copy/search for selected text,
 // and app actions on empty space.
 import {
-  ClipboardPaste, Copy, Download, Palette, Plus, Scissors, Search, Settings, SquareTerminal, TextSelect, Undo2,
+  ClipboardPaste, Copy, Download, Plus, Scissors, Search, Settings, SquareTerminal, TextSelect, Undo2,
 } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { applyTheme, currentTheme, THEMES } from "../lib/themes";
 import { useApp } from "../store";
 import { toast } from "./ui";
 
@@ -152,14 +151,12 @@ function build(e: MouseEvent): Entry[] {
       { sep: true, label: "" },
     );
   }
-  const next = THEMES[(THEMES.findIndex((t) => t.id === currentTheme().id) + 1) % THEMES.length];
   items.push(
     { label: "搜索", icon: <Search />, hint: "Ctrl+P", run: () => openSearch("") },
     { label: "新建服务器", icon: <Plus />, run: () => s.openEditor("") },
     { label: "导入服务器", icon: <Download />, run: () => s.setImportOpen(true) },
     { label: s.view === "terminal" ? "首页" : "终端", icon: <SquareTerminal />, run: () => s.setView(s.view === "terminal" ? "home" : "terminal") },
     { sep: true, label: "" },
-    { label: `主题：${next.name}`, icon: <Palette />, run: () => applyTheme(next.id) },
     { label: "设置", icon: <Settings />, run: () => s.openSettings("ai") },
   );
   return items;

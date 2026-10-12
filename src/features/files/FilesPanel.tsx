@@ -1,4 +1,5 @@
 // SFTP file browser + transfers for one host (side panel).
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -19,8 +20,10 @@ import {
   FolderOpen,
   FolderPlus,
   FolderSymlink,
+  FolderSync,
   Home,
   KeyRound,
+  Link2,
   Pencil,
   RefreshCw,
   SquareTerminal,
@@ -32,6 +35,7 @@ import { Confirm, Empty, toast } from "../../components/ui";
 import { api, errMsg, type FileEntry, type TransferInfo } from "../../lib/api";
 import { fmtBytes, fmtPerms, fmtTime } from "../../lib/format";
 import { termBus } from "../../lib/termBus";
+import { useApp } from "../../store";
 import { ChmodDialog, EditorDialog, NamePrompt } from "./FileDialogs";
 import { Transfers } from "./Transfers";
 import "./files.css";
@@ -79,6 +83,17 @@ type Modal =
   | { kind: "mkdir" }
   | { kind: "touch" }
   | null;
+
+let consumedJump = 0;
+
+const FOLLOW_KEY = "files.followTerm";
+const readFollow = () => {
+  try {
+    return localStorage.getItem(FOLLOW_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
 
 export function FilesPanel({ hostId }: { hostId: string }) {
   const [cwd, setCwd] = useState("");
@@ -151,6 +166,14 @@ export function FilesPanel({ hostId }: { hostId: string }) {
     load("");
   }, [load]);
 
+  // "Open in files" from elsewhere (monitor). Runs after the initial load, so its request wins.
+  const jump = useApp((s) => s.filesJump);
+  useEffect(() => {
+    if (!jump || jump.hostId !== hostId || jump.n === consumedJump) return;
+    consumedJump = jump.n;
+    load(jump.path, { push: true });
+  }, [jump, hostId, load]);
+
   const navigate = (path: string) => load(path, { push: true });
   const goBack = () => {
     const p = back[back.length - 1];
@@ -166,6 +189,50 @@ export function FilesPanel({ hostId }: { hostId: string }) {
     setBack([...back, cwd]);
     load(p);
   };
+
+  // ---------- terminal sync ----------
+  // Paired terminal: the active tab when it's on this host, else the newest live tab for the host.
+  const termTab = useApp((s) => {
+    const a = s.tabs.find((t) => t.id === s.activeTab);
+    if (a?.hostId === hostId && a.alive) return a.id;
+    return [...s.tabs].reverse().find((t) => t.hostId === hostId && t.alive && !t.id.startsWith("pending"))?.id ?? null;
+  });
+  const [follow, setFollow] = useState(readFollow);
+  const followWarned = useRef(false);
+  const toggleFollow = () => {
+    const next = !follow;
+    setFollow(next);
+    followWarned.current = false;
+    try {
+      localStorage.setItem(FOLLOW_KEY, next ? "1" : "0");
+    } catch {}
+  };
+
+  const pullTermCwd = useCallback(async () => {
+    if (!termTab) return;
+    try {
+      const dir = await api.termCwd(termTab);
+      if (!dir) {
+        if (!followWarned.current) toast("无法获取终端目录", "error");
+        followWarned.current = true;
+      } else if (dir !== cwdRef.current) load(dir, { push: true });
+    } catch {}
+  }, [termTab, load]);
+
+  // Follow: re-check after each Enter in the paired terminal (twice, to catch slower commands).
+  useEffect(() => {
+    if (!follow || !termTab) return;
+    pullTermCwd();
+    const timers: number[] = [];
+    const un = listen<string>("term-enter", (e) => {
+      if (e.payload !== termTab) return;
+      timers.push(window.setTimeout(pullTermCwd, 300), window.setTimeout(pullTermCwd, 1500));
+    });
+    return () => {
+      un.then((f) => f());
+      timers.forEach(clearTimeout);
+    };
+  }, [follow, termTab, pullTermCwd]);
 
   // ---------- derived list ----------
   const view = useMemo(() => {
@@ -303,7 +370,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
   };
 
   const cdInTerminal = (target: FileEntry | undefined) => {
-    const t = termBus.active();
+    const t = termTab ? termBus.get(termTab) : undefined;
     if (!t) return toast("没有活动的终端", "error");
     const dir = target ? (target.isDir ? target.path : parentOf(target.path)) : cwd;
     t.run(`cd ${shQuote(dir)}`);
@@ -426,6 +493,17 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           />
           <button className={"icon-btn" + (loading ? " spin" : "")} title="刷新 (F5)" onClick={refresh}>
             <RefreshCw />
+          </button>
+          <button
+            className={"icon-btn" + (follow ? " active" : "")}
+            title={follow ? "停止跟随终端目录" : "跟随终端目录"}
+            disabled={!termTab}
+            onClick={toggleFollow}
+          >
+            <Link2 />
+          </button>
+          <button className="icon-btn" title="终端 cd 到此目录" disabled={!termTab || !cwd} onClick={() => cdInTerminal(undefined)}>
+            <FolderSync />
           </button>
         </div>
         <div className="row">

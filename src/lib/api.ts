@@ -11,7 +11,8 @@ export interface Host {
   host: string;
   port: number;
   username: string;
-  authType: "password" | "key";
+  authType: "password" | "key" | "agent";
+  /** key: id in key list; agent: SHA256 fingerprint of the agent key (null = any) */
   passwordSecret?: string | null;
   keyId?: string | null;
   jumpHostId?: string | null;
@@ -22,6 +23,19 @@ export interface Host {
   sort: number;
   updatedAt: number;
 }
+
+/** Hotkeys in global-shortcut syntax ("Ctrl+Alt+KeyM"); "" = off. */
+export interface HotkeySettings { toggle: string; switcher: string; openOnly: boolean }
+export interface HotkeyStatus { toggleError?: string | null; switcherError?: string | null }
+export interface SwitcherShow { openOnly: boolean; mainFocused: boolean }
+export type SwitcherTarget = { tabId: string } | { hostId: string };
+
+export interface AgentKey { fingerprint: string; comment: string; algo: string }
+export interface OpAccount { id: string; email: string; url: string }
+export interface OpStatus { detected: boolean; agent: boolean; cli: boolean; accounts: OpAccount[] }
+/** category: SSH_KEY | SERVER | LOGIN | AGENT (agent-only fallback; id = fingerprint) */
+export interface OpItem { id: string; title: string; category: string; vault: string; subtitle: string }
+export interface OpHost { title: string; host: string; port?: number | null; username: string; password?: string | null; keyFingerprint?: string | null }
 
 export interface KeyEntry { id: string; name: string; publicKey: string; updatedAt: number }
 export interface Snippet { id: string; name: string; command: string; tags: string[]; updatedAt: number }
@@ -67,8 +81,10 @@ export interface PromptEvent<T = any> { id: string; kind: "hostkey" | "agent"; d
 export interface HostKeyPrompt { host: string; port: number; algo: string; fingerprint: string; changed: boolean; oldFingerprint?: string | null }
 export interface AgentPrompt { hostId: string; hostName: string; host: string; action: string; detail: string; reason: string; dangerous: boolean }
 export interface AuditEntry { id: number; ts: number; source: string; hostId?: string | null; action: string; detail: string; result: string }
-export interface Latency { hostId: string; ms: number | null }
+export interface Latency { hostId: string; ms: number | null; since?: number }
 export interface Probe { hostId: string; ms: number | null; via: "ssh" | "tcp"; error?: string | null }
+export interface ConnStep { hostId: string; label: string; detail?: string | null }
+export interface ConnFailure { error: string; at: number }
 export interface ConnState { hostId: string; state: "connecting" | "connected" | "error" | "disconnected"; error?: string | null }
 
 export type ImportSource = "openssh" | "putty" | "xshell" | "mobaxterm" | "finalshell" | "termius" | "ishell" | "csv" | "backup";
@@ -101,11 +117,18 @@ export const api = {
   keyImport: (name: string, privateKey: string, passphrase?: string) => invoke<KeyEntry>("key_import", { name, privateKey, passphrase }),
   keyGenerate: (name: string) => invoke<KeyEntry>("key_generate", { name }),
   keyDelete: (id: string) => invoke<void>("key_delete", { id }),
+  agentKeys: () => invoke<AgentKey[]>("agent_keys"),
+  opStatus: () => invoke<OpStatus>("op_status"),
+  opItems: (account?: string) => invoke<OpItem[]>("op_items", { account }),
+  opItem: (reference: string, account?: string) => invoke<OpHost>("op_item", { reference, account }),
 
   // connections & terminals
   connConnect: (hostId: string) => invoke<void>("conn_connect", { hostId }),
   connDisconnect: (hostId: string) => invoke<void>("conn_disconnect", { hostId }),
   connList: () => invoke<string[]>("conn_list"),
+  /** host id -> last connect failure (live updates via the "conn-failures" event) */
+  connFailures: () => invoke<Record<string, ConnFailure>>("conn_failures"),
+  connFailureDismiss: (hostId: string) => invoke<void>("conn_failure_dismiss", { hostId }),
   connLatency: () => invoke<Latency[]>("conn_latency"),
   hostProbe: (hostIds: string[]) => invoke<Probe[]>("host_probe", { hostIds }),
   /** host id -> remote OS name (learned on connect; live updates via the "host-os" event) */
@@ -121,11 +144,14 @@ export const api = {
   termResize: (id: string, cols: number, rows: number) => invoke<void>("term_resize", { id, cols, rows }),
   termClose: (id: string) => invoke<void>("term_close", { id }),
   termList: () => invoke<TermInfo[]>("term_list"),
+  /** Shell's current directory; null when it can't be determined (non-Linux, env marker dropped). */
+  termCwd: (id: string) => invoke<string | null>("term_cwd", { id }),
   historyRecord: (hostId: string, command: string) => invoke<void>("history_record", { hostId, command }),
   /** hostId "" = all hosts; newest first */
   historyList: (hostId: string, query = "", limit?: number) => invoke<HistoryHit[]>("history_list", { hostId, query, limit }),
   historyDelete: (hostId: string, command: string) => invoke<void>("history_delete", { hostId, command }),
-  execRun: (hostId: string, command: string, timeoutSecs?: number) => invoke<ExecResult>("exec_run", { hostId, command, timeoutSecs }),
+  execRun: (hostId: string, command: string, timeoutSecs?: number, quiet?: boolean) =>
+    invoke<ExecResult>("exec_run", { hostId, command, timeoutSecs, quiet }),
 
   // monitor
   monitorSubscribe: (hostId: string) => invoke<MonitorSnapshot>("monitor_subscribe", { hostId }),
@@ -184,7 +210,18 @@ export const api = {
   importPreview: (source: ImportSource, path: string, password?: string) => invoke<ImportPreview>("import_preview", { source, path, password }),
   importApply: (hosts: ImportCandidate[], snippets: Snippet[], backupPath?: string, backupPassword?: string) =>
     invoke<ImportResult>("import_apply", { hosts, snippets, backupPath, backupPassword }),
-  exportBackup: (path: string, password?: string) => invoke<number>("export_backup", { path, password }),
+  /** `secrets` includes passwords and keys; `password` encrypts the file. */
+  exportBackup: (path: string, secrets: boolean, password?: string) => invoke<number>("export_backup", { path, secrets, password }),
+
+  // global hotkeys
+  hotkeyGet: () => invoke<{ settings: HotkeySettings; status: HotkeyStatus }>("hotkey_get"),
+  hotkeySave: (settings: HotkeySettings) => invoke<HotkeyStatus>("hotkey_save", { settings }),
+  /** Pause the hotkeys while a new combination is being recorded. */
+  hotkeySuspend: (on: boolean) => invoke<void>("hotkey_suspend", { on }),
+  switcherPending: () => invoke<SwitcherShow | null>("switcher_pending"),
+  switcherPresent: (height: number) => invoke<void>("switcher_present", { height }),
+  switcherHide: () => invoke<void>("switcher_hide"),
+  switcherPick: (target: SwitcherTarget) => invoke<void>("switcher_pick", { target }),
 
   // UI support
   uiHeartbeat: () => invoke<void>("ui_heartbeat"),

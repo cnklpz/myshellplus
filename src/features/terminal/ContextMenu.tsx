@@ -1,11 +1,14 @@
 // Floating right-click menu. Keyboard is captured at window level while open, so the terminal keeps focus.
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface MenuAction {
   label: string;
   icon?: ReactNode;
   hint?: string;
   disabled?: boolean;
+  /** Destructive action: shown in the error colour. */
+  danger?: boolean;
   onSelect: () => void;
 }
 export type MenuItem = MenuAction | "sep" | false | null | undefined;
@@ -107,13 +110,18 @@ export function ContextMenu(props: {
     };
   }, []);
 
-  return (
+  // Portal: a transformed ancestor (dialog animation) would otherwise offset `position: fixed`.
+  return createPortal(
     <div
       ref={ref}
       className="ctx-menu"
       role="menu"
       style={{ left: pos.left, top: pos.top, visibility: pos.ready ? "visible" : "hidden" }}
       onContextMenu={(e) => e.preventDefault()}
+      // Portaled, but React events still bubble to the owner: keep them from reaching row / drag handlers.
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
       onMouseLeave={() => setActive(-1)}
     >
       {items.map((it, i) =>
@@ -124,7 +132,7 @@ export function ContextMenu(props: {
             key={i}
             type="button"
             role="menuitem"
-            className={"ctx-item" + (i === active ? " active" : "")}
+            className={"ctx-item" + (i === active ? " active" : "") + (it.danger ? " danger" : "")}
             disabled={it.disabled}
             onMouseDown={(e) => e.preventDefault()}
             onMouseEnter={() => setActive(it.disabled ? -1 : i)}
@@ -139,6 +147,19 @@ export function ContextMenu(props: {
           </button>
         ),
       )}
-    </div>
+    </div>,
+    document.body,
   );
+}
+
+/** Row-level right-click menu: `open(e, items)` from onContextMenu, render `node` anywhere. */
+export function useContextMenu() {
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const open = useCallback((e: ReactMouseEvent, items: MenuItem[]) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY, items });
+  }, []);
+  const node = menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />;
+  return { open, node };
 }

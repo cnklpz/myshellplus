@@ -1,14 +1,15 @@
 // Add/edit host dialog (driven by store.editingHost: "" = new, id = edit).
 // Two panes: live preview + section nav on the left, scrolling form on the right.
 import {
-  Ban, Bot, CircleCheck, CircleX, Eye, EyeOff, KeyRound, LoaderCircle, Lock, Network, Palette, Server, X,
+  Ban, Bot, CircleCheck, CircleX, Eye, EyeOff, Fingerprint, KeyRound, LoaderCircle, Lock, Network, Palette, Server, X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Select } from "../../components/Select";
 import { toast, useEscClose } from "../../components/ui";
-import { api, errMsg, type AgentPolicy, type Host, type KeyEntry } from "../../lib/api";
+import { api, errMsg, type AgentKey, type AgentPolicy, type Host, type KeyEntry, type OpHost, type OpStatus } from "../../lib/api";
 import { useApp } from "../../store";
 import { KeyManager } from "./KeyManager";
+import { OnePasswordImport } from "./OnePasswordImport";
 import "./hosts.css";
 
 // Host label colors are stored per host (user data), so they are literal values, not theme tokens.
@@ -80,6 +81,10 @@ export function HostEditor() {
   const [busy, setBusy] = useState<"" | "save" | "test">("");
   const [test, setTest] = useState<TestState>({ state: "idle" });
   const [active, setActive] = useState<SecId>("basic");
+  const [op, setOp] = useState<OpStatus | null>(null);
+  /** null = not loaded; error text when the agent is unreachable */
+  const [agentKeys, setAgentKeys] = useState<AgentKey[] | null>(null);
+  const [agentErr, setAgentErr] = useState("");
 
   const mainRef = useRef<HTMLFormElement>(null);
   const secRefs = useRef<Partial<Record<SecId, HTMLElement | null>>>({});
@@ -87,7 +92,22 @@ export function HostEditor() {
 
   useEffect(() => {
     api.keyList().then(setKeys).catch((e) => toast(errMsg(e), "error"));
+    api.opStatus().then(setOp).catch(() => setOp(null));
   }, []);
+
+  const loadAgentKeys = () => {
+    setAgentErr("");
+    api
+      .agentKeys()
+      .then(setAgentKeys)
+      .catch((e) => {
+        setAgentKeys([]);
+        setAgentErr(errMsg(e));
+      });
+  };
+  useEffect(() => {
+    if (h.authType === "agent" && agentKeys === null) loadAgentKeys();
+  }, [h.authType]);
 
   const groups = useMemo(() => [...new Set(hosts.map((x) => x.groupName.trim()).filter(Boolean))].sort(), [hosts]);
   const jumpCandidates = hosts.filter((x) => x.id !== h.id);
@@ -95,6 +115,24 @@ export function HostEditor() {
   const clearErr = (k: ErrKey) => setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e));
   const close = () => openEditor(null);
   const hasSavedPw = !!existing?.passwordSecret;
+  const showAgent = !!op?.agent || !!op?.detected || h.authType === "agent";
+  const agentLabel = op?.detected ? "1Password" : "SSH Agent";
+
+  // key_id means a key-list id for "key" and a fingerprint for "agent", so it never carries over.
+  const setAuth = (t: Host["authType"]) => setH((p) => (p.authType === t ? p : { ...p, authType: t, keyId: null }));
+
+  const fromOnePassword = (o: OpHost) => {
+    setH((p) => ({
+      ...p,
+      name: p.name.trim() ? p.name : o.title || p.name,
+      host: o.host || p.host,
+      username: o.username || p.username,
+      ...(o.keyFingerprint ? { authType: "agent" as const, keyId: o.keyFingerprint } : o.password ? { authType: "password" as const, keyId: null } : {}),
+    }));
+    if (o.port) setPort(String(o.port));
+    if (!o.keyFingerprint && o.password) setPassword(o.password);
+    setErrors({});
+  };
 
   useEscClose(close);
 
@@ -302,6 +340,8 @@ export function HostEditor() {
                 onSave();
               }}
             >
+              {isNew && op?.detected && <OnePasswordImport status={op} onPick={fromOnePassword} />}
+
               <section className="he-sec" data-sec="basic" ref={secRef("basic")}>
                 <h3 className="he-sec-title">基本信息</h3>
                 <div className="he-grid">
@@ -368,12 +408,12 @@ export function HostEditor() {
                 </div>
                 <div className="he-field">
                   <Label text="认证方式" />
-                  <div className="he-grid">
+                  <div className={"he-grid" + (showAgent ? " three" : "")}>
                     <button
                       type="button"
                       className={"he-choice" + (h.authType === "password" ? " on" : "")}
                       aria-pressed={h.authType === "password"}
-                      onClick={() => set("authType", "password")}
+                      onClick={() => setAuth("password")}
                     >
                       <span className="he-choice-icon"><Lock /></span>
                       密码
@@ -382,11 +422,22 @@ export function HostEditor() {
                       type="button"
                       className={"he-choice" + (h.authType === "key" ? " on" : "")}
                       aria-pressed={h.authType === "key"}
-                      onClick={() => set("authType", "key")}
+                      onClick={() => setAuth("key")}
                     >
                       <span className="he-choice-icon"><KeyRound /></span>
                       密钥
                     </button>
+                    {showAgent && (
+                      <button
+                        type="button"
+                        className={"he-choice" + (h.authType === "agent" ? " on" : "")}
+                        aria-pressed={h.authType === "agent"}
+                        onClick={() => setAuth("agent")}
+                      >
+                        <span className="he-choice-icon"><Fingerprint /></span>
+                        {agentLabel}
+                      </button>
+                    )}
                   </div>
                 </div>
                 {h.authType === "password" ? (
@@ -415,6 +466,25 @@ export function HostEditor() {
                         {showPw ? <EyeOff /> : <Eye />}
                       </button>
                     </div>
+                  </div>
+                ) : h.authType === "agent" ? (
+                  <div className="he-field">
+                    <Label
+                      text="Agent 密钥"
+                      action={<button type="button" className="link-btn" onClick={loadAgentKeys}>刷新</button>}
+                    />
+                    <Select
+                      width="100%"
+                      value={h.keyId ?? ""}
+                      options={[
+                        { value: "", label: "任意密钥" },
+                        // Keep a saved fingerprint selectable even when the agent is locked or unreachable.
+                        ...(h.keyId && !agentKeys?.some((k) => k.fingerprint === h.keyId) ? [{ value: h.keyId, label: h.keyId }] : []),
+                        ...(agentKeys ?? []).map((k) => ({ value: k.fingerprint, label: k.comment || k.fingerprint, text: k.comment, hint: k.algo })),
+                      ]}
+                      onChange={(v) => set("keyId", v || null)}
+                    />
+                    <Err text={agentErr} />
                   </div>
                 ) : (
                   <div className="he-field">

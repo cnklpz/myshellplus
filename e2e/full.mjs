@@ -135,7 +135,7 @@ await run("AI: Chinese at prompt becomes a command", async () => {
 
 await run("home: latency test", async () => {
   await page.locator(".sb-item", { hasText: "首页" }).click();
-  await page.locator(".page-header button", { hasText: "全部测速" }).click();
+  await page.locator(".page.home .page-header button", { hasText: "全部测速" }).click();
   const card = page.locator(".home-card", { hasText: "e2e-box" });
   await card.locator(".home-latency-value").filter({ hasText: /\d+ ms/ }).waitFor({ timeout: 8000 });
   await card.locator(".home-more").click();
@@ -425,7 +425,31 @@ await run("home: group tabs + export", async () => {
   await shot(page, "20b-home-tabs");
   await page.locator(".home-tab", { hasText: "全部" }).click();
   await page.locator(".home-card", { hasText: "e2e-box" }).waitFor();
-  await page.locator(".page-header button", { hasText: "导出" }).click();
+  // drag "导入组" in front of "测试"
+  const tabNames = () => page.locator(".home-tab .ellipsis").allInnerTexts();
+  const before = await tabNames();
+  const src = await page.locator(".home-tab", { hasText: "导入组" }).boundingBox();
+  const dst = await page.locator(".home-tab", { hasText: "测试" }).boundingBox();
+  await page.mouse.move(src.x + src.width / 2, src.y + src.height / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(src.x + src.width / 2 + ((dst.x + 4 - src.x - src.width / 2) * i) / 12, src.y + src.height / 2);
+  await sleep(250);
+  await shot(page, "20c-tab-drag");
+  await page.mouse.up();
+  await sleep(300);
+  const after = await tabNames();
+  if (after.indexOf("导入组") > after.indexOf("测试")) throw new Error(`not reordered: ${before} -> ${after}`);
+  const sections = await page.locator(".home-group .section-title .ellipsis").allInnerTexts();
+  if (sections[0] !== "导入组") throw new Error(`sections not reordered: ${sections}`);
+  if ((await page.locator(".home-tab.on .ellipsis").innerText()) !== "全部") throw new Error("drag selected a tab");
+  await page.reload();
+  await page.locator(".sb-item", { hasText: "首页" }).waitFor();
+  await page.keyboard.press("Escape");
+  await page.locator(".sb-item", { hasText: "首页" }).click();
+  await page.locator(".page.home").waitFor();
+  const persisted = await tabNames();
+  if (persisted.indexOf("导入组") > persisted.indexOf("测试")) throw new Error("order not persisted");
+  await page.locator(".page.home .page-header button", { hasText: "导出" }).click();
   await page.getByText("导出备份").first().waitFor();
   await page.keyboard.press("Escape");
   await page.locator(".sb-item", { hasText: "终端" }).click();

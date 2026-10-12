@@ -9,7 +9,7 @@
 .bt-search > svg { position: absolute; left: var(--sp-3); width: var(--icon-sm); height: var(--icon-sm); color: var(--fg-2); pointer-events: none; }
 .bt-search > .input { padding-left: calc(var(--sp-3) + var(--icon-sm) + var(--sp-2)); }
 .bt-count { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
-.bt-check { width: var(--icon-sm); height: var(--icon-sm); margin: 0; flex: none; accent-color: var(--accent); cursor: pointer; }
+
 .bt-group { font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); margin-top: var(--sp-2); }
 .bt-group:hover { background: transparent; color: var(--fg-1); }
 /* host rows: indent so the checkbox column sits under the group label */
