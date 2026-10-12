@@ -47,6 +47,7 @@ export function searchDecorations() {
 
 // ---------- AI prediction flag (cached, refreshed when the window regains focus) ----------
 let aiPredict = false;
+let nlPredict = false;
 let loading: Promise<void> | null = null;
 
 export function refreshAiPredict(): Promise<void> {
@@ -54,10 +55,13 @@ export function refreshAiPredict(): Promise<void> {
     loading = api
       .aiSettingsGet()
       .then((s) => {
-        aiPredict = !!s.aiPredictEnabled;
+        const configured = s.providers.some((p) => p.apiKeySecret || p.kind === "openai");
+        aiPredict = configured && !!s.aiPredictEnabled;
+        nlPredict = configured && s.nlPredictEnabled !== false;
       })
       .catch(() => {
         aiPredict = false;
+        nlPredict = false;
       })
       .finally(() => {
         loading = null;
@@ -67,6 +71,8 @@ export function refreshAiPredict(): Promise<void> {
 }
 
 export const aiPredictEnabled = () => aiPredict;
+/** Chinese (natural language) typed at the prompt asks the AI for a command. */
+export const nlPredictEnabled = () => nlPredict;
 
 let installed = false;
 /** Load once and keep in sync with the settings page (refresh on window focus). */
@@ -75,4 +81,5 @@ export function installAiPredictWatcher() {
   installed = true;
   refreshAiPredict();
   window.addEventListener("focus", () => void refreshAiPredict());
+  window.addEventListener("msp:ai-settings", () => void refreshAiPredict());
 }

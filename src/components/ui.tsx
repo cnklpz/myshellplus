@@ -1,6 +1,7 @@
 // Shared UI building blocks. Prefer these + base.css classes over ad-hoc styles.
 import { X } from "lucide-react";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
+import { useTweenText } from "../lib/motion";
 import { useApp } from "../store";
 
 // Open dialogs, innermost last: only the topmost one reacts to Esc.
@@ -33,11 +34,13 @@ export function Dialog(props: {
   width?: number;
   onClose: () => void;
   footer?: ReactNode;
+  /** Extra class on the overlay, e.g. for a custom enter/leave animation. */
+  className?: string;
   children: ReactNode;
 }) {
   useEscClose(props.onClose);
   return (
-    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
+    <div className={"overlay" + (props.className ? " " + props.className : "")} onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
       <div className="dialog" style={{ width: props.width ?? 520 }}>
         <div className="dialog-header">
           <span className="grow ellipsis">{props.title}</span>
@@ -98,6 +101,12 @@ export function Bar(props: { value: number; max?: number }) {
       <i style={{ width: `${pct}%` }} />
     </div>
   );
+}
+
+/** A number whose text eases to each new value (rAF, no React re-render per frame). */
+export function TweenNum(props: { value: number; fmt: (v: number) => string; className?: string; title?: string; style?: CSSProperties }) {
+  const ref = useTweenText<HTMLSpanElement>(props.value, props.fmt);
+  return <span ref={ref} className={props.className} title={props.title} style={props.style} />;
 }
 
 export function Toasts() {

@@ -1,6 +1,7 @@
 // Larger area chart for the detail dialogs: measured width (ResizeObserver) so text and strokes
 // stay crisp, y-axis labels in a fixed gutter, faint gridlines, hover crosshair with a tooltip.
 import { useEffect, useId, useRef, useState } from "react";
+import { type Pt, useChartTween } from "../../lib/motion";
 import { pathFor } from "./Sparkline";
 
 export interface ChartSeries {
@@ -86,6 +87,24 @@ export function AreaChart(props: {
     setHover(i >= 0 && i < n ? i : null);
   };
 
+  // Per-series geometry; the tween draws in-between frames straight into the path elements.
+  const vals = props.series.map((s) => s.values.slice(-slots));
+  const pts = vals.map((vs) => {
+    const off = n - vs.length;
+    return vs.map((v, i): Pt => [xAt(i + off), yAt(v)]);
+  });
+  const lineRefs = useRef<(SVGPathElement | null)[]>([]);
+  const areaRefs = useRef<(SVGPathElement | null)[]>([]);
+  const areaOf = (p: Pt[], line: string) => `${line} L${p[p.length - 1][0].toFixed(2)},${bottom} L${p[0][0].toFixed(2)},${bottom} Z`;
+  useChartTween(w > 0 ? vals : [], w > 0 ? pts : [], (frame) =>
+    frame.forEach((p, si) => {
+      if (!p.length) return;
+      const line = pathFor(p);
+      lineRefs.current[si]?.setAttribute("d", line);
+      areaRefs.current[si]?.setAttribute("d", areaOf(p, line));
+    }),
+  );
+
   const hx = hover !== null ? xAt(hover) : 0;
   const flip = hx > GUTTER + pw / 2;
 
@@ -118,24 +137,26 @@ export function AreaChart(props: {
                 </g>
               );
             })}
+            <defs>
+              <clipPath id={`${gid}-clip`}>
+                <rect x={GUTTER - 1} y={0} width={pw + 1} height={h} />
+              </clipPath>
+            </defs>
             {props.series.map((s, si) => {
-              const vals = s.values.slice(-slots);
-              if (!vals.length) return null;
-              const off = n - vals.length;
-              const pts: [number, number][] = vals.map((v, i) => [xAt(i + off), yAt(v)]);
-              const line = pathFor(pts);
-              const last = pts[pts.length - 1];
-              const area = `${line} L${last[0].toFixed(2)},${bottom} L${pts[0][0].toFixed(2)},${bottom} Z`;
+              const p = pts[si];
+              if (!p.length) return null;
+              const line = pathFor(p);
+              const area = areaOf(p, line);
               return (
-                <g key={si}>
+                <g key={si} clipPath={`url(#${gid}-clip)`}>
                   <defs>
                     <linearGradient id={`${gid}-${si}`} x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0" style={{ stopColor: s.color, stopOpacity: 0.22 }} />
                       <stop offset="1" style={{ stopColor: s.color, stopOpacity: 0 }} />
                     </linearGradient>
                   </defs>
-                  <path d={area} fill={`url(#${gid}-${si})`} stroke="none" />
-                  <path d={line} fill="none" style={{ stroke: s.color }} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+                  <path ref={(el) => void (areaRefs.current[si] = el)} d={area} fill={`url(#${gid}-${si})`} stroke="none" />
+                  <path ref={(el) => void (lineRefs.current[si] = el)} d={line} fill="none" style={{ stroke: s.color }} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
                 </g>
               );
             })}

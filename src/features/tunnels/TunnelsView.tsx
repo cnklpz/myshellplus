@@ -190,6 +190,12 @@ export function TunnelsView() {
   );
 }
 
+const KIND_DESC: Record<Kind, string> = {
+  local: "本机端口转发到服务器可访问的地址，如内网数据库",
+  remote: "服务器端口转发回本机或本机网络；外部访问需开启 GatewayPorts",
+  dynamic: "本机开 SOCKS5 代理，经服务器访问任意地址",
+};
+
 const validPort = (s: string) => /^\d+$/.test(s) && +s >= 1 && +s <= 65535;
 
 function TunnelEditor(props: { initial: Partial<TunnelDef>; onClose: () => void; onSaved: () => void }) {
@@ -236,6 +242,12 @@ function TunnelEditor(props: { initial: Partial<TunnelDef>; onClose: () => void;
     }
   };
 
+  const server = hosts.find((h) => h.id === hostId)?.name || "服务器";
+  const bind = `${bindAddr.trim() || "?"}:${bindPort || "?"}`;
+  const target = `${targetHost.trim() || "?"}:${targetPort || "?"}`;
+  const flow =
+    kind === "local" ? ["本机 " + bind, server, target] : kind === "remote" ? [server + " " + bind, "本机", target] : ["本机 " + bind, server, "任意地址"];
+
   const portCls = (s: string) => "input tn-port" + (s && !validPort(s) ? " tn-invalid" : "");
 
   return (
@@ -264,7 +276,22 @@ function TunnelEditor(props: { initial: Partial<TunnelDef>; onClose: () => void;
             onChange={setHostId}
           />
         </Field>
-        <Field label="类型" hint={kind === "remote" ? "外部访问需服务器开启 GatewayPorts" : undefined}>
+        <Field
+          label="类型"
+          hint={
+            <div className="tn-kind-hint">
+              <span>{KIND_DESC[kind]}</span>
+              <span className="tn-flow mono">
+                {flow.map((x, i) => (
+                  <span key={i}>
+                    {i > 0 && <span className="tn-arrow">→</span>}
+                    {x}
+                  </span>
+                ))}
+              </span>
+            </div>
+          }
+        >
           <div className="seg">
             {(["local", "remote", "dynamic"] as Kind[]).map((k) => (
               <button key={k} type="button" className={kind === k ? "on" : ""} onClick={() => setKind(k)}>

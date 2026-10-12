@@ -4,7 +4,7 @@
 import type { Terminal } from "@xterm/xterm";
 import { toast } from "../../components/ui";
 import { api, errMsg, type Suggestion } from "../../lib/api";
-import { aiPredictEnabled } from "./config";
+import { aiPredictEnabled, nlPredictEnabled } from "./config";
 
 export interface PopupState {
   items: Suggestion[];
@@ -14,12 +14,15 @@ export interface PopupState {
   top?: number;
   bottom?: number;
   aiLoading: boolean;
+  /** The line is natural language (Chinese): suggestions replace it, Enter fills the pick in. */
+  nl: boolean;
 }
 
 const MAX_ROWS = 6;
 const MAX_AI = 3;
 const LOCAL_DEBOUNCE = 120;
 const AI_IDLE = 600;
+const NL_IDLE = 700;
 const MAX_INPUT = 300;
 /** Popup inner offset from its left edge to the command text (padding + icon column + gap). */
 export const POPUP_TEXT_OFFSET = 4 + 8 + 16 + 8;
@@ -27,6 +30,13 @@ const POPUP_ROW_H = 28;
 const POPUP_WIDTH = 520;
 
 interface Pos { x: number; y: number }
+
+const NL_RE = /[㐀-鿿豈-﫿぀-ヿ가-힯]/;
+/** A description rather than a command: the line starts with CJK text (`git commit -m "修复"` is a command). */
+export const isNaturalLanguage = (s: string) => NL_RE.test(s.trimStart().charAt(0));
+
+/** Last background AI error shown, so a missing key / bad endpoint is reported once, not per keystroke. */
+let lastAiError = "";
 
 export class Predictor {
   private start: Pos | null = null;
@@ -197,6 +207,17 @@ export class Predictor {
     if (input === null) return this.reset();
     this.input = input;
     if (this.suppressed) return;
+    if (isNaturalLanguage(input)) {
+      // Natural language: local history/snippets can't match, ask the AI once typing pauses.
+      this.local = [];
+      this.localInput = input;
+      clearTimeout(this.aiTimer);
+      if (nlPredictEnabled() && input.trim().length >= 2 && input.length <= MAX_INPUT && input !== this.aiInput) {
+        this.aiTimer = window.setTimeout(() => this.runAi(false), NL_IDLE);
+      }
+      this.render();
+      return;
+    }
     if (input.trim().length < 2 || input.length > MAX_INPUT) {
       this.local = [];
       this.localInput = null;
@@ -237,7 +258,8 @@ export class Predictor {
     this.suppressed = false;
     clearTimeout(this.aiTimer);
     const seq = ++this.aiSeq;
-    if (force) {
+    const nl = isNaturalLanguage(input);
+    if (force || nl) {
       this.aiLoading = true;
       this.render();
     }
@@ -247,10 +269,16 @@ export class Predictor {
         if (seq !== this.aiSeq || this.disposed) return;
         this.ai = r.map((s) => ({ ...s, source: "ai" as const }));
         this.aiInput = input;
-        if (force && this.ai.length === 0) toast("AI 无预测结果");
+        lastAiError = "";
+        if ((force || nl) && this.ai.length === 0) toast("AI 无预测结果");
       })
       .catch((e) => {
-        if (force && seq === this.aiSeq) toast(`AI 预测失败：${errMsg(e)}`, "error");
+        if (seq !== this.aiSeq) return;
+        const msg = errMsg(e);
+        if (force || nl || msg !== lastAiError) toast(`AI 预测失败：${msg}`, "error");
+        lastAiError = msg;
+        this.aiInput = input; // don't retry the same input on every keystroke
+        this.ai = [];
       })
       .finally(() => {
         if (seq !== this.aiSeq || this.disposed) return;
@@ -299,7 +327,7 @@ export class Predictor {
     if (this.selected >= items.length) this.selected = items.length - 1;
     const pos = this.position(items.length + (this.aiLoading ? 1 : 0));
     if (!pos) return this.emit(null);
-    this.emit({ items, selected: this.selected, input: this.input, aiLoading: this.aiLoading, ...pos });
+    this.emit({ items, selected: this.selected, input: this.input, aiLoading: this.aiLoading, nl: isNaturalLanguage(this.input), ...pos });
   }
 
   /** Write the rest of suggestion `i` to the shell. */
@@ -336,6 +364,12 @@ export class Predictor {
       return true;
     }
     switch (ev.key) {
+      case "Enter":
+        // A Chinese description would just fail in the shell: fill in the picked command instead.
+        if (ev.shiftKey || !isNaturalLanguage(this.input)) return true;
+        ev.preventDefault();
+        this.accept(Math.max(0, this.selected));
+        return false;
       case "ArrowDown":
         ev.preventDefault();
         this.select(this.selected < n - 1 ? this.selected + 1 : 0);

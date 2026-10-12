@@ -165,26 +165,44 @@ const PREDICT_SYSTEM: &str = "你是 Linux shell 命令补全引擎。根据用�
 只输出 JSON 数组，最多 3 项，每项形如 {\"command\":\"完整命令（必须以用户前缀开头）\",\"description\":\"不超过 12 个字的中文说明\"}。\
 不要输出任何其他文字。";
 
+const NL_PREDICT_SYSTEM: &str = "你是 Linux shell 助手。用户在命令行里用自然语言描述了想做的事，给出可直接执行的命令。只输出 JSON 数组，最多 3 项，按推荐程度排序，每项形如 {\"command\":\"单行命令\",\"description\":\"不超过 12 个字的中文说明\"}。不要输出任何其他文字。";
+
+/// Natural language at the prompt (starts with CJK text) rather than a command prefix.
+pub fn is_natural_language(s: &str) -> bool {
+    s.trim_start().chars().next().is_some_and(|c| matches!(c as u32, 0x3400..=0x9FFF | 0xF900..=0xFAFF | 0x3040..=0x30FF | 0xAC00..=0xD7AF))
+}
+
 pub async fn ai_predict(ctx: Arc<Ctx>, host_id: String, input: String, screen: String) -> Result<Vec<Suggestion>> {
     let s = ai::settings(&ctx.db);
-    let user = format!(
-        "{}\n终端屏幕最后几行:\n{}\n\n用户当前输入的前缀: {}",
-        host_context(&ctx, &host_id),
-        screen.chars().rev().take(1500).collect::<String>().chars().rev().collect::<String>(),
-        input
-    );
+    let nl = is_natural_language(&input);
+    let screen: String = screen.chars().rev().take(1500).collect::<String>().chars().rev().collect();
+    let user = if nl {
+        format!("{}\n终端屏幕最后几行:\n{}\n\n用户的需求: {}", host_context(&ctx, &host_id), screen, input.trim())
+    } else {
+        format!("{}\n终端屏幕最后几行:\n{}\n\n用户当前输入的前缀: {}", host_context(&ctx, &host_id), screen, input)
+    };
     let text = ai::complete(
         &ctx.db,
         &ctx.vault,
         s.predict_provider.as_deref(),
-        Request { system: PREDICT_SYSTEM, user, max_tokens: 4000, effort: "low" },
+        Request {
+            system: if nl { NL_PREDICT_SYSTEM } else { PREDICT_SYSTEM },
+            user,
+            max_tokens: 1024,
+            effort: "low",
+            think: false,
+            model: s.predict_model.clone(),
+        },
     )
     .await?;
     let v = ai::extract_json(&text).unwrap_or(json!([]));
     let mut out = Vec::new();
     for item in v.as_array().cloned().unwrap_or_default() {
         let cmd = item["command"].as_str().unwrap_or_default().trim().to_string();
-        if cmd.is_empty() || !cmd.starts_with(input.trim_start()) {
+        if cmd.is_empty() || cmd.contains('\n') || (!nl && !cmd.starts_with(input.trim_start())) {
+            continue;
+        }
+        if out.iter().any(|o: &Suggestion| o.command == cmd) {
             continue;
         }
         out.push(Suggestion {
@@ -210,7 +228,7 @@ pub struct NlCommand {
 
 pub async fn nl_to_command(ctx: Arc<Ctx>, host_id: String, prompt: String) -> Result<NlCommand> {
     let user = format!("{}\n需求: {}", host_context(&ctx, &host_id), prompt);
-    let text = ai::complete(&ctx.db, &ctx.vault, None, Request { system: NL_SYSTEM, user, max_tokens: 8000, effort: "medium" }).await?;
+    let text = ai::complete(&ctx.db, &ctx.vault, None, Request { system: NL_SYSTEM, user, max_tokens: 8000, effort: "medium", think: ai::settings(&ctx.db).thinking, model: None }).await?;
     let v = ai::extract_json(&text).ok_or_else(|| anyhow::anyhow!("AI 返回无法解析: {text}"))?;
     Ok(NlCommand {
         command: v["command"].as_str().unwrap_or_default().trim().into(),
@@ -223,5 +241,5 @@ const EXPLAIN_SYSTEM: &str = "你是资深 Linux 运维。用简洁的中文解�
 
 pub async fn explain(ctx: Arc<Ctx>, host_id: String, text: String) -> Result<String> {
     let user = format!("{}\n内容:\n{}", host_context(&ctx, &host_id), text);
-    ai::complete(&ctx.db, &ctx.vault, None, Request { system: EXPLAIN_SYSTEM, user, max_tokens: 8000, effort: "medium" }).await
+    ai::complete(&ctx.db, &ctx.vault, None, Request { system: EXPLAIN_SYSTEM, user, max_tokens: 8000, effort: "medium", think: ai::settings(&ctx.db).thinking, model: None }).await
 }

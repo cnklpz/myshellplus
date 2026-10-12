@@ -224,6 +224,21 @@ fn conn_latency(ctx: S) -> Vec<ssh::Latency> {
 }
 
 #[tauri::command]
+async fn host_probe(ctx: S<'_>, host_ids: Vec<String>) -> CmdResult<Vec<ssh::Probe>> {
+    let tasks: Vec<_> = host_ids
+        .into_iter()
+        .map(|id| tauri::async_runtime::spawn(ssh::probe(ctx.inner().clone(), id)))
+        .collect();
+    let mut out = Vec::with_capacity(tasks.len());
+    for t in tasks {
+        if let Ok(p) = t.await {
+            out.push(p);
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
 async fn term_open(ctx: S<'_>, host_id: String, cols: u32, rows: u32) -> CmdResult<term::TermInfo> {
     Ok(term::open(ctx.inner().clone(), host_id, cols, rows).await?)
 }
@@ -641,7 +656,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             vault_status, vault_setup, vault_disable_password, vault_unlock, vault_lock, vault_remember, vault_change_password,
             host_list, host_save, host_delete, key_list, key_import, key_generate, key_delete,
-            conn_connect, conn_disconnect, conn_list, conn_latency, host_os_map,
+            conn_connect, conn_disconnect, conn_list, conn_latency, host_probe, host_os_map,
             term_open, term_attach, term_write, term_resize, term_close, term_list, history_record, history_list, history_delete, exec_run,
             monitor_subscribe, monitor_unsubscribe,
             sftp_list, sftp_read, sftp_write, sftp_mkdir, sftp_rename, sftp_remove, sftp_chmod,

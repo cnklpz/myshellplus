@@ -17,7 +17,8 @@ const LABELS: Record<Suggestion["source"], string> = {
 };
 
 export function PredictPopup(props: { state: PopupState; onPick: (i: number) => void; onHover: (i: number) => void }) {
-  const { items, selected, input, aiLoading, left, top, bottom } = props.state;
+  const { items, selected, input, aiLoading, nl, left, top, bottom } = props.state;
+  const active = nl ? Math.max(0, selected) : selected;
   return (
     <div
       className="predict"
@@ -31,7 +32,7 @@ export function PredictPopup(props: { state: PopupState; onPick: (i: number) => 
         return (
           <div
             key={s.source + s.command}
-            className={"predict-row" + (i === selected ? " selected" : "") + (s.source === "ai" ? " ai" : "")}
+            className={"predict-row" + (i === active ? " selected" : "") + (s.source === "ai" ? " ai" : "")}
             title={LABELS[s.source]}
             onMouseEnter={() => props.onHover(i)}
             onClick={() => props.onPick(i)}
@@ -42,13 +43,14 @@ export function PredictPopup(props: { state: PopupState; onPick: (i: number) => 
               {s.command.slice(prefix.length)}
             </span>
             {s.description && <span className="predict-desc ellipsis">{s.description}</span>}
+            {nl && i === active && <kbd className="predict-key">Enter</kbd>}
           </div>
         );
       })}
       {aiLoading && (
         <div className="predict-row loading">
           <LoaderCircle className="predict-icon spin" />
-          <span className="predict-cmd faint">预测中…</span>
+          <span className="predict-cmd faint">{nl ? "生成命令…" : "预测中…"}</span>
         </div>
       )}
     </div>

@@ -35,3 +35,5 @@
   background: var(--bg-0); border-radius: var(--radius-md);
   font-size: var(--fs-sm); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto;
 }
+.sn-ai-note { display: block; color: var(--fg-1); user-select: text; }
+.sn-ai-note.danger { color: var(--warn); }

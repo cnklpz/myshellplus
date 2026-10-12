@@ -18,6 +18,7 @@
   --icon-sm: 15px;
   --icon-md: 17px;
   --icon-lg: 18px;
+  --label-w: 72px; /* form label column (.field, key/value grids) */
   --scrollbar-w: 10px;
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -162,9 +163,11 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .input:focus, .select:focus, .textarea:focus { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
 .input::placeholder, .textarea::placeholder { color: var(--fg-2); }
 
-/* Form field: label column is fixed width so all inputs align on one vertical line. */
-.field { display: grid; grid-template-columns: 104px 1fr; align-items: center; gap: var(--sp-3); }
-.field > label { color: var(--fg-1); font-size: var(--fs-sm); text-align: right; }
+/* Form field: label column is fixed width so all inputs align on one vertical line.
+   Labels are left-aligned on the container's content edge (same x as the dialog title), and the
+   column is only as wide as the longest label (5 CJK chars), so short labels leave no empty strip. */
+.field { display: grid; grid-template-columns: var(--label-w) minmax(0, 1fr); align-items: center; gap: var(--sp-3); }
+.field > label { color: var(--fg-1); font-size: var(--fs-sm); text-align: left; white-space: nowrap; }
 .field.top { align-items: start; }
 .field.top > label { padding-top: var(--sp-2); }
 .field-hint { grid-column: 2; font-size: var(--fs-xs); color: var(--fg-2); margin-top: calc(-1 * var(--sp-2)); }
@@ -225,11 +228,14 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .card { background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--line); border-radius: var(--radius-lg); padding: var(--sp-4); }
 
 /* Dialog */
-.overlay { position: fixed; inset: 0; background: rgba(4, 6, 8, 0.6); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.overlay { position: fixed; inset: 0; background: rgba(4, 6, 8, 0.6); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 100; animation: overlay-in 0.14s ease-out; }
 .dialog {
   background: var(--bg-1); border: none; border-radius: var(--radius-lg);
   box-shadow: var(--shadow); display: flex; flex-direction: column; max-height: 86vh; max-width: 92vw;
+  animation: dialog-in 0.16s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
+@keyframes overlay-in { from { opacity: 0; } }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(var(--sp-1)) scale(0.99); } }
 .dialog-header { display: flex; align-items: center; gap: var(--sp-2); height: 52px; padding: 0 var(--sp-3) 0 var(--sp-6); font-weight: 600; font-size: var(--fs-lg); letter-spacing: -0.01em; flex: none; }
 .dialog-body { padding: var(--sp-2) var(--sp-6) var(--sp-6); overflow: auto; min-height: 0; }
 .dialog-footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-3) var(--sp-6); background: var(--bg-0); border-radius: 0 0 var(--radius-lg) var(--radius-lg); box-shadow: inset 0 1px 0 var(--line); flex: none; }
@@ -245,7 +251,7 @@ input, textarea, select, button { font: inherit; color: inherit; }
 
 /* Progress bar */
 .bar { height: 6px; border-radius: 3px; background: var(--bg-4); overflow: hidden; flex: none; }
-.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1), background-color 0.2s; }
 .bar.warn > i { background: var(--warn); }
 .bar.err > i { background: var(--err); }
 
@@ -359,3 +365,14 @@ h1, h2, h3, .page-header h1, .dialog-header, .panel-header { font-weight: 600; l
 .gctx .ctx-label { flex: 1 1 auto; }
 .gctx .ctx-hint { margin-left: var(--sp-6); color: var(--fg-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .gctx .ctx-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--line); }
+
+/* Generic loading spinner (lucide LoaderCircle). */
+.spin { animation: msp-spin 0.9s linear infinite; }
+@keyframes msp-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+
+/* Reduced motion: keep state changes instant (spinners/shimmers still run). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0s !important; }
+  .overlay, .dialog, .select-menu, .pal-overlay, .pal, .ctx-menu.gctx { animation: none !important; }
+}

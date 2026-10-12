@@ -299,12 +299,28 @@ function AiSection() {
               onChange={(v) => update({ predictProvider: v || null })}
             />
           </Field>
+          <Field label="预测模型">
+            <input
+              className="input"
+              value={s.predictModel ?? ""}
+              placeholder="claude-haiku-5-5"
+              spellCheck={false}
+              onChange={(e) => update({ predictModel: e.target.value || null })}
+            />
+          </Field>
+          <Field label="深度思考">
+            <Toggle on={!!s.thinking} onChange={(v) => update({ thinking: v })} />
+            <span className="set-note">更准但更慢，补全始终不思考</span>
+          </Field>
           <Field label="本地预测">
             <Toggle on={s.predictEnabled} onChange={(v) => update({ predictEnabled: v })} />
           </Field>
           <Field label="AI 预测">
             <Toggle on={s.aiPredictEnabled} onChange={(v) => update({ aiPredictEnabled: v })} />
             <span className="set-note">会发送当前输入和屏幕内容</span>
+          </Field>
+          <Field label="中文转命令">
+            <Toggle on={s.nlPredictEnabled !== false} onChange={(v) => update({ nlPredictEnabled: v })} />
           </Field>
         </div>
       </Block>
@@ -359,7 +375,6 @@ function SecuritySection() {
               <button className="btn" onClick={() => setChanging(true)}>
                 修改
               </button>
-              <span className="spacer" />
               <button className="btn" onClick={lock}>
                 <Lock />
                 立即锁定

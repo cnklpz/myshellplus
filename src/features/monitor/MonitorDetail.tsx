@@ -7,6 +7,7 @@ import { Select } from "../../components/Select";
 import { Bar, Confirm, Dialog, toast } from "../../components/ui";
 import { api, errMsg, type Sample, type SysInfo } from "../../lib/api";
 import { fmtBytes, fmtPct, fmtRate } from "../../lib/format";
+import { reducedMotion } from "../../lib/motion";
 import { useApp } from "../../store";
 import { AreaChart } from "./AreaChart";
 
@@ -127,10 +128,25 @@ export function MonitorDetail(props: {
   const cur = props.history[props.history.length - 1];
   const name = hostName || props.info?.hostname || "";
 
+  // Play the slide-out before unmounting (instant with reduced motion).
+  const [leaving, setLeaving] = useState(false);
+  const onCloseRef = useRef(props.onClose);
+  onCloseRef.current = props.onClose;
+  const close = useCallback(() => {
+    if (reducedMotion()) onCloseRef.current();
+    else setLeaving(true);
+  }, []);
+  useEffect(() => {
+    if (!leaving) return;
+    const t = window.setTimeout(() => onCloseRef.current(), 140);
+    return () => window.clearTimeout(t);
+  }, [leaving]);
+
   return (
     <Dialog
       width={880}
-      onClose={props.onClose}
+      className={"mon-d-overlay" + (leaving ? " leaving" : "")}
+      onClose={close}
       title={
         <span className="mon-d-title">
           <span className="ellipsis">

@@ -60,7 +60,7 @@ export interface Suggestion { command: string; source: "history" | "snippet" | "
 export interface NlCommand { command: string; explanation: string; dangerous: boolean }
 
 export interface AiProvider { id: string; name: string; kind: "anthropic" | "openai"; baseUrl: string; model: string; apiKeySecret?: string | null }
-export interface AiSettings { providers: AiProvider[]; active?: string | null; predictProvider?: string | null; predictEnabled: boolean; aiPredictEnabled: boolean }
+export interface AiSettings { providers: AiProvider[]; active?: string | null; predictProvider?: string | null; predictEnabled: boolean; aiPredictEnabled: boolean; nlPredictEnabled: boolean; thinking: boolean; predictModel?: string | null }
 export interface McpSettings { enabled: boolean; port: number; token: string }
 
 export interface PromptEvent<T = any> { id: string; kind: "hostkey" | "agent"; data: T; created: number; expires: number }
@@ -68,6 +68,7 @@ export interface HostKeyPrompt { host: string; port: number; algo: string; finge
 export interface AgentPrompt { hostId: string; hostName: string; host: string; action: string; detail: string; reason: string; dangerous: boolean }
 export interface AuditEntry { id: number; ts: number; source: string; hostId?: string | null; action: string; detail: string; result: string }
 export interface Latency { hostId: string; ms: number | null }
+export interface Probe { hostId: string; ms: number | null; via: "ssh" | "tcp"; error?: string | null }
 export interface ConnState { hostId: string; state: "connecting" | "connected" | "error" | "disconnected"; error?: string | null }
 
 export type ImportSource = "openssh" | "putty" | "xshell" | "mobaxterm" | "finalshell" | "csv" | "backup";
@@ -106,6 +107,7 @@ export const api = {
   connDisconnect: (hostId: string) => invoke<void>("conn_disconnect", { hostId }),
   connList: () => invoke<string[]>("conn_list"),
   connLatency: () => invoke<Latency[]>("conn_latency"),
+  hostProbe: (hostIds: string[]) => invoke<Probe[]>("host_probe", { hostIds }),
   /** host id -> remote OS name (learned on connect; live updates via the "host-os" event) */
   hostOsMap: () => invoke<Record<string, string>>("host_os_map"),
   termOpen: (hostId: string, cols: number, rows: number) => invoke<TermInfo>("term_open", { hostId, cols, rows }),
@@ -164,7 +166,10 @@ export const api = {
   aiExplain: (hostId: string, text: string) => invoke<string>("ai_explain", { hostId, text }),
   aiSettingsGet: () => invoke<AiSettings>("ai_settings_get"),
   /** keys: providerId -> new API key ("" clears) */
-  aiSettingsSave: (settings: AiSettings, keys: Record<string, string>) => invoke<void>("ai_settings_save", { settings, keys }),
+  aiSettingsSave: (settings: AiSettings, keys: Record<string, string>) =>
+    invoke<void>("ai_settings_save", { settings, keys }).then(() => {
+      window.dispatchEvent(new Event("msp:ai-settings"));
+    }),
 
   // MCP / agent
   mcpSettingsGet: () => invoke<{ settings: McpSettings; runningPort: number | null }>("mcp_settings_get"),

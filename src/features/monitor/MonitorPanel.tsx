@@ -2,7 +2,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
-import { Bar, Dialog, Empty, toast } from "../../components/ui";
+import { Bar, Dialog, Empty, toast, TweenNum } from "../../components/ui";
 import { api, errMsg, type Proc, type Sample, type SysInfo } from "../../lib/api";
 import { fmtBytes, fmtPct, fmtRate, fmtUptime } from "../../lib/format";
 import { type DetailKind, MonitorDetail } from "./MonitorDetail";
@@ -225,6 +225,9 @@ function pctColor(p: number) {
   return p >= 90 ? "var(--err)" : p >= 75 ? "var(--warn)" : undefined;
 }
 
+const fmt0 = (v: number) => v.toFixed(0);
+const fmtPct0 = (v: number) => `${v.toFixed(0)}%`;
+
 function Tile(props: { label: string; pct: number; sub: string; values: number[]; color: string; onOpen: () => void }) {
   return (
     <div className="mon-tile link" {...linkProps(props.onOpen)}>
@@ -233,7 +236,7 @@ function Tile(props: { label: string; pct: number; sub: string; values: number[]
         <Go />
       </span>
       <span className="big" style={{ color: pctColor(props.pct) }}>
-        {props.pct.toFixed(0)}
+        <TweenNum value={props.pct} fmt={fmt0} />
         <small>%</small>
       </span>
       <span className="sub ellipsis" title={props.sub}>{props.sub}</span>
@@ -253,7 +256,7 @@ function Cores({ cores, onOpen }: { cores: number[]; onOpen: () => void }) {
         {cores.map((c, i) => (
           <div className="mon-core" key={i} title={`CPU${i}: ${fmtPct(c, 1)}`}>
             <i className={c >= 90 ? "err" : c >= 75 ? "warn" : ""} style={{ height: `${Math.max(0, Math.min(100, c))}%` }} />
-            <span>{c.toFixed(0)}</span>
+            <TweenNum value={c} fmt={fmt0} />
           </div>
         ))}
       </div>
@@ -274,9 +277,9 @@ function NetSection({ history, cur, onOpen }: { history: Sample[]; cur: Sample; 
       </div>
       <div className="mon-rate">
         <ArrowDown className="c2" />
-        <span className="ellipsis" title="下行">{fmtRate(cur.rxRate)}</span>
+        <TweenNum className="ellipsis" title="下行" value={cur.rxRate} fmt={fmtRate} />
         <ArrowUp className="c1" />
-        <span className="ellipsis" title="上行">{fmtRate(cur.txRate)}</span>
+        <TweenNum className="ellipsis" title="上行" value={cur.txRate} fmt={fmtRate} />
       </div>
       <div className="mon-chart">
         <Sparkline
@@ -335,9 +338,9 @@ function DiskIoSection({ history, cur, onOpen }: { history: Sample[]; cur: Sampl
       </div>
       <div className="mon-rate">
         <span className="k c2">读</span>
-        <span className="ellipsis">{fmtRate(cur.readRate)}</span>
+        <TweenNum className="ellipsis" value={cur.readRate} fmt={fmtRate} />
         <span className="k c4">写</span>
-        <span className="ellipsis">{fmtRate(cur.writeRate)}</span>
+        <TweenNum className="ellipsis" value={cur.writeRate} fmt={fmtRate} />
       </div>
       <div className="mon-chart">
         <Sparkline
@@ -371,7 +374,7 @@ function DisksSection({ cur, onOpen }: { cur: Sample; onOpen: () => void }) {
                 <span className="size">
                   {fmtBytes(d.used)} / {fmtBytes(d.total)}
                 </span>
-                <span className="pct" style={{ color: pctColor(pct) }}>{pct.toFixed(0)}%</span>
+                <TweenNum className="pct" style={{ color: pctColor(pct) }} value={pct} fmt={fmtPct0} />
               </div>
               <Bar value={d.used} max={d.total || 1} />
             </div>

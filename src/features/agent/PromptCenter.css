@@ -1,6 +1,6 @@
-/* Prompt dialogs (host key / agent approval). Label column matches .field (104px). */
-.pc-kv { display: grid; grid-template-columns: 104px minmax(0, 1fr); column-gap: var(--sp-3); row-gap: var(--sp-2); align-items: baseline; }
-.pc-kv > span:nth-child(odd) { color: var(--fg-1); font-size: var(--fs-sm); text-align: right; }
+/* Prompt dialogs (host key / agent approval). Label column matches .field (--label-w). */
+.pc-kv { display: grid; grid-template-columns: var(--label-w) minmax(0, 1fr); column-gap: var(--sp-3); row-gap: var(--sp-2); align-items: baseline; }
+.pc-kv > span:nth-child(odd) { color: var(--fg-1); font-size: var(--fs-sm); white-space: nowrap; }
 .pc-code {
   display: block; margin: 0; padding: var(--sp-2) var(--sp-3);
   font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.5;

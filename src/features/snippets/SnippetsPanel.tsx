@@ -1,5 +1,5 @@
 // Command snippets list (side panel); click inserts into the active terminal.
-import { CornerDownLeft, Pencil, Play, Plus, ScrollText, Search, Trash2 } from "lucide-react";
+import { CornerDownLeft, Pencil, Play, Plus, ScrollText, Search, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Confirm, Dialog, Empty, Field, toast } from "../../components/ui";
 import { api, errMsg, type Snippet } from "../../lib/api";
@@ -25,7 +25,7 @@ export function fillVars(cmd: string, values: Record<string, string>): string {
 
 type Mode = "run" | "paste";
 
-export function SnippetsPanel({ hostId: _hostId }: { hostId: string | null }) {
+export function SnippetsPanel({ hostId }: { hostId: string | null }) {
   const [list, setList] = useState<Snippet[] | null>(null);
   const [q, setQ] = useState("");
   const [tag, setTag] = useState<string | null>(null);
@@ -149,6 +149,7 @@ export function SnippetsPanel({ hostId: _hostId }: { hostId: string | null }) {
       {editing && (
         <SnippetEditor
           initial={editing}
+          hostId={hostId}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -236,12 +237,14 @@ export function VarsDialog(props: { title: string; command: string; confirmText?
   );
 }
 
-function SnippetEditor(props: { initial: Partial<Snippet>; onClose: () => void; onSaved: () => void }) {
+function SnippetEditor(props: { initial: Partial<Snippet>; hostId: string | null; onClose: () => void; onSaved: () => void }) {
   const init = props.initial;
   const [name, setName] = useState(init.name ?? "");
   const [command, setCommand] = useState(init.command ?? "");
   const [tags, setTags] = useState((init.tags ?? []).join(", "));
   const [saving, setSaving] = useState(false);
+  const [ask, setAsk] = useState("");
+  const [gen, setGen] = useState<{ busy: boolean; note: string; danger: boolean }>({ busy: false, note: "", danger: false });
   const vars = parseVars(command);
   const ok = name.trim() !== "" && command.trim() !== "";
 
@@ -256,6 +259,23 @@ function SnippetEditor(props: { initial: Partial<Snippet>; onClose: () => void; 
       toast(errMsg(e), "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** Natural language -> command via the configured AI service; host context is optional. */
+  const generate = async () => {
+    const prompt = ask.trim();
+    if (!prompt || gen.busy) return;
+    setGen({ busy: true, note: "", danger: false });
+    try {
+      const r = await api.aiNl2Cmd(props.hostId ?? "", prompt);
+      if (!r.command) throw new Error(r.explanation || "AI 未返回命令");
+      setCommand(r.command);
+      if (!name.trim()) setName(prompt.slice(0, 24));
+      setGen({ busy: false, note: r.explanation, danger: r.dangerous });
+    } catch (e) {
+      setGen({ busy: false, note: "", danger: false });
+      toast(errMsg(e), "error");
     }
   };
 
@@ -274,6 +294,27 @@ function SnippetEditor(props: { initial: Partial<Snippet>; onClose: () => void; 
       <div className="stack gap-3">
         <Field label="名称">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </Field>
+        <Field
+          label="AI 生成"
+          hint={gen.note ? <span className={"sn-ai-note" + (gen.danger ? " danger" : "")}>{gen.danger ? "高风险：" : ""}{gen.note}</span> : undefined}
+        >
+          <input
+            className="input"
+            value={ask}
+            placeholder="查看占用 80 端口的进程"
+            onChange={(e) => setAsk(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                generate();
+              }
+            }}
+          />
+          <button className="btn" disabled={!ask.trim() || gen.busy} onClick={generate}>
+            <Sparkles />
+            {gen.busy ? "生成中…" : "生成"}
+          </button>
         </Field>
         <Field
           label="命令"

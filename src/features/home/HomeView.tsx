@@ -2,7 +2,9 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   Download,
+  Gauge,
   Link,
+  LoaderCircle,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -20,6 +22,7 @@ import { useApp } from "../../store";
 import { openTerminal } from "../terminal/open";
 import "./home.css";
 import { useLatencyHistory } from "./latencyHistory";
+import { probeHosts, useProbe, useProbing } from "./probe";
 
 const UNGROUPED = "未分组";
 const TUNNEL_POLL_MS = 5000;
@@ -40,6 +43,7 @@ const STATE_LABEL: Record<ConnKind, string> = {
 };
 
 type Tier = "ok" | "warn" | "err";
+const fmtMs = (ms: number) => (ms < 1 ? "<1 ms" : `${Math.round(ms)} ms`);
 const tierOf = (ms: number | null): Tier => (ms === null || ms >= 200 ? "err" : ms >= 60 ? "warn" : "ok");
 
 /** Running tunnel count, polled while the page is mounted. */
@@ -92,6 +96,7 @@ export function HomeView() {
   const osMap = useHostOs();
   const [query, setQuery] = useState("");
   const [deleting, setDeleting] = useState<Host | null>(null);
+  const probing = useProbing();
 
   const q = query.trim().toLowerCase();
   const groups = useMemo(() => {
@@ -129,6 +134,13 @@ export function HomeView() {
             spellCheck={false}
           />
         </div>
+        <button
+          className="btn"
+          disabled={hosts.length === 0 || probing}
+          onClick={() => probeHosts(groups.flatMap((g) => g.items.map((h) => h.id)))}
+        >
+          {probing ? <LoaderCircle className="spin" /> : <Gauge />} 全部测速
+        </button>
         <button className="btn" onClick={() => setImportOpen(true)}>
           <Download /> 导入
         </button>
@@ -229,15 +241,39 @@ function Sparkline({ samples }: { samples: readonly (number | null)[] }) {
   );
 }
 
-/** Top-right latency readout: sparkline + value when connected, "—" otherwise. */
+/** Top-right latency readout: live SSH ping when connected, else the last manual test; click to test. */
 function Latency({ hostId, connected }: { hostId: string; connected: boolean }) {
   const latency = useApp((s) => s.latency[hostId]);
   const samples = useLatencyHistory(hostId);
-  if (!connected || latency === undefined) return <span className="home-latency idle">—</span>;
+  const probe = useProbe(hostId);
+  const test = (e: MouseEvent) => {
+    e.stopPropagation();
+    probeHosts([hostId]);
+  };
+  if (probe?.busy)
+    return (
+      <span className="home-latency idle">
+        <LoaderCircle className="spin" />
+      </span>
+    );
+  if (connected && latency !== undefined)
+    return (
+      <span className={"home-latency " + tierOf(latency)} title="SSH 往返延迟，点击测速" onClick={test} onDoubleClick={test}>
+        <Sparkline samples={samples} />
+        <span className="home-latency-value">{latency === null ? "超时" : fmtMs(latency)}</span>
+      </span>
+    );
+  const r = probe?.result;
+  if (!r)
+    return (
+      <span className="home-latency idle" title="点击测速" onClick={test} onDoubleClick={test}>
+        —
+      </span>
+    );
+  const title = r.ms === null ? r.error || "超时" : r.via === "tcp" ? "TCP 握手延迟，点击重测" : "SSH 往返延迟，点击重测";
   return (
-    <span className={"home-latency " + tierOf(latency)}>
-      <Sparkline samples={samples} />
-      <span className="home-latency-value">{latency === null ? "超时" : `${Math.round(latency)} ms`}</span>
+    <span className={"home-latency " + tierOf(r.ms)} title={title} onClick={test} onDoubleClick={test}>
+      <span className="home-latency-value">{r.ms === null ? (r.error === "超时" || !r.error ? "超时" : "不可达") : fmtMs(r.ms)}</span>
     </span>
   );
 }
@@ -397,6 +433,9 @@ function CardMenu(props: {
       </button>
       <button onClick={run(() => openTerminal(h.id))}>
         <SquareTerminal /> 新建终端
+      </button>
+      <button onClick={run(() => probeHosts([h.id]))}>
+        <Gauge /> 测速
       </button>
       {props.connected && (
         <button onClick={run(() => api.connDisconnect(h.id))}>

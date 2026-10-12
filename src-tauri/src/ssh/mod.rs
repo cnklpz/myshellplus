@@ -210,6 +210,57 @@ pub struct Latency {
     pub ms: Option<u32>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Probe {
+    pub host_id: String,
+    /// Round trip in ms; None = unreachable / timed out.
+    pub ms: Option<u32>,
+    /// ssh = ping over the live connection, tcp = TCP handshake to the server (or its jump host).
+    pub via: String,
+    pub error: Option<String>,
+}
+
+/// Manual latency test: SSH ping when connected, otherwise time a TCP handshake (DNS excluded).
+pub async fn probe(ctx: Arc<Ctx>, host_id: String) -> Probe {
+    if let Some(c) = ctx.pool.existing(&host_id) {
+        let start = std::time::Instant::now();
+        let ok = tokio::time::timeout(Duration::from_secs(5), c.handle.send_ping()).await;
+        let ms = matches!(ok, Ok(Ok(()))).then(|| start.elapsed().as_millis() as u32);
+        *c.latency.lock() = ms;
+        let _ = ctx.app.emit("latency", Latency { host_id: host_id.clone(), ms });
+        let error = ms.is_none().then(|| "超时".to_string());
+        return Probe { host_id, ms, via: "ssh".into(), error };
+    }
+    let r: Result<u32> = async {
+        let mut h = ctx.db.get_host(&host_id)?;
+        // Behind a jump host the target is usually not reachable directly: measure the first hop.
+        for _ in 0..4 {
+            match h.jump_host_id.clone().filter(|s| !s.is_empty()) {
+                Some(j) => h = ctx.db.get_host(&j)?,
+                None => break,
+            }
+        }
+        let addr = tokio::time::timeout(Duration::from_secs(5), tokio::net::lookup_host((h.host.as_str(), h.port)))
+            .await
+            .map_err(|_| anyhow!("域名解析超时"))?
+            .context("域名解析失败")?
+            .next()
+            .ok_or_else(|| anyhow!("域名解析失败"))?;
+        let start = std::time::Instant::now();
+        tokio::time::timeout(Duration::from_secs(3), tokio::net::TcpStream::connect(addr))
+            .await
+            .map_err(|_| anyhow!("超时"))?
+            .context("无法连接")?;
+        Ok(start.elapsed().as_millis().max(1) as u32)
+    }
+    .await;
+    match r {
+        Ok(ms) => Probe { host_id, ms: Some(ms), via: "tcp".into(), error: None },
+        Err(e) => Probe { host_id, ms: None, via: "tcp".into(), error: Some(format!("{e:#}")) },
+    }
+}
+
 /// Remember the remote OS name (shown on the home cards) after each connect.
 fn spawn_os_probe(ctx: Arc<Ctx>, c: Arc<Conn>) {
     tauri::async_runtime::spawn(async move {

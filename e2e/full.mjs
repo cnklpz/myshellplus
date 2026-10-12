@@ -1,5 +1,6 @@
 // End-to-end test of the real app against the local test SSH server (docker msp-sshd on :2222).
 // Usage: ./launch.sh (fresh data dir) && node full.mjs [onlyStepSubstring]
+import http from "node:http";
 import { connect, makeRunner, shot, SSH } from "./lib.mjs";
 
 const only = process.argv[2];
@@ -10,6 +11,7 @@ const { step, results } = makeRunner(async (name) => {
 });
 const run = (name, fn) => (!only || name.includes(only) ? step(name, fn) : null);
 const sleep = (ms) => page.waitForTimeout(ms);
+const invoke = (cmd, args) => page.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
 
 /** Plain text of the active terminal (xterm buffer). */
 const termText = () => page.evaluate(() => window.__termBus?.active()?.screenText(200) ?? "");
@@ -70,6 +72,80 @@ await run("prediction popup", async () => {
   await page.keyboard.press("Control+U");
 });
 
+// Fake OpenAI-compatible endpoint: rejects the Qwen thinking switch once (client must retry without it).
+const aiReqs = [];
+const fakeAi = http.createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    const j = JSON.parse(body || "{}");
+    aiReqs.push(j);
+    res.setHeader("content-type", "application/json");
+    if ("enable_thinking" in j) {
+      res.writeHead(400);
+      return res.end(JSON.stringify({ error: { message: "unrecognized field: enable_thinking" } }));
+    }
+    const user = j.messages?.at(-1)?.content ?? "";
+    const content = user.includes("用户的需求")
+      ? JSON.stringify([{ command: "df -h /", description: "磁盘占用" }])
+      : user.includes("前缀: ech")
+        ? JSON.stringify([{ command: "echo ai-from-fake", description: "测试" }])
+        : "[]";
+    res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+  });
+});
+await new Promise((r) => fakeAi.listen(0, "127.0.0.1", r));
+
+await run("AI: Chinese at prompt becomes a command", async () => {
+  const saved = await invoke("ai_settings_get");
+  try {
+    await invoke("ai_settings_save", {
+      settings: {
+        providers: [{ id: "fake", name: "Fake", kind: "openai", baseUrl: `http://127.0.0.1:${fakeAi.address().port}/v1`, model: "qwen-fake" }],
+        active: "fake",
+        predictProvider: "fake",
+        predictEnabled: true,
+        aiPredictEnabled: true,
+        nlPredictEnabled: true,
+        thinking: false,
+      },
+      keys: {},
+    });
+    await page.evaluate(() => window.dispatchEvent(new Event("msp:ai-settings")));
+    await sleep(300);
+    await typeInTerm("查看磁盘");
+    await page.locator(".predict-row.ai", { hasText: "df -h /" }).waitFor({ timeout: 8000 });
+    await shot(page, "06b-ai-nl");
+    await page.keyboard.press("Enter"); // fills the command in, does not run the Chinese line
+    await sleep(300);
+    if (!(await termText()).includes("df -h /")) throw new Error("command not filled in");
+    await page.keyboard.press("Enter");
+    await waitTerm("Filesystem");
+    if (!aiReqs.some((r) => !("enable_thinking" in r))) throw new Error("no retry without enable_thinking");
+
+    await typeInTerm("ech");
+    await page.locator(".predict-row.ai", { hasText: "ai-from-fake" }).waitFor({ timeout: 8000 });
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Control+U");
+  } finally {
+    await invoke("ai_settings_save", { settings: saved, keys: {} });
+    await page.evaluate(() => window.dispatchEvent(new Event("msp:ai-settings")));
+  }
+});
+
+await run("home: latency test", async () => {
+  await page.locator(".sb-item", { hasText: "首页" }).click();
+  await page.locator(".page-header button", { hasText: "全部测速" }).click();
+  const card = page.locator(".home-card", { hasText: "e2e-box" });
+  await card.locator(".home-latency-value").filter({ hasText: /\d+ ms/ }).waitFor({ timeout: 8000 });
+  await card.locator(".home-more").click();
+  await page.locator(".home-menu button", { hasText: "测速" }).click();
+  await card.locator(".home-latency-value").filter({ hasText: /\d+ ms/ }).waitFor({ timeout: 8000 });
+  await shot(page, "06c-home-latency");
+  await page.locator(".sb-item", { hasText: "终端" }).click();
+  await page.locator(".term-view:visible .xterm").waitFor();
+});
+
 await run("monitor panel data", async () => {
   await page.locator(".side-tabs button", { hasText: "状态" }).click();
   await page.locator(".side-body").getByText(/CPU/).first().waitFor();
@@ -107,7 +183,6 @@ const backToTerm = async () => {
   await page.locator(".sb-item", { hasText: "终端" }).click();
   await sleep(300);
 };
-const invoke = (cmd, args) => page.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
 
 await run("global search palette", async () => {
   await page.locator(".gs-trigger").click();
@@ -486,5 +561,6 @@ await run("lock screen + unlock", async () => {
 console.log("\nerrors:", errors.length ? errors.slice(0, 10) : "none");
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
+fakeAi.close();
 await browser.close();
 process.exit(failed ? 1 : 0);

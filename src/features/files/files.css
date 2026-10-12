@@ -86,8 +86,8 @@
 .fp-ed-error { color: var(--err); }
 .fp-editor { width: 100%; height: 62vh; font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.5; resize: none; white-space: pre; tab-size: 4; }
 
-.fp-chmod { display: grid; grid-template-columns: 104px repeat(3, 64px); align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-2); }
-.fp-chmod > span { font-size: var(--fs-sm); color: var(--fg-1); text-align: right; }
+.fp-chmod { display: grid; grid-template-columns: var(--label-w) repeat(3, 64px); align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-2); }
+.fp-chmod > span { font-size: var(--fs-sm); color: var(--fg-1); }
 .fp-chmod > .hd { color: var(--fg-2); font-size: var(--fs-xs); text-align: center; }
 .fp-chmod > label { display: flex; justify-content: center; }
 .fp-chmod input[type="checkbox"] { width: var(--icon-md); height: var(--icon-md); accent-color: var(--accent); margin: 0; }

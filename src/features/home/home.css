@@ -52,6 +52,9 @@
 .home-latency.warn { --tier: var(--warn); }
 .home-latency.err { --tier: var(--err); }
 .home-latency-value { font-weight: 500; }
+.home-latency[title] { cursor: pointer; border-radius: var(--radius-sm); padding: 0 var(--sp-1); margin: 0 calc(-1 * var(--sp-1)); }
+.home-latency[title]:hover { background: var(--bg-2); }
+.home-latency > svg { width: var(--icon-sm); height: var(--icon-sm); }
 .home-spark { flex: none; width: 48px; height: 16px; }
 .home-spark polyline {
   fill: none; stroke: var(--tier); stroke-width: 1.25;

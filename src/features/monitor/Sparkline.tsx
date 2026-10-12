@@ -1,6 +1,7 @@
 // Tiny inline-SVG sparkline. Responsive width (viewBox + preserveAspectRatio="none"),
 // smooth curve, low-opacity area fill. Supports several series sharing one scale.
-import { useId } from "react";
+import { useId, useRef } from "react";
+import { type Pt, useChartTween } from "../../lib/motion";
 
 export interface SparkSeries {
   values: number[];
@@ -47,18 +48,29 @@ export function Sparkline(props: {
   }
   const pad = 1.5; // keep the stroke inside the box
   const step = W / (slots - 1);
+  const vals = props.series.map((s) => s.values.slice(-slots));
+  const pts = vals.map((vs) => {
+    const x0 = W - (vs.length - 1) * step;
+    return vs.map((v, i): Pt => [x0 + i * step, h - pad - (Math.max(0, Math.min(v, max)) / max) * (h - pad * 2)]);
+  });
+  const lineRefs = useRef<(SVGPathElement | null)[]>([]);
+  const areaRefs = useRef<(SVGPathElement | null)[]>([]);
+  const areaOf = (p: Pt[], line: string) => `${line} L${p[p.length - 1][0].toFixed(2)},${h} L${p[0][0].toFixed(2)},${h} Z`;
+  useChartTween(vals, pts, (frame) =>
+    frame.forEach((p, si) => {
+      if (!p.length) return;
+      const line = pathFor(p);
+      lineRefs.current[si]?.setAttribute("d", line);
+      areaRefs.current[si]?.setAttribute("d", areaOf(p, line));
+    }),
+  );
   return (
     <svg className="spark" viewBox={`0 0 ${W} ${h}`} preserveAspectRatio="none" style={{ height: h }} aria-hidden>
       {props.series.map((s, si) => {
-        const vals = s.values.slice(-slots);
-        if (vals.length === 0) return null;
-        const x0 = W - (vals.length - 1) * step;
-        const pts: [number, number][] = vals.map((v, i) => [
-          x0 + i * step,
-          h - pad - (Math.max(0, Math.min(v, max)) / max) * (h - pad * 2),
-        ]);
-        const line = pathFor(pts);
-        const area = `${line} L${pts[pts.length - 1][0].toFixed(2)},${h} L${pts[0][0].toFixed(2)},${h} Z`;
+        const p = pts[si];
+        if (p.length === 0) return null;
+        const line = pathFor(p);
+        const area = areaOf(p, line);
         return (
           <g key={si}>
             {props.fill !== false && (
@@ -69,10 +81,10 @@ export function Sparkline(props: {
                     <stop offset="1" style={{ stopColor: s.color, stopOpacity: 0 }} />
                   </linearGradient>
                 </defs>
-                <path d={area} fill={`url(#${gid}-${si})`} stroke="none" />
+                <path ref={(el) => void (areaRefs.current[si] = el)} d={area} fill={`url(#${gid}-${si})`} stroke="none" />
               </>
             )}
-            <path d={line} fill="none" style={{ stroke: s.color }} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+            <path ref={(el) => void (lineRefs.current[si] = el)} d={line} fill="none" style={{ stroke: s.color }} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
           </g>
         );
       })}
