@@ -5,7 +5,8 @@
 //! touches disk, so cloud sync can upload the `secrets` table as-is (end-to-end encrypted).
 //! Two modes:
 //! - device (default): no master password; the data key is protected by Windows DPAPI, so it only opens
-//!   for the current Windows user on this machine. Secrets are still only ciphertext on disk.
+//!   for the current Windows user on this machine (Android: a key file in the app's private storage).
+//!   Secrets are still only ciphertext on disk.
 //! - password (opt-in in 设置 → 安全): the data key is wrapped by a key derived from the master password;
 //!   "remember on this device" additionally keeps a DPAPI copy for auto-unlock.
 
@@ -295,9 +296,63 @@ mod dpapi {
     }
 }
 
-#[cfg(not(windows))]
+/// Android: the device key is a random file in the app's private data directory, which only this
+/// app can read (per-app sandbox). It is kept apart from the database, so a copied database or
+/// backup alone does not open the vault.
+#[cfg(target_os = "android")]
 mod dpapi {
-    // Android/other platforms will use the platform keystore; not implemented yet.
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+
+    use anyhow::{Result, anyhow, bail};
+    use rand::RngCore;
+    use zeroize::Zeroizing;
+
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+
+    pub fn set_dir(dir: PathBuf) {
+        let _ = DIR.set(dir);
+    }
+
+    fn device_key(create: bool) -> Result<Zeroizing<[u8; 32]>> {
+        let path = DIR.get().ok_or_else(|| anyhow!("设备密钥目录未设置"))?.join("device.key");
+        match std::fs::read(&path) {
+            Ok(b) => {
+                let b = Zeroizing::new(b);
+                let mut k = Zeroizing::new([0u8; 32]);
+                if b.len() != 32 {
+                    bail!("设备密钥文件损坏");
+                }
+                k.copy_from_slice(&b);
+                Ok(k)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && create => {
+                let mut k = Zeroizing::new([0u8; 32]);
+                rand::thread_rng().fill_bytes(k.as_mut());
+                std::fs::write(&path, k.as_ref())?;
+                Ok(k)
+            }
+            Err(e) => Err(anyhow!("读取设备密钥失败: {e}")),
+        }
+    }
+
+    pub fn protect(data: &[u8]) -> Result<Vec<u8>> {
+        let (n, ct) = super::seal(&*device_key(true)?, data)?;
+        Ok(super::pack(&n, &ct))
+    }
+
+    pub fn unprotect(data: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+        let (n, ct) = super::unpack(data)?;
+        super::open(&*device_key(false)?, n, ct)
+    }
+}
+
+#[cfg(target_os = "android")]
+pub use dpapi::set_dir as set_device_dir;
+
+#[cfg(not(any(windows, target_os = "android")))]
+mod dpapi {
+    // Other platforms will use the platform keystore; not implemented yet.
     use anyhow::{Result, bail};
     pub fn protect(_: &[u8]) -> Result<Vec<u8>> {
         bail!("当前平台不支持记住密码")

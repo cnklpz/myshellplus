@@ -224,6 +224,18 @@ const CWD_MARKER: &str = "LC_MYSHELL_TID";
 pub async fn cwd(ctx: Arc<Ctx>, id: &str) -> Result<Option<String>> {
     let s = ctx.terms.get(id)?;
     let conn = get_conn(ctx.clone(), s.host_id.clone()).await?;
+    cwd_on(&conn, &s).await
+}
+
+/// Like `cwd`, only on the terminal's live connection (background callers must not reconnect).
+pub async fn cwd_existing(ctx: &Ctx, id: &str) -> Result<Option<String>> {
+    let s = ctx.terms.get(id)?;
+    let Some(conn) = ctx.pool.existing(&s.host_id) else { return Ok(None) };
+    cwd_on(&conn, &s).await
+}
+
+async fn cwd_on(conn: &crate::ssh::Conn, s: &TermSession) -> Result<Option<String>> {
+    let id = &s.id;
     let cached = s.shell_pid.lock().map(|p| p.to_string()).unwrap_or_default();
     let script = format!(
         r#"M="{CWD_MARKER}={id}"
@@ -243,7 +255,7 @@ set -- $(st "$P")
 echo "$P"
 {{ has "$2" && readlink "/proc/$2/cwd"; }} 2>/dev/null || readlink "/proc/$P/cwd""#
     );
-    let r = crate::ssh::exec::run(&conn, &format!("sh -c {}", crate::util::sh_quote(&script)), Duration::from_secs(10)).await?;
+    let r = crate::ssh::exec::run(conn, &format!("sh -c {}", crate::util::sh_quote(&script)), Duration::from_secs(10)).await?;
     let mut lines = r.stdout.lines();
     let pid = lines.next().and_then(|l| l.trim().parse::<u32>().ok());
     *s.shell_pid.lock() = pid;

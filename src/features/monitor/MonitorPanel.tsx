@@ -470,6 +470,9 @@ interface DragState {
   active: boolean;
   /** Text areas need a short hold first, so a plain drag there still selects text. */
   armed: boolean;
+  /** Touch: a hold lifts the card (a swipe scrolls); releasing a lifted card without moving opens its menu. */
+  touch: boolean;
+  moved: boolean;
   holdTimer: number;
   /** Last card swapped with; ignored until the pointer leaves it, so big/small pairs don't flip-flop. */
   lastTarget: string | null;
@@ -646,6 +649,17 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
     }
   };
 
+  // Touch: once a card is lifted the finger drags it instead of scrolling the panel.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onMove = (e: TouchEvent) => {
+      if (drag.current?.active) e.preventDefault();
+    };
+    el.addEventListener("touchmove", onMove, { passive: false });
+    return () => el.removeEventListener("touchmove", onMove);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape" && drag.current?.active) {
@@ -669,7 +683,8 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
     const card = cardAt(t);
     if (!card) return;
     finish(false);
-    const needHold = !!t.closest(".selectable");
+    const touch = e.pointerType === "touch";
+    const needHold = touch || !!t.closest(".selectable");
     const d: DragState = {
       uid: card.dataset.card!,
       pointer: e.pointerId,
@@ -681,6 +696,8 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
       grabY: 0,
       active: false,
       armed: !needHold,
+      touch,
+      moved: false,
       holdTimer: 0,
       lastTarget: null,
       frame: 0,
@@ -692,8 +709,9 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
       d.holdTimer = window.setTimeout(() => {
         if (drag.current !== d) return;
         d.armed = true;
+        if (touch) navigator.vibrate?.(10);
         activate();
-      }, 300);
+      }, touch ? 350 : 300);
     drag.current = d;
   };
 
@@ -702,6 +720,7 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
     if (!d) return;
     d.x = e.clientX;
     d.y = e.clientY;
+    if (d.active && !d.moved && Math.hypot(d.x - d.sx, d.y - d.sy) > 8) d.moved = true;
     if (!d.active) {
       if (Math.hypot(d.x - d.sx, d.y - d.sy) < 5) return;
       if (!d.armed) {
@@ -780,7 +799,11 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
         className={"mon-cards" + (dragId ? " sorting" : "")}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
-        onPointerUp={() => finish(true)}
+        onPointerUp={() => {
+          const d = drag.current;
+          finish(true);
+          if (d?.touch && d.active && !d.moved) setMenu({ x: d.sx, y: d.sy, uid: d.uid });
+        }}
         onPointerCancel={() => finish(false)}
         onLostPointerCapture={() => drag.current?.active && finish(true)}
         onClickCapture={(e) => {
@@ -792,6 +815,8 @@ function Cards({ hostId, ctx, render }: { hostId: string; ctx: CardCtx; render: 
         onContextMenu={(e) => {
           if (e.defaultPrevented || !ref.current?.contains(e.target as Node)) return;
           e.preventDefault();
+          // Touch long-press on a card: the hold already lifted it; its menu opens on release.
+          if (drag.current?.touch) return;
           finish(false);
           setMenu({ x: e.clientX, y: e.clientY, uid: cardAt(e.target as Element)?.dataset.card ?? null });
         }}

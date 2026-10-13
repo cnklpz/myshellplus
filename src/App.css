@@ -99,3 +99,49 @@
 .page-modal-close { position: absolute; top: calc((var(--h-page-head) - var(--h-md)) / 2); right: var(--sp-4); z-index: 3; }
 .page-modal .page-header { padding-right: calc(var(--sp-4) + var(--h-md) + var(--sp-3)); }
 .snippets-modal-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 0 var(--sp-2) var(--sp-2); }
+
+/* ---------- mobile (html.mobile): one column, bottom navigation, full-screen sheets ---------- */
+html.mobile { --h-sm: 36px; --h-md: 40px; }
+html.mobile .shell { padding-top: env(safe-area-inset-top); }
+html.mobile .app, html.mobile .app.with-side { grid-template-columns: minmax(0, 1fr); padding: 0; gap: 0; }
+html.mobile .main { border-radius: 0; box-shadow: none; }
+html.mobile .side { position: fixed; inset: 0; z-index: 80; border-radius: 0; box-shadow: none; padding-top: env(safe-area-inset-top); }
+html.mobile .page-modal-overlay { align-items: stretch; }
+html.mobile .page-modal { width: 100%; max-width: none; height: auto; border-radius: 0; padding-top: env(safe-area-inset-top); }
+html.mobile .page-modal-close { top: calc(env(safe-area-inset-top) + (var(--h-page-head) - var(--h-md)) / 2); right: var(--sp-2); }
+html.mobile .page-header { padding: 0 var(--sp-4); gap: var(--sp-2); }
+html.mobile .page-header h1 { white-space: nowrap; }
+/* Header actions with an icon show only the icon on phones (font-size 0 hides the text node). */
+html.mobile .page-header > .btn:has(> svg) { font-size: 0; gap: 0; width: var(--h-md); padding: 0; justify-content: center; }
+html.mobile .page-modal .page-header { padding-right: calc(var(--sp-2) + var(--h-md) + var(--sp-2)); }
+html.mobile .page-body { padding: var(--sp-2) var(--sp-4) var(--sp-4); }
+
+.mnav {
+  display: flex; flex: none; height: calc(var(--h-nav) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom);
+  background: var(--chrome); box-shadow: inset 0 1px 0 var(--line);
+}
+.mnav-item {
+  flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-half);
+  border: none; background: transparent; color: var(--fg-2); font-size: var(--fs-xs); font-weight: 500;
+}
+.mnav-item.on { color: var(--fg-0); }
+.mnav-item.on .mnav-icon > svg { color: var(--accent); }
+.mnav-icon { position: relative; display: inline-flex; }
+.mnav-icon > svg { width: var(--icon-xl); height: var(--icon-xl); stroke-width: 1.75; }
+.mnav-icon > .badge { position: absolute; top: calc(-1 * var(--sp-1)); left: calc(100% - var(--sp-2)); }
+
+.msheet-overlay { align-items: flex-end; z-index: 95; }
+.msheet {
+  width: 100%; display: flex; flex-direction: column;
+  padding: var(--sp-2) 0 calc(var(--sp-2) + env(safe-area-inset-bottom));
+  background: var(--bg-1); border-radius: var(--radius-lg) var(--radius-lg) 0 0; box-shadow: var(--shadow);
+  animation: msheet-in 0.18s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes msheet-in { from { transform: translateY(var(--sp-8)); opacity: 0; } }
+.msheet-item {
+  display: flex; align-items: center; gap: var(--sp-4); height: var(--h-touch); padding: 0 var(--sp-6);
+  border: none; background: transparent; color: var(--fg-0); font-size: var(--fs-md); text-align: left;
+}
+.msheet-item:active { background: var(--bg-3); }
+.msheet-item > svg { width: var(--icon-lg); height: var(--icon-lg); stroke-width: 1.75; color: var(--fg-1); flex: none; }
+.msheet-sep { height: 1px; margin: var(--sp-2) 0; background: var(--line); }

@@ -73,3 +73,8 @@
   margin: 0; padding: var(--sp-2) var(--sp-3); background: var(--bg-0); border-radius: var(--radius-sm);
   color: var(--err); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto;
 }
+
+/* Mobile: server picker above the command pane. */
+html.mobile .bt-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(0, 3fr); gap: var(--sp-3); padding: 0 var(--sp-4) var(--sp-4); }
+html.mobile .bt-cmd { min-height: 80px; }
+html.mobile .bt-pop, html.mobile .bt-pop.wide { position: fixed; top: var(--h-page-head); left: var(--sp-4); right: var(--sp-4); width: auto; }

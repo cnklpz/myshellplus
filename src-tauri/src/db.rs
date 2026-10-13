@@ -77,6 +77,14 @@ CREATE TABLE IF NOT EXISTS history(
   last_used INTEGER NOT NULL,
   PRIMARY KEY(host_id, command)
 );
+CREATE TABLE IF NOT EXISTS history_next(
+  host_id TEXT NOT NULL,
+  prev TEXT NOT NULL,
+  next TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 1,
+  last_used INTEGER NOT NULL,
+  PRIMARY KEY(host_id, prev, next)
+);
 CREATE TABLE IF NOT EXISTS known_hosts(
   host TEXT NOT NULL,
   port INTEGER NOT NULL,
@@ -580,6 +588,38 @@ impl Db {
         Ok(())
     }
 
+    /// `next` was run right after `prev` in the same terminal: learned for "what usually comes next".
+    pub fn record_next(&self, host_id: &str, prev: &str, next: &str) -> Result<()> {
+        let (prev, next) = (prev.trim(), next.trim());
+        if prev.is_empty() || next.is_empty() || prev == next || prev.len() > 2000 || next.len() > 2000 {
+            return Ok(());
+        }
+        let c = self.conn.lock();
+        c.execute(
+            "INSERT INTO history_next(host_id,prev,next,count,last_used) VALUES(?1,?2,?3,1,?4)
+             ON CONFLICT(host_id,prev,next) DO UPDATE SET count=count+1,last_used=?4",
+            params![host_id, prev, next, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// Commands that usually followed `prev` on this host and start with `prefix`, most frequent first.
+    pub fn next_commands(&self, host_id: &str, prev: &str, prefix: &str, limit: usize) -> Result<Vec<HistoryHit>> {
+        let c = self.conn.lock();
+        let like = format!("{}%", prefix.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let mut st = c.prepare(
+            "SELECT next, count, last_used FROM history_next
+             WHERE host_id=?1 AND prev=?2 AND next LIKE ?3 ESCAPE '\\' AND next <> ?4
+             ORDER BY count * 1.0 / (1 + (?5 - last_used) / 86400000.0) DESC LIMIT ?6",
+        )?;
+        let rows = st
+            .query_map(params![host_id, prev, like, prefix, now_ms(), limit as i64], |r| {
+                Ok(HistoryHit { command: r.get(0)?, count: r.get(1)?, last_used: r.get(2)? })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// Commands starting with `prefix`, this host's first, ranked by frequency and recency.
     pub fn search_history(&self, host_id: &str, prefix: &str, limit: usize) -> Result<Vec<HistoryHit>> {
         let c = self.conn.lock();
@@ -620,6 +660,10 @@ impl Db {
     pub fn delete_history(&self, host_id: &str, command: &str) -> Result<()> {
         let c = self.conn.lock();
         c.execute("DELETE FROM history WHERE (?1 = '' OR host_id = ?1) AND command = ?2", params![host_id, command])?;
+        c.execute(
+            "DELETE FROM history_next WHERE (?1 = '' OR host_id = ?1) AND (prev = ?2 OR next = ?2)",
+            params![host_id, command],
+        )?;
         Ok(())
     }
 

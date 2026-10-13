@@ -1,10 +1,11 @@
 // Terminal tabs + xterm sessions, command prediction, AI command bar.
 import {
-  Activity, ArrowRightToLine, ChevronDown, FolderOpen, ListX, Pencil, Plus, RotateCw, X, XCircle,
+  Activity, ArrowRightToLine, ChevronDown, FolderOpen, ListX, PanelRight, Pencil, Plus, RotateCw, X, XCircle,
 } from "lucide-react";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { Confirm, Empty, SearchBox } from "../../components/ui";
 import { hostMenuItems, useHostDialogs } from "../hosts/hostMenu";
+import { isMobile } from "../../lib/platform";
 import { nameIsAddr, usePrivacy } from "../../lib/privacy";
 import { type TermTab, useApp } from "../../store";
 import { installAiPredictWatcher } from "./config";
@@ -162,6 +163,23 @@ export function TerminalArea() {
           </div>
         )}
         {addBtn}
+        {isMobile && (
+          <div className="term-add">
+            <button
+              className="icon-btn"
+              title="面板"
+              disabled={!activeTab}
+              onClick={() => {
+                const s = useApp.getState();
+                const t = s.tabs.find((x) => x.id === s.activeTab);
+                if (t) s.setPanelHost(t.hostId);
+                s.setSidePanel("monitor");
+              }}
+            >
+              <PanelRight />
+            </button>
+          </div>
+        )}
       </div>
       {menu.node}
       {hostDialogs.node}
@@ -453,7 +471,7 @@ function EmptyState(props: { onNew: () => void }) {
   return (
     <Empty
       className="term-empty"
-      text="双击左侧服务器开始"
+      text={isMobile ? "还没有终端" : "双击左侧服务器开始"}
       action={
         <button className="btn sm" onClick={props.onNew}>
           <Plus />

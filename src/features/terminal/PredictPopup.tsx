@@ -1,18 +1,22 @@
-import { BookText, History, LoaderCircle, ScrollText, Sparkles } from "lucide-react";
+import { BookText, File, Folder, History, LoaderCircle, ScrollText, Sparkles, SquareTerminal } from "lucide-react";
 import type { Suggestion } from "../../lib/api";
 import type { PopupState } from "./predictor";
 
 const ICONS: Record<Suggestion["source"], typeof History> = {
   history: History,
   snippet: ScrollText,
+  command: SquareTerminal,
   builtin: BookText,
+  path: File,
   ai: Sparkles,
 };
 
 const LABELS: Record<Suggestion["source"], string> = {
   history: "历史",
-  snippet: "命令",
+  snippet: "命令片段",
+  command: "服务器命令",
   builtin: "常用",
+  path: "路径",
   ai: "AI",
 };
 
@@ -27,7 +31,7 @@ export function PredictPopup(props: { state: PopupState; onPick: (i: number) => 
       onMouseDown={(e) => e.preventDefault()}
     >
       {items.map((s, i) => {
-        const Icon = ICONS[s.source] ?? History;
+        const Icon = s.dir ? Folder : (ICONS[s.source] ?? History);
         const prefix = s.command.startsWith(input) ? input : "";
         return (
           <div

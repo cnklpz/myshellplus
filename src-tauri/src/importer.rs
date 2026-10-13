@@ -441,6 +441,7 @@ fn parse_putty() -> Result<Vec<Candidate>> {
     bail!("仅 Windows 支持从 PuTTY 导入")
 }
 
+#[cfg(any(windows, test))]
 fn urldecode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::new();

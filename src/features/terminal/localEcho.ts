@@ -45,6 +45,41 @@ function cellWidth(s: string): number {
 
 const PRINTABLE = /^[^\x00-\x1f\x7f]+$/;
 
+let glyph = { font: "", w: 0 };
+/** Natural advance width of one mono glyph at the terminal's font, to fit overlay text to the cell width. */
+function glyphWidth(term: Terminal, cw: number): number {
+  const font = `${term.options.fontSize}px ${term.options.fontFamily}`;
+  if (glyph.font !== font) {
+    const c = document.createElement("canvas").getContext("2d");
+    if (!c) return cw;
+    c.font = font;
+    glyph = { font, w: c.measureText("M").width || cw };
+  }
+  return glyph.w;
+}
+
+/**
+ * Place a text overlay (absolutely positioned child of `.xterm-screen`) over cell `x` of viewport row `row`,
+ * in the terminal's font with letter spacing matching the cell grid, clipped at the right edge.
+ */
+export function placeOverlay(el: HTMLElement, term: Terminal, x: number, row: number) {
+  const screen = el.parentElement;
+  if (!screen) return;
+  const cw = screen.clientWidth / term.cols;
+  const ch = screen.clientHeight / term.rows;
+  const s = el.style;
+  s.left = `${x * cw}px`;
+  s.top = `${row * ch}px`;
+  s.height = `${ch}px`;
+  s.lineHeight = `${ch}px`;
+  s.fontSize = `${term.options.fontSize}px`;
+  s.fontFamily = term.options.fontFamily ?? "monospace";
+  // xterm snaps cells to device pixels, often narrower than the glyph's natural advance (8.4px → 8px):
+  // the spacing must go negative then, or the overlay drifts right of the grid.
+  s.letterSpacing = `${cw - glyphWidth(term, cw)}px`;
+  s.maxWidth = `${(term.cols - x) * cw}px`;
+}
+
 export class LocalEcho {
   private pending = "";
   /** Absolute buffer position where the first pending char will appear. */
@@ -71,8 +106,9 @@ export class LocalEcho {
     this.cursorHidden = hide;
     const theme = { ...termTheme() };
     if (hide) {
-      theme.cursor = "transparent";
-      theme.cursorAccent = "transparent";
+      // Paint it in the background color: the WebGL renderer drops alpha, so "transparent" draws opaque black.
+      theme.cursor = theme.background;
+      theme.cursorAccent = theme.background;
     }
     this.term.options.theme = theme;
   }
@@ -106,6 +142,11 @@ export class LocalEcho {
     window.removeEventListener(SETTINGS_EVENT, this.onSettings);
     clearTimeout(this.noEchoTimer);
     this.overlay.remove();
+  }
+
+  /** Predicted characters are on screen that the server hasn't echoed yet. */
+  busy(): boolean {
+    return this.pending.length > 0;
   }
 
   /** Network RTT from the backend's SSH ping. */
@@ -249,10 +290,7 @@ export class LocalEcho {
       this.setCursorHidden(false);
       return;
     }
-    const screen = this.overlay.parentElement;
-    if (!screen) return;
-    const cw = screen.clientWidth / this.term.cols;
-    const ch = screen.clientHeight / this.term.rows;
+    if (!this.overlay.parentElement) return;
     const viewportY = this.term.buffer.active.viewportY;
     const row = this.anchor.y - viewportY;
     if (row < 0 || row >= this.term.rows) {
@@ -263,25 +301,6 @@ export class LocalEcho {
     this.text.textContent = this.pending;
     o.style.display = "block";
     this.setCursorHidden(true);
-    o.style.left = `${this.anchor.x * cw}px`;
-    o.style.top = `${row * ch}px`;
-    o.style.height = `${ch}px`;
-    o.style.lineHeight = `${ch}px`;
-    o.style.fontSize = `${this.term.options.fontSize}px`;
-    o.style.fontFamily = this.term.options.fontFamily ?? "monospace";
-    o.style.letterSpacing = `${Math.max(0, cw - this.measure(cw))}px`;
-    o.style.maxWidth = `${(this.term.cols - this.anchor.x) * cw}px`;
-  }
-
-  private glyphW = 0;
-  /** Natural advance width of one mono glyph at the current font, to pad up to the cell width. */
-  private measure(cw: number): number {
-    if (!this.glyphW) {
-      const c = document.createElement("canvas").getContext("2d");
-      if (!c) return cw;
-      c.font = `${this.term.options.fontSize}px ${this.term.options.fontFamily}`;
-      this.glyphW = c.measureText("M").width || cw;
-    }
-    return this.glyphW;
+    placeOverlay(o, this.term, this.anchor.x, row);
   }
 }

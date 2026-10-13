@@ -2,14 +2,15 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { appDataDir } from "@tauri-apps/api/path";
 import { save } from "@tauri-apps/plugin-dialog";
-import { ArrowDown, ArrowUp, Copy, Lock, Plus, Power, Trash2, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Copy, Lock, Plus, Power, Trash2, Zap } from "lucide-react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { Select } from "../../components/Select";
 import { Dialog, Empty, Field, Toggle, toast } from "../../components/ui";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { type AiProvider, type AiSettings, api, errMsg, type HotkeySettings, type HotkeyStatus, type KnownHost, type LogEntry } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 import { fmtMs } from "../../lib/format";
+import { isMobile } from "../../lib/platform";
 import { usePrivacy } from "../../lib/privacy";
 import { fileStamp } from "../diagnostics/connLog";
 import { useApp } from "../../store";
@@ -29,6 +30,7 @@ import {
   presetRules,
   saveHighlightSettings,
 } from "../terminal/highlight";
+import { DEFAULT_FONT_SIZE, predictStyle, setPredictStyle } from "../terminal/config";
 import { type EchoMode, echoSettings, saveEchoSettings } from "../terminal/localEcho";
 
 type Section = "ai" | "security" | "appearance" | "keys" | "backup" | "sync" | "logs" | "about";
@@ -42,11 +44,15 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: "sync", label: "云同步" },
   { id: "logs", label: "日志" },
   { id: "about", label: "关于" },
-];
+].filter((s) => !(isMobile && s.id === "keys")) as { id: Section; label: string }[];
+
+/** Mobile: back from a section page to the section list. */
+const BackCtx = createContext<(() => void) | null>(null);
 
 export function SettingsView() {
   const wanted = useApp((s) => s.settingsSection) as Section | null;
-  const [section, setSection] = useState<Section>(wanted ?? "ai");
+  // Mobile shows the section list first (null), then one section with a back button.
+  const [section, setSection] = useState<Section | null>(wanted ?? (isMobile ? null : "ai"));
   useEffect(() => {
     if (wanted) {
       setSection(wanted);
@@ -55,7 +61,7 @@ export function SettingsView() {
   }, [wanted]);
   return (
     <div className="page">
-      <div className="set-layout">
+      <div className={"set-layout" + (isMobile ? (section ? " m-detail" : " m-list") : "")}>
         <nav className="set-nav">
           <div className="set-nav-head">
             <h1>设置</h1>
@@ -63,20 +69,23 @@ export function SettingsView() {
           {SECTIONS.map((s) => (
             <button key={s.id} type="button" className={section === s.id ? "on" : ""} onClick={() => setSection(s.id)}>
               <span className="ellipsis">{s.label}</span>
+              {isMobile && <ChevronRight />}
             </button>
           ))}
         </nav>
         <div className="set-content">
-          <div className="set-inner">
-            {section === "ai" && <AiSection />}
-            {section === "security" && <SecuritySection />}
-            {section === "appearance" && <AppearanceSection />}
-            {section === "keys" && <KeysSection />}
-            {section === "backup" && <BackupSection />}
-            {section === "sync" && <SyncSection />}
-            {section === "logs" && <LogsSection />}
-            {section === "about" && <AboutSection />}
-          </div>
+          <BackCtx.Provider value={isMobile ? () => setSection(null) : null}>
+            <div className="set-inner">
+              {section === "ai" && <AiSection />}
+              {section === "security" && <SecuritySection />}
+              {section === "appearance" && <AppearanceSection />}
+              {section === "keys" && <KeysSection />}
+              {section === "backup" && <BackupSection />}
+              {section === "sync" && <SyncSection />}
+              {section === "logs" && <LogsSection />}
+              {section === "about" && <AboutSection />}
+            </div>
+          </BackCtx.Provider>
         </div>
       </div>
     </div>
@@ -84,8 +93,14 @@ export function SettingsView() {
 }
 
 function Title(props: { text: string; children?: React.ReactNode }) {
+  const back = useContext(BackCtx);
   return (
     <div className="set-title">
+      {back && (
+        <button className="icon-btn" title="返回" onClick={back}>
+          <ChevronLeft />
+        </button>
+      )}
       <h2>{props.text}</h2>
       <span className="spacer" />
       {props.children}
@@ -374,6 +389,7 @@ function AiSection() {
           <Field label="本地预测">
             <Toggle on={s.predictEnabled} onChange={(v) => update({ predictEnabled: v })} />
           </Field>
+          <PredictStyleField />
           <Field label="AI 预测">
             <Toggle on={s.aiPredictEnabled} onChange={(v) => update({ aiPredictEnabled: v })} />
             <span className="set-note">会发送当前输入和屏幕内容</span>
@@ -660,9 +676,29 @@ function lsSet(k: string, v: string) {
   }
 }
 
+function PredictStyleField() {
+  const [style, setStyle] = useState(predictStyle());
+  return (
+    <Field label="预测显示">
+      <Seg
+        value={style}
+        options={[
+          { value: "inline", label: "灰色提示" },
+          { value: "menu", label: "候选菜单" },
+        ]}
+        onChange={(v) => {
+          setStyle(v);
+          setPredictStyle(v);
+        }}
+      />
+      {style === "inline" && <span className="set-note">↓ 展开候选</span>}
+    </Field>
+  );
+}
+
 function AppearanceSection() {
   const [themeId, setThemeId] = useState(currentTheme().id);
-  const [fontSize, setFontSize] = useState(lsGet("termFontSize") ?? "14");
+  const [fontSize, setFontSize] = useState(lsGet("termFontSize") ?? String(DEFAULT_FONT_SIZE));
 
   const [echo, setEchoState] = useState(echoSettings());
   const setEcho = (v: { mode: EchoMode; threshold: number }) => {
@@ -1026,10 +1062,12 @@ const KEY_GROUPS: { title: string; keys: [string, string][] }[] = [
   {
     title: "命令补全",
     keys: [
+      ["采用灰色预测", "→"],
+      ["采用预测的下一段", "Ctrl+→"],
+      ["展开候选列表", "↓"],
       ["AI 补全", "Ctrl+Space"],
       ["选择候选", "↑/↓"],
       ["采用候选", "Tab"],
-      ["采用第一个候选", "→"],
       ["中文描述转命令", "Enter"],
       ["关闭候选", "Esc"],
     ],
@@ -1317,7 +1355,7 @@ function AboutSection() {
           <span className="set-path">{dir || "-"}</span>
         </Field>
       </div>
-      <UpdateBlock />
+      {!isMobile && <UpdateBlock />}
     </>
   );
 }

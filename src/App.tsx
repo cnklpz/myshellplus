@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { GlobalContextMenu } from "./components/GlobalContextMenu";
+import { MobileNav } from "./components/MobileNav";
 import { PageModal } from "./components/PageModal";
 import { Sidebar } from "./components/Sidebar";
 import { Titlebar } from "./components/Titlebar";
@@ -22,6 +23,7 @@ import { VaultGate } from "./features/vault/VaultGate";
 import { startupCheck } from "./lib/updater";
 import { api, type ConnFailure, type ConnState, type ConnStep, errMsg, type Latency } from "./lib/api";
 import { onTauriEvent } from "./lib/events";
+import { isMobile } from "./lib/platform";
 import { type ToolModal, useApp } from "./store";
 import "./App.css";
 
@@ -83,16 +85,19 @@ export default function App() {
 
   useEffect(() => {
     boot();
-    try {
-      startupCheck();
-    } catch (e) {
-      toast(errMsg(e), "error");
+    // Mobile builds have no updater (app stores update them) and no switcher window.
+    if (!isMobile) {
+      try {
+        startupCheck();
+      } catch (e) {
+        toast(errMsg(e), "error");
+      }
     }
     // Watchdog heartbeat: the backend reloads the webview if this stops while the window is visible.
     const beat = () => void api.uiHeartbeat().catch(() => {});
     beat();
     const timer = setInterval(beat, 5000);
-    const stopSwitcher = startSwitcherSync();
+    const stopSwitcher = isMobile ? () => {} : startSwitcherSync();
     const un = [
       onTauriEvent<ConnState>("conn-state", (e) => useApp.getState().setConn(e.payload)),
       onTauriEvent<ConnStep>("conn-step", (e) => useApp.getState().pushConnStep(e.payload)),
@@ -126,11 +131,13 @@ export default function App() {
 
   return (
     <div className="shell">
-      <Titlebar />
-      <div className={"app" + (showSide ? " with-side" : "") + (onTerminal && !showSide ? " with-rail" : "")}>
-        <aside className="sidebar">
-          <Sidebar />
-        </aside>
+      {!isMobile && <Titlebar />}
+      <div className={"app" + (showSide ? " with-side" : "") + (onTerminal && !showSide && !isMobile ? " with-rail" : "")}>
+        {!isMobile && (
+          <aside className="sidebar">
+            <Sidebar />
+          </aside>
+        )}
 
         <main className="main">
           {/* Terminals stay mounted on every page so xterm state is kept. */}
@@ -160,7 +167,7 @@ export default function App() {
           </aside>
         )}
 
-        {onTerminal && !showSide && (
+        {onTerminal && !showSide && !isMobile && (
           <aside className="side-rail">
             <SideRail />
           </aside>
@@ -168,7 +175,7 @@ export default function App() {
       </div>
 
       {(["batch", "tunnels", "snippets", "agent", "settings"] as ToolModal[]).map((m) => (
-        <PageModal key={m} open={modal === m} onClose={closeModal} width={m === "snippets" ? 720 : 1120}>
+        <PageModal key={m} open={modal === m} onClose={closeModal} width={isMobile ? undefined : m === "snippets" ? 720 : 1120}>
           {m === "batch" && <BatchView />}
           {m === "tunnels" && modal === m && <TunnelsView />}
           {m === "snippets" && modal === m && <SnippetsModal />}
@@ -177,6 +184,7 @@ export default function App() {
         </PageModal>
       ))}
 
+      {isMobile && <MobileNav />}
       {editingHost !== null && <HostEditor />}
       {importOpen && <ImportDialog />}
       <PromptCenter />

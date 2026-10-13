@@ -1,20 +1,24 @@
-//! Command prediction: history + snippets + built-in dictionary, plus AI completion
-//! and natural-language-to-command.
+//! Command prediction: history (ours and the server's) + snippets + the server's commands + built-in
+//! dictionary + remote path listing, plus AI completion and natural-language-to-command.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
+use parking_lot::Mutex;
 use serde::Serialize;
 use serde_json::json;
 
 use crate::ai::{self, Request};
 use crate::state::Ctx;
+use crate::util::sh_quote;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Suggestion {
     pub command: String,
-    /// history | snippet | builtin | ai
+    /// history | snippet | command | builtin | path | ai
     pub source: String,
     pub description: String,
 }
@@ -116,7 +120,8 @@ const BUILTIN: &[(&str, &str)] = &[
     ("pm2 logs", "PM2 日志"),
 ];
 
-pub fn local(ctx: &Ctx, host_id: &str, input: &str, limit: usize) -> Result<Vec<Suggestion>> {
+/// `prev`: the command this terminal ran last. What usually follows it ranks above plain history.
+pub fn local(ctx: &Ctx, host_id: &str, input: &str, prev: Option<&str>, limit: usize) -> Result<Vec<Suggestion>> {
     let input_trim = input.trim_start();
     if input_trim.is_empty() {
         return Ok(vec![]);
@@ -127,8 +132,30 @@ pub fn local(ctx: &Ctx, host_id: &str, input: &str, limit: usize) -> Result<Vec<
             out.push(s);
         }
     };
+    let index = ctx.indexes.get(host_id);
+    if let Some(prev) = prev.map(str::trim).filter(|p| !p.is_empty()) {
+        let mut next: Vec<(String, i64)> =
+            ctx.db.next_commands(host_id, prev, input_trim, 4)?.into_iter().map(|h| (h.command, h.count)).collect();
+        if let Some(f) = index.as_ref().and_then(|i| i.follows.get(prev)) {
+            for (c, n) in f.iter().filter(|(c, _)| c.starts_with(input_trim)) {
+                match next.iter_mut().find(|(x, _)| x == c) {
+                    Some(e) => e.1 += i64::from(*n),
+                    None => next.push((c.clone(), i64::from(*n))),
+                }
+            }
+        }
+        next.sort_by_key(|e| std::cmp::Reverse(e.1));
+        for (c, _) in next.into_iter().take(3) {
+            push(Suggestion { command: c, source: "history".into(), description: "常接在上一条后".into() }, &mut out);
+        }
+    }
     for h in ctx.db.search_history(host_id, input, limit)? {
         push(Suggestion { command: h.command, source: "history".into(), description: format!("用过 {} 次", h.count) }, &mut out);
+    }
+    if let Some(idx) = &index {
+        for c in idx.history.iter().filter(|c| c.starts_with(input_trim)).take(limit) {
+            push(Suggestion { command: c.clone(), source: "history".into(), description: "服务器历史".into() }, &mut out);
+        }
     }
     let lower = input_trim.to_lowercase();
     for s in ctx.db.list_snippets()? {
@@ -139,6 +166,16 @@ pub fn local(ctx: &Ctx, host_id: &str, input: &str, limit: usize) -> Result<Vec<
             push(Suggestion { command: s.command, source: "snippet".into(), description: s.name }, &mut out);
         }
     }
+    // Still typing the command name: complete it from what is actually installed on the server.
+    if let Some(idx) = &index
+        && !input_trim.contains(char::is_whitespace)
+    {
+        let mut names: Vec<&String> = idx.commands.iter().filter(|c| c.starts_with(input_trim)).collect();
+        names.sort_by_key(|c| c.len());
+        for c in names.into_iter().take(4) {
+            push(Suggestion { command: c.clone(), source: "command".into(), description: "命令".into() }, &mut out);
+        }
+    }
     for (c, d) in BUILTIN {
         if c.starts_with(input_trim) {
             push(Suggestion { command: (*c).into(), source: "builtin".into(), description: (*d).into() }, &mut out);
@@ -146,6 +183,196 @@ pub fn local(ctx: &Ctx, host_id: &str, input: &str, limit: usize) -> Result<Vec<
     }
     out.truncate(limit);
     Ok(out)
+}
+
+/// What a live connection tells us about the server: executables on `$PATH` and the user's own shell history.
+#[derive(Default)]
+pub struct RemoteIndex {
+    /// Sorted, deduplicated command names.
+    commands: Vec<String>,
+    /// Newest first, deduplicated.
+    history: Vec<String>,
+    /// Command -> commands typed right after it (at least `MIN_FOLLOWS` times), most frequent first.
+    follows: HashMap<String, Vec<(String, u32)>>,
+}
+
+/// Per-host remote indexes, tagged with the `since` of the connection they were read from so a reconnect
+/// reloads them. `map` and `loading` are never held together.
+#[derive(Default)]
+pub struct Indexes {
+    map: Mutex<HashMap<String, (u64, Arc<RemoteIndex>)>>,
+    loading: Mutex<HashSet<String>>,
+}
+
+impl Indexes {
+    fn get(&self, host_id: &str) -> Option<Arc<RemoteIndex>> {
+        self.map.lock().get(host_id).map(|(_, i)| i.clone())
+    }
+
+    pub fn forget(&self, host_id: &str) {
+        self.map.lock().remove(host_id);
+    }
+}
+
+const INDEX_SCRIPT: &str = r#"echo @@CMDS
+if command -v bash >/dev/null 2>&1; then bash -c 'compgen -c' 2>/dev/null
+else (IFS=:; for d in $PATH; do ls -1 "$d" 2>/dev/null; done); fi
+echo @@HIST
+tail -n 3000 ~/.bash_history 2>/dev/null
+echo @@SEP
+tail -n 3000 ~/.zsh_history 2>/dev/null
+echo @@SEP
+tail -n 6000 ~/.local/share/fish/fish_history 2>/dev/null | sed -n 's/^- cmd: //p'
+true"#;
+
+const MAX_HISTORY: usize = 5000;
+/// A pairing seen once is chance; twice is a habit.
+const MIN_FOLLOWS: u32 = 2;
+
+fn parse_index(out: &str) -> RemoteIndex {
+    let (cmds, hist) = out.split_once("@@HIST\n").unwrap_or((out, ""));
+    let cmds = cmds.strip_prefix("@@CMDS\n").unwrap_or(cmds);
+    let mut commands: Vec<String> = cmds
+        .lines()
+        .map(str::trim)
+        .filter(|c| c.len() >= 2 && !c.starts_with('_') && !c.contains(char::is_whitespace))
+        .map(str::to_string)
+        .collect();
+    commands.sort();
+    commands.dedup();
+    // In file order (oldest -> newest); `None` marks a file boundary or an entry that can't be replayed.
+    let entries: Vec<Option<&str>> = hist.lines().filter_map(history_line).collect();
+    let mut seen = HashSet::new();
+    let mut history = Vec::new();
+    // Walk backwards so the newest copy of each command wins.
+    for cmd in entries.iter().rev().flatten() {
+        if seen.insert(*cmd) {
+            history.push(cmd.to_string());
+            if history.len() >= MAX_HISTORY {
+                break;
+            }
+        }
+    }
+    // What was typed right after what: "cd app" is usually followed by "git pull".
+    let mut pairs: HashMap<(&str, &str), u32> = HashMap::new();
+    for w in entries.windows(2) {
+        if let [Some(a), Some(b)] = w
+            && a != b
+        {
+            *pairs.entry((*a, *b)).or_default() += 1;
+        }
+    }
+    let mut follows: HashMap<String, Vec<(String, u32)>> = HashMap::new();
+    for ((a, b), n) in pairs {
+        if n >= MIN_FOLLOWS {
+            follows.entry(a.to_string()).or_default().push((b.to_string(), n));
+        }
+    }
+    for v in follows.values_mut() {
+        v.sort_by(|x, y| y.1.cmp(&x.1).then_with(|| x.0.cmp(&y.0)));
+        v.truncate(8);
+    }
+    RemoteIndex { commands, history, follows }
+}
+
+/// One history file line: `Some(None)` breaks a sequence, `None` is skipped (timestamps).
+fn history_line(line: &str) -> Option<Option<&str>> {
+    if line == "@@SEP" {
+        return Some(None);
+    }
+    // bash HISTTIMEFORMAT stamps (#1700000000)
+    if line.strip_prefix('#').is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    // zsh extended history (: 1700000000:0;cmd)
+    let cmd = match line.strip_prefix(": ") {
+        Some(rest) => rest.split_once(';').map_or(line, |(_, c)| c),
+        None => line,
+    }
+    .trim();
+    // multi-line entries can't be replayed from one line
+    if cmd.is_empty() || cmd.len() > 300 || cmd.ends_with('\\') {
+        return Some(None);
+    }
+    Some(Some(cmd))
+}
+
+/// Read the server's command names and shell history once per connection. Only uses a live connection.
+/// Returns whether a new index was loaded (cached suggestions are stale then).
+pub async fn warm(ctx: Arc<Ctx>, host_id: String) -> Result<bool> {
+    let Some(conn) = ctx.pool.existing(&host_id) else { return Ok(false) };
+    if ctx.indexes.map.lock().get(&host_id).is_some_and(|(since, _)| *since == conn.since) {
+        return Ok(false);
+    }
+    if !ctx.indexes.loading.lock().insert(host_id.clone()) {
+        return Ok(false);
+    }
+    let r = crate::ssh::exec::run(&conn, &format!("sh -c {}", sh_quote(INDEX_SCRIPT)), Duration::from_secs(20)).await;
+    ctx.indexes.loading.lock().remove(&host_id);
+    let idx = parse_index(&r?.stdout);
+    ctx.indexes.map.lock().insert(host_id, (conn.since, Arc::new(idx)));
+    Ok(true)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathEntry {
+    pub name: String,
+    pub is_dir: bool,
+}
+
+const MAX_ENTRIES: usize = 3000;
+const MAX_LINK_STATS: usize = 128;
+
+/// Entries of `dir` as typed at terminal `id`'s prompt: absolute, `~/…`, or relative to the shell's cwd.
+/// Only uses the live connection; an unreadable directory is just an empty list.
+pub async fn list_path(ctx: Arc<Ctx>, id: String, dir: String) -> Result<Vec<PathEntry>> {
+    let host_id = ctx.terms.get(&id)?.host_id.clone();
+    let Some(conn) = ctx.pool.existing(&host_id) else { return Ok(vec![]) };
+    let work = async {
+        let sftp = conn.sftp().await?;
+        let base = if dir.starts_with('/') {
+            dir.clone()
+        } else if dir == "~" || dir.starts_with("~/") {
+            let home = sftp.canonicalize(".").await?;
+            format!("{}{}", home.trim_end_matches('/'), dir.get(1..).unwrap_or(""))
+        } else {
+            let cwd = match crate::term::cwd_existing(&ctx, &id).await.ok().flatten() {
+                Some(c) => c,
+                None => sftp.canonicalize(".").await?,
+            };
+            format!("{}/{}", cwd.trim_end_matches('/'), dir)
+        };
+        let mut out = Vec::new();
+        let mut links = Vec::new();
+        for e in sftp.read_dir(base.clone()).await?.take(MAX_ENTRIES) {
+            let name = e.file_name();
+            if name == "." || name == ".." {
+                continue;
+            }
+            let ft = e.file_type();
+            if ft.is_symlink() && links.len() < MAX_LINK_STATS {
+                links.push(out.len());
+            }
+            out.push(PathEntry { name, is_dir: ft.is_dir() });
+        }
+        // Symlinked directories (/bin, /lib…) matter for `cd`: resolve them concurrently.
+        let stats = futures::future::join_all(links.iter().map(|&i| {
+            let path = format!("{}/{}", base.trim_end_matches('/'), out[i].name);
+            let sftp = sftp.clone();
+            async move { sftp.metadata(path).await.map(|m| m.is_dir()).unwrap_or(false) }
+        }))
+        .await;
+        for (&i, d) in links.iter().zip(stats) {
+            out[i].is_dir = d;
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok::<_, anyhow::Error>(out)
+    };
+    match tokio::time::timeout(Duration::from_secs(5), work).await {
+        Ok(r) => Ok(r.unwrap_or_default()),
+        Err(_) => Ok(vec![]),
+    }
 }
 
 fn host_context(ctx: &Ctx, host_id: &str) -> String {
@@ -282,4 +509,33 @@ pub async fn chat(ctx: Arc<Ctx>, host_id: String, messages: Vec<ChatMsg>, screen
     }
     user.push_str(&format!("\n用户: {}", last.content.trim()));
     ai::complete(&ctx.db, &ctx.vault, None, Request { system: CHAT_SYSTEM, user, max_tokens: 8000, effort: "medium", think: ai::settings(&ctx.db).thinking, model: None }).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_parses_commands_and_all_history_formats() {
+        let out = "@@CMDS\nls\ngit\n_private\ngit\nx\n@@HIST\n#1700000000\ngit status\n: 1700000001:0;docker ps\nls -la\ngit status\necho a \\\n\n";
+        let idx = parse_index(out);
+        assert_eq!(idx.commands, vec!["git", "ls"]);
+        assert_eq!(idx.history, vec!["git status", "ls -la", "docker ps"]);
+    }
+
+    #[test]
+    fn index_learns_what_follows_what() {
+        let out = "@@CMDS\n@@HIST\ncd app\ngit pull\ncd app\ngit pull\ncd app\n@@SEP\nls\n";
+        let idx = parse_index(out);
+        assert_eq!(idx.follows.get("cd app"), Some(&vec![("git pull".to_string(), 2)]));
+        assert_eq!(idx.follows.get("git pull"), Some(&vec![("cd app".to_string(), 2)]));
+        // never across a file boundary
+        assert!(idx.follows.get("cd app").is_some_and(|v| v.iter().all(|(c, _)| c != "ls")));
+    }
+
+    #[test]
+    fn index_tolerates_missing_sections() {
+        let idx = parse_index("");
+        assert!(idx.commands.is_empty() && idx.history.is_empty());
+    }
 }

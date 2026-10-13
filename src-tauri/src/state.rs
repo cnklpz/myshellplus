@@ -21,6 +21,7 @@ pub struct Ctx {
     pub monitors: Monitors,
     pub tunnels: Tunnels,
     pub transfers: Transfers,
+    pub indexes: crate::predict::Indexes,
 }
 
 pub type CtxRef = Arc<Ctx>;

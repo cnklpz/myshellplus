@@ -1,7 +1,8 @@
 // Right-hand side panel: configurable tab row (pinned panels), "+" menu for the rest, and the panel body.
-import { Activity, Bot, Box, FolderOpen, PanelRightClose, Plus, ScrollText, SquareMousePointer, Wrench } from "lucide-react";
+import { Activity, Bot, Box, FolderOpen, PanelRightClose, Plus, ScrollText, SquareMousePointer, Wrench, X } from "lucide-react";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 import { Empty } from "../../components/ui";
+import { isMobile } from "../../lib/platform";
 import { type SidePanelId, useApp } from "../../store";
 import { AiPanel } from "../ai/AiPanel";
 import { DockerPanel } from "../docker/DockerPanel";
@@ -40,9 +41,10 @@ export function SideTabs() {
   const [menu, setMenu] = useState(false);
   const ctx = useContextMenu();
   // An unpinned panel opened from the "+" menu shows as a temporary tab at the end.
-  const tabs = [...pins, ...(sidePanel && !pins.includes(sidePanel) ? [sidePanel] : [])].map(def);
+  // Mobile: every panel is a tab (icons, the open one also labeled); no pinning.
+  const tabs = isMobile ? PANELS : [...pins, ...(sidePanel && !pins.includes(sidePanel) ? [sidePanel] : [])].map(def);
   return (
-    <div className={"side-tabs" + (tabs.length > 4 ? " compact" : "")}>
+    <div className={"side-tabs" + (tabs.length > 4 && !isMobile ? " compact" : "")}>
       {tabs.map((p) => (
         <button
           key={p.id}
@@ -61,14 +63,16 @@ export function SideTabs() {
           <span>{p.label}</span>
         </button>
       ))}
-      <div className="side-more">
-        <button className={"side-collapse" + (menu ? " open" : "")} title="更多面板" onClick={() => setMenu(!menu)}>
-          <Plus />
-        </button>
-        {menu && <PanelMenu onClose={() => setMenu(false)} />}
-      </div>
-      <button className="side-collapse" title="收起" onClick={() => setSidePanel(null)}>
-        <PanelRightClose />
+      {!isMobile && (
+        <div className="side-more">
+          <button className={"side-collapse" + (menu ? " open" : "")} title="更多面板" onClick={() => setMenu(!menu)}>
+            <Plus />
+          </button>
+          {menu && <PanelMenu onClose={() => setMenu(false)} />}
+        </div>
+      )}
+      <button className="side-collapse" title={isMobile ? "关闭" : "收起"} onClick={() => setSidePanel(null)}>
+        {isMobile ? <X /> : <PanelRightClose />}
       </button>
       {ctx.node}
     </div>

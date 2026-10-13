@@ -116,6 +116,12 @@
   font: inherit; font-size: var(--fs-xs); color: var(--fg-2); background: var(--bg-1);
 }
 
+/* inline prediction after the cursor (fish-style) */
+.predict-ghost {
+  position: absolute; z-index: 4; pointer-events: none; white-space: pre; overflow: hidden;
+  color: color-mix(in srgb, var(--fg-2) 75%, transparent);
+}
+
 /* ---------- search (floating pill) ---------- */
 .term-search {
   position: absolute; top: var(--sp-2); right: calc(var(--sp-8) + var(--sp-4)); z-index: 15;
@@ -242,6 +248,24 @@
 .term-tool:hover svg { color: var(--fg-1); }
 .term-tool-sep { flex: none; width: 1px; height: var(--sp-4); margin: 0 var(--sp-1); background: var(--line-strong); }
 
+/* ---------- mobile key row (replaces the tool strip) ---------- */
+.key-row {
+  flex: none; display: flex; align-items: stretch; height: var(--h-touch); padding: var(--sp-1) var(--sp-1) var(--sp-1) 0;
+  background: var(--bg-1); box-shadow: inset 0 1px 0 var(--line);
+}
+.key-scroll { flex: 1 1 auto; min-width: 0; display: flex; gap: var(--sp-1); padding: 0 var(--sp-1) 0 var(--sp-2); overflow-x: auto; scrollbar-width: none; }
+.key-scroll::-webkit-scrollbar { display: none; }
+.key-btn {
+  flex: none; min-width: calc(var(--h-touch) - var(--sp-2)); padding: 0 var(--sp-2);
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--radius-sm); background: var(--bg-2); color: var(--fg-0);
+  font-family: var(--font-mono); font-size: var(--fs-sm); touch-action: manipulation;
+}
+.key-btn:active { background: var(--bg-4); }
+.key-btn.on { background: var(--accent); color: var(--on-accent); }
+.key-btn.tool { background: transparent; color: var(--fg-1); padding: 0; }
+.key-btn.tool svg { width: var(--icon-lg); height: var(--icon-lg); stroke-width: 1.75; }
+
 /* ---------- command history dialog ---------- */
 .hist-search > .input { font-family: var(--font-mono); }
 .hist-list {
@@ -300,3 +324,6 @@
 }
 .conn-diag { margin: 0 var(--sp-6) var(--sp-3); }
 .term-tab-rename { min-width: 0; width: 120px; height: var(--h-xs); padding: 0 var(--sp-1); border: none; border-radius: var(--radius-sm); background: var(--bg-2); color: var(--fg-0); font: inherit; box-shadow: inset 0 0 0 1px var(--accent); outline: none; }
+
+/* Mobile: tab-bar popups span the screen width under the tab bar. */
+html.mobile .host-picker, html.mobile .term-overflow { position: fixed; top: calc(var(--h-panel-head) + var(--sp-1)); left: var(--sp-3); right: var(--sp-3); width: auto; }

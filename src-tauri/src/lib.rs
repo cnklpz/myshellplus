@@ -143,6 +143,7 @@ fn host_save(ctx: S, mut host: Host, password: Option<String>, proxy_password: O
 async fn host_delete(ctx: S<'_>, id: String) -> CmdResult<()> {
     tunnel::stop_host(ctx.inner(), &id).await;
     monitor::stop_host(ctx.inner(), &id);
+    ctx.indexes.forget(&id);
     ctx.pool.disconnect(&id).await;
     if let Ok(h) = ctx.db.get_host(&id) {
         for s in [h.password_secret, h.proxy_secret].into_iter().flatten() {
@@ -368,9 +369,14 @@ fn term_list(ctx: S) -> Vec<term::TermInfo> {
     ctx.terms.list()
 }
 
+/// `prev`: the command run just before this one in the same terminal (learned for prediction).
 #[tauri::command]
-fn history_record(ctx: S, host_id: String, command: String) -> CmdResult<()> {
-    Ok(ctx.db.record_history(&host_id, &command)?)
+fn history_record(ctx: S, host_id: String, command: String, prev: Option<String>) -> CmdResult<()> {
+    ctx.db.record_history(&host_id, &command)?;
+    if let Some(p) = prev {
+        log_err("记录命令顺序失败", ctx.db.record_next(&host_id, &p, &command));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -544,8 +550,19 @@ fn batch_start(ctx: S, host_ids: Vec<String>, command: String, timeout_secs: u64
 // ---------------- prediction & AI ----------------
 
 #[tauri::command]
-fn predict_local(ctx: S, host_id: String, input: String) -> CmdResult<Vec<predict::Suggestion>> {
-    Ok(predict::local(ctx.inner(), &host_id, &input, 8)?)
+fn predict_local(ctx: S, host_id: String, input: String, prev: Option<String>) -> CmdResult<Vec<predict::Suggestion>> {
+    Ok(predict::local(ctx.inner(), &host_id, &input, prev.as_deref(), 8)?)
+}
+
+/// Load the server's commands and shell history for local prediction (live connection only).
+#[tauri::command]
+async fn predict_warm(ctx: S<'_>, host_id: String) -> CmdResult<bool> {
+    Ok(predict::warm(ctx.inner().clone(), host_id).await?)
+}
+
+#[tauri::command]
+async fn predict_path(ctx: S<'_>, id: String, dir: String) -> CmdResult<Vec<predict::PathEntry>> {
+    Ok(predict::list_path(ctx.inner().clone(), id, dir).await?)
 }
 
 #[tauri::command]
@@ -805,19 +822,22 @@ async fn export_backup(ctx: S<'_>, path: String, secrets: bool, password: Option
 pub fn run() {
     // Self test / UI test instances run next to the user's window.
     let isolated = std::env::var("MYSHELL_SELFTEST").is_ok() || std::env::var("MYSHELL_TEST_INSTANCE").is_ok();
-    let mut builder = tauri::Builder::default();
-    if !isolated {
-        // One window only: launching again brings the existing window to the front.
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            hotkey::show_main(app);
-        }));
-    }
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = {
+        let mut b = builder.plugin(tauri_plugin_updater::Builder::new().build()).plugin(hotkey::plugin());
+        if !isolated {
+            // One window only: launching again brings the existing window to the front.
+            b = b.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                hotkey::show_main(app);
+            }));
+        }
+        b
+    };
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(hotkey::plugin())
         // A (re)loaded main page has lost its monitor subscriptions; connections stay untouched.
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
@@ -840,6 +860,8 @@ pub fn run() {
             };
             std::fs::create_dir_all(&dir)?;
             applog::init(&dir);
+            #[cfg(target_os = "android")]
+            vault::set_device_dir(dir.clone());
             let db = Arc::new(Db::open(&dir.join("myshellplus.db"))?);
             let vault = Arc::new(vault::Vault::new(db.clone()));
             let unlocked = vault.is_unlocked();
@@ -853,6 +875,7 @@ pub fn run() {
                 monitors: Default::default(),
                 tunnels: Default::default(),
                 transfers: Default::default(),
+                indexes: Default::default(),
             });
             let server = Arc::new(McpServer::default());
             watchdog::spawn(app.handle().clone());
@@ -903,7 +926,7 @@ pub fn run() {
             transfer_start, transfer_list, transfer_cancel, transfer_clear,
             tunnel_list, tunnel_save, tunnel_delete, tunnel_start, tunnel_stop, tunnel_status,
             snippet_list, snippet_save, snippet_delete, batch_start,
-            predict_local, predict_ai, ai_nl2cmd, ai_explain, ai_chat, ai_settings_get, ai_settings_save,
+            predict_local, predict_warm, predict_path, predict_ai, ai_nl2cmd, ai_explain, ai_chat, ai_settings_get, ai_settings_save,
             mcp_settings_get, mcp_settings_save, mcp_new_token, prompt_list, prompt_answer, audit_list, known_host_list, known_host_delete,
             import_default_path, import_preview, import_apply, export_backup,
             ui_heartbeat, local_read_text, local_write_text,

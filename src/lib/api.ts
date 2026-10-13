@@ -89,7 +89,8 @@ export interface BatchHostResult {
   stdout: string; stderr: string; exitCode: number | null; durationMs: number; error?: string | null;
 }
 export interface HistoryHit { command: string; count: number; lastUsed: number }
-export interface Suggestion { command: string; source: "history" | "snippet" | "builtin" | "ai"; description: string }
+export interface Suggestion { command: string; source: "history" | "snippet" | "command" | "builtin" | "path" | "ai"; description: string; dir?: boolean }
+export interface PathEntry { name: string; isDir: boolean }
 export interface NlCommand { command: string; explanation: string; dangerous: boolean }
 
 export interface AiProvider { id: string; name: string; kind: "anthropic" | "openai"; baseUrl: string; model: string; apiKeySecret?: string | null }
@@ -176,7 +177,7 @@ export const api = {
   termList: () => invoke<TermInfo[]>("term_list"),
   /** Shell's current directory; null when it can't be determined (non-Linux, env marker dropped). */
   termCwd: (id: string) => invoke<string | null>("term_cwd", { id }),
-  historyRecord: (hostId: string, command: string) => invoke<void>("history_record", { hostId, command }),
+  historyRecord: (hostId: string, command: string, prev?: string | null) => invoke<void>("history_record", { hostId, command, prev: prev ?? null }),
   /** hostId "" = all hosts; newest first */
   historyList: (hostId: string, query = "", limit?: number) => invoke<HistoryHit[]>("history_list", { hostId, query, limit }),
   historyDelete: (hostId: string, command: string) => invoke<void>("history_delete", { hostId, command }),
@@ -217,7 +218,9 @@ export const api = {
   batchStart: (hostIds: string[], command: string, timeoutSecs: number) => invoke<string>("batch_start", { hostIds, command, timeoutSecs }),
 
   // prediction & AI
-  predictLocal: (hostId: string, input: string) => invoke<Suggestion[]>("predict_local", { hostId, input }),
+  predictLocal: (hostId: string, input: string, prev?: string | null) => invoke<Suggestion[]>("predict_local", { hostId, input, prev: prev ?? null }),
+  predictWarm: (hostId: string) => invoke<boolean>("predict_warm", { hostId }),
+  predictPath: (id: string, dir: string) => invoke<PathEntry[]>("predict_path", { id, dir }),
   predictAi: (hostId: string, input: string, screen: string) => invoke<Suggestion[]>("predict_ai", { hostId, input, screen }),
   aiNl2Cmd: (hostId: string, prompt: string) => invoke<NlCommand>("ai_nl2cmd", { hostId, prompt }),
   aiExplain: (hostId: string, text: string) => invoke<string>("ai_explain", { hostId, text }),

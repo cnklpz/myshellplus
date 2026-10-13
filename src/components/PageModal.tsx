@@ -12,7 +12,7 @@ export function PageModal(props: { open: boolean; onClose: () => void; width?: n
       style={{ display: props.open ? "flex" : "none" }}
       onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}
     >
-      <div className="page-modal" style={{ width: props.width ?? 1120 }}>
+      <div className="page-modal" style={props.width ? { width: props.width } : undefined}>
         <button className="icon-btn md page-modal-close" title="关闭" onClick={props.onClose}>
           <X />
         </button>

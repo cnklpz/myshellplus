@@ -3,10 +3,12 @@ import ReactDOM from "react-dom/client";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/base.css";
 import { installDiagnostics } from "./lib/diag";
+import { isMobile } from "./lib/platform";
 import { applyTheme, currentTheme } from "./lib/themes";
 
 async function start() {
   applyTheme(currentTheme().id);
+  if (isMobile) document.documentElement.classList.add("mobile");
   if ("__TAURI_INTERNALS__" in window) {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     installDiagnostics(getCurrentWindow().label);

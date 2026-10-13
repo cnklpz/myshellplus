@@ -128,6 +128,15 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
         { command: "docker logs -f --tail 200 ", source: "builtin", description: "容器日志" },
         { command: "docker compose up -d", source: "builtin", description: "后台启动 compose" },
       ].filter((s) => s.command.startsWith(args.input));
+    case "predict_warm":
+      return false;
+    case "predict_path":
+      return [
+        { name: "log", isDir: true },
+        { name: "lib", isDir: true },
+        { name: "local", isDir: true },
+        { name: "lock", isDir: false },
+      ];
     case "ai_settings_get":
       return { providers: [{ id: "anthropic", name: "Claude", kind: "anthropic", baseUrl: "https://api.anthropic.com", model: "claude-opus-5-5", apiKeySecret: "x" }], active: "anthropic", predictProvider: "anthropic", predictEnabled: true, aiPredictEnabled: false, nlPredictEnabled: true, thinking: false, predictModel: null };
     case "mcp_settings_get": return { settings: { enabled: true, port: 17890, token: "msp_3f9a0c1e2b7d4a6f8e1c0b9a7d6e5f4c3b2a1908" }, runningPort: 17890, error: null };

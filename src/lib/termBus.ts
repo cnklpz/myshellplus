@@ -5,6 +5,8 @@ import { useApp } from "../store";
 export interface TermHandle {
   /** Type text into the shell (no newline added). */
   paste: (text: string) => void;
+  /** Input as if typed on the keyboard (mobile key row: Esc, arrows, Ctrl+X). */
+  input: (data: string) => void;
   /** Send text and press Enter. */
   run: (command: string) => void;
   /** Plain text of the last `lines` screen lines. */

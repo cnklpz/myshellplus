@@ -25,3 +25,8 @@
 
 /* Catches right-clicks on blank panel space without adding a layout box. */
 .side-body-menu { display: contents; }
+
+/* Mobile: all panels as tabs; only the open one shows its label. */
+html.mobile .side-tabs > button:not(.on) > span { display: none; }
+html.mobile .side-tabs > button.on { flex: 2 1 0; }
+html.mobile .side-tabs > button > span { white-space: nowrap; }

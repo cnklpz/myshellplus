@@ -26,6 +26,7 @@ import "./home.css";
 import { useLatencyHistory } from "./latencyHistory";
 import { probeHosts, useProbe, useProbing } from "./probe";
 import { usePrivacy } from "../../lib/privacy";
+import { isMobile } from "../../lib/platform";
 import { useTauriEvent } from "../../lib/events";
 import { fmtMs } from "../../lib/format";
 import { lsGet, lsSet } from "../../lib/storage";
@@ -91,6 +92,9 @@ function useHostOs() {
   useTauriEvent<Record<string, string>>("host-os", (e) => setMap(e.payload));
   return map;
 }
+
+/** Header button text: phones show the icon only (the title attribute keeps the name). */
+const label = (text: string) => (isMobile ? null : " " + text);
 
 export function HomeView() {
   const hosts = useApp((s) => s.hosts);
@@ -164,19 +168,24 @@ export function HomeView() {
         </div>
         <button
           className="btn"
+          title="全部测速"
           disabled={hosts.length === 0 || probing}
           onClick={() => probeHosts(groups.flatMap((g) => g.items.map((h) => h.id)))}
         >
-          {probing ? <LoaderCircle className="spin" /> : <Gauge />} 全部测速
+          {probing ? <LoaderCircle className="spin" /> : <Gauge />}
+          {label("全部测速")}
         </button>
-        <button className="btn" onClick={() => setImportOpen(true)}>
-          <Download /> 导入…
+        <button className="btn" title="导入…" onClick={() => setImportOpen(true)}>
+          <Download />
+          {label("导入…")}
         </button>
-        <button className="btn" disabled={hosts.length === 0} onClick={() => setExporting(true)}>
-          <Upload /> 导出…
+        <button className="btn" title="导出…" disabled={hosts.length === 0} onClick={() => setExporting(true)}>
+          <Upload />
+          {label("导出…")}
         </button>
-        <button className="btn" onClick={() => openEditor("")}>
-          <Plus /> 新建…
+        <button className="btn" title="新建…" onClick={() => openEditor("")}>
+          <Plus />
+          {label("新建…")}
         </button>
       </div>
 

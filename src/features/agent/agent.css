@@ -66,3 +66,7 @@
 .agent-inner .t-err { color: var(--err); }
 .agent-inner .t-faint { color: var(--fg-2); }
 .agent-inner .t-muted { color: var(--fg-1); }
+
+/* Mobile */
+html.mobile .agent-search { width: auto; flex: 1 1 auto; }
+html.mobile .agent-tools > div { grid-template-columns: 112px minmax(0, 1fr); }

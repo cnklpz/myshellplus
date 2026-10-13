@@ -2,6 +2,7 @@
 // Kept apart from SidePanels.tsx so the panels can import it without an import cycle.
 import { PanelRightClose, Pin, PinOff } from "lucide-react";
 import { createContext, useCallback, useContext } from "react";
+import { isMobile } from "../../lib/platform";
 import { type SidePanelId, useApp } from "../../store";
 import type { MenuItem } from "../terminal/ContextMenu";
 
@@ -19,6 +20,8 @@ export function togglePin(id: SidePanelId) {
 }
 
 export function panelItems(id: SidePanelId): MenuItem[] {
+  // Mobile panels are full-screen sheets with every tab shown: nothing to hide or pin.
+  if (isMobile) return [];
   const s = useApp.getState();
   const pinned = s.sidePins.includes(id);
   return [

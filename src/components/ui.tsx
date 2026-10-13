@@ -2,6 +2,7 @@
 import { Search, X } from "lucide-react";
 import { createContext, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref, useContext, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { isMobile } from "../lib/platform";
 import { level, PCT_ERR, PCT_WARN } from "../lib/level";
 import { useTweenText } from "../lib/motion";
 import { useApp, type Toast, type ToastAction } from "../store";
@@ -85,13 +86,16 @@ export function Dialog(props: {
 }) {
   const hidden = useContext(HiddenContext);
   useEscClose(props.onClose, !hidden);
+  const width = props.width ?? 520;
+  // Phones: form-sized dialogs fill the screen; small confirmations stay centered.
+  const full = isMobile && width > 440;
   return createPortal(
     <div
-      className={"overlay" + (props.className ? " " + props.className : "")}
+      className={"overlay" + (full ? " full" : "") + (props.className ? " " + props.className : "")}
       style={hidden ? { display: "none" } : undefined}
       onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}
     >
-      <div className="dialog" style={{ width: props.width ?? 520 }}>
+      <div className={"dialog" + (full ? " full" : "")} style={full ? undefined : { width }}>
         <DialogHeader title={props.title} onClose={props.onClose} />
         <EscLayer>
           <div className="dialog-body">{props.children}</div>

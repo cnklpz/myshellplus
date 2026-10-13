@@ -32,6 +32,8 @@ import { useEffect, useRef, useState } from "react";
 import { HideDialogs, toast } from "../../components/ui";
 import { api, errMsg } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
+import { applyMods } from "../../lib/mobileKeys";
+import { isMobile } from "../../lib/platform";
 import { copyHostAddr } from "../hosts/hostMenu";
 import { termBus } from "../../lib/termBus";
 import { hostById, type TermTab, useApp } from "../../store";
@@ -39,6 +41,7 @@ import { AiBar, ExplainCard } from "./AiBar";
 import { BatchDialog, useBatchRun } from "./CommandBar";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { HistoryDialog, SaveSnippetDialog } from "./HistoryDialog";
+import { KeyRow } from "./KeyRow";
 import { onThemeChange, termTheme } from "../../lib/themes";
 import { refreshAiPredict, savedFontSize, TERM_OPTIONS } from "./config";
 import { Highlighter } from "./highlight";
@@ -174,7 +177,7 @@ export function XTermView(props: {
       return out.join("\n");
     };
 
-    const predictor = new Predictor(term, wrapEl, id, hostId, screenText, setPopup);
+    const predictor = new Predictor(term, wrapEl, id, hostId, screenText, () => echo.busy(), setPopup);
 
     const copy = () => {
       const s = term.getSelection();
@@ -210,7 +213,8 @@ export function XTermView(props: {
       });
 
     const subs = [
-      term.onData((data) => {
+      term.onData((typed) => {
+        const data = applyMods(typed);
         if (!live.current.alive) {
           if (data === "\r") live.current.reconnect();
           return;
@@ -331,16 +335,15 @@ export function XTermView(props: {
         term.paste(text);
         term.focus();
       },
+      input: (data) => term.input(data, true),
       run: (command) => {
         if (!live.current.alive) {
           toast("连接已断开", "error");
           return;
         }
-        predictor.onRun();
+        predictor.onRun(command); // records history
         echo.clear();
         api.termWrite(id, command + "\r").catch((e) => toast(errMsg(e), "error"));
-        const c = command.trim();
-        if (c && !c.includes("\n")) api.historyRecord(hostId, c).catch(() => {});
         term.scrollToBottom();
       },
       screenText,
@@ -508,49 +511,73 @@ export function XTermView(props: {
             />
           )}
         </div>
-        <div className="term-toolbar">
-          <button className="term-tool" onClick={() => setBatchOpen("")} title="多行命令发送到此终端">
-            <ListChecks />
-            <span>批量执行</span>
-            {batchRun && (
-              <span className="badge num">
-                {batchRun.done}/{batchRun.total}
-              </span>
-            )}
-          </button>
-          <button className="term-tool" onClick={() => useApp.getState().setModal("batch")}>
-            <Layers />
-            <span>多机执行</span>
-          </button>
-          <button className="term-tool" onClick={() => useApp.getState().setModal("snippets")}>
-            <ScrollText />
-            <span>命令</span>
-          </button>
-          <button className="term-tool" title="Ctrl+Shift+H" onClick={() => setHistoryOpen(true)}>
-            <History />
-            <span>历史</span>
-          </button>
-          <button className="term-tool" onClick={() => useApp.getState().setModal("tunnels")}>
-            <Network />
-            <span>隧道</span>
-          </button>
-          <span className="term-tool-sep" />
-          <button
-            className="term-tool"
-            title="Ctrl+K"
-            onClick={() => {
-              inst.current?.predictor.reset();
-              setAiOpen(true);
-            }}
-          >
-            <Sparkles />
-            <span>AI 命令</span>
-          </button>
-          <button className="term-tool" title="Ctrl+F" onClick={() => setSearchOpen(true)}>
-            <Search />
-            <span>搜索</span>
-          </button>
-        </div>
+        {isMobile ? (
+          <KeyRow
+            send={(d) => inst.current?.term.input(d, true)}
+            appCursor={() => !!inst.current?.term.modes.applicationCursorKeysMode}
+            tools={[
+              {
+                label: "AI 命令",
+                icon: <Sparkles />,
+                onSelect: () => {
+                  inst.current?.predictor.reset();
+                  setAiOpen(true);
+                },
+              },
+              { label: "命令", icon: <ScrollText />, onSelect: () => useApp.getState().setSidePanel("snippets") },
+              { label: "历史…", icon: <History />, onSelect: () => setHistoryOpen(true) },
+              { label: "搜索", icon: <Search />, onSelect: () => setSearchOpen(true) },
+              "sep",
+              { label: "批量执行…", icon: <ListChecks />, onSelect: () => setBatchOpen("") },
+              { label: "多机执行", icon: <Layers />, onSelect: () => useApp.getState().setModal("batch") },
+              { label: "隧道", icon: <Network />, onSelect: () => useApp.getState().setModal("tunnels") },
+            ]}
+          />
+        ) : (
+          <div className="term-toolbar">
+            <button className="term-tool" onClick={() => setBatchOpen("")} title="多行命令发送到此终端">
+              <ListChecks />
+              <span>批量执行</span>
+              {batchRun && (
+                <span className="badge num">
+                  {batchRun.done}/{batchRun.total}
+                </span>
+              )}
+            </button>
+            <button className="term-tool" onClick={() => useApp.getState().setModal("batch")}>
+              <Layers />
+              <span>多机执行</span>
+            </button>
+            <button className="term-tool" onClick={() => useApp.getState().setModal("snippets")}>
+              <ScrollText />
+              <span>命令</span>
+            </button>
+            <button className="term-tool" title="Ctrl+Shift+H" onClick={() => setHistoryOpen(true)}>
+              <History />
+              <span>历史</span>
+            </button>
+            <button className="term-tool" onClick={() => useApp.getState().setModal("tunnels")}>
+              <Network />
+              <span>隧道</span>
+            </button>
+            <span className="term-tool-sep" />
+            <button
+              className="term-tool"
+              title="Ctrl+K"
+              onClick={() => {
+                inst.current?.predictor.reset();
+                setAiOpen(true);
+              }}
+            >
+              <Sparkles />
+              <span>AI 命令</span>
+            </button>
+            <button className="term-tool" title="Ctrl+F" onClick={() => setSearchOpen(true)}>
+              <Search />
+              <span>搜索</span>
+            </button>
+          </div>
+        )}
         {batchOpen !== undefined && (
           <BatchDialog
             tab={tab}

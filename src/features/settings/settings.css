@@ -65,7 +65,7 @@
 }
 .theme-tile:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .theme-tile.on { box-shadow: inset 0 0 0 2px var(--accent); }
-.theme-preview { display: flex; gap: var(--sp-1); height: 72px; padding: var(--sp-1); border-radius: var(--radius-md); }
+.theme-preview { display: flex; gap: var(--sp-1); width: 100%; height: 72px; padding: var(--sp-1); border-radius: var(--radius-md); }
 .tp-side { width: 22%; }
 .tp-main { flex: 1; border-radius: var(--radius-sm); padding: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-1); }
 .tp-main > span { display: block; height: var(--sp-1); border-radius: var(--sp-half); }
@@ -73,7 +73,7 @@
 .tp-main > span:nth-child(2) { width: 62%; }
 .tp-main > span:nth-child(3) { width: 48%; }
 .tp-main > span:nth-child(4) { width: 22%; }
-.theme-name { display: flex; align-items: center; justify-content: space-between; height: var(--h-sm); padding: 0 var(--sp-1); font-size: var(--fs-sm); font-weight: 500; color: var(--fg-0); }
+.theme-name { display: flex; align-items: center; justify-content: space-between; width: 100%; height: var(--h-sm); padding: 0 var(--sp-1); font-size: var(--fs-sm); font-weight: 500; color: var(--fg-0); }
 .theme-tile:not(.on) .theme-name { color: var(--fg-1); }
 .theme-dots { display: flex; gap: var(--sp-1); }
 .theme-dots > i { width: 8px; height: 8px; border-radius: 50%; }
@@ -112,3 +112,16 @@
 /* Startup update dialog */
 .upd-notes { max-height: 360px; overflow: auto; }
 .upd-note { font-size: var(--fs-sm); color: var(--fg-2); font-variant-numeric: tabular-nums; }
+
+/* Mobile: the nav is a full-width section list; a picked section replaces it (back button in its title). */
+html.mobile .set-layout { grid-template-columns: minmax(0, 1fr); }
+html.mobile .set-layout.m-list .set-content, html.mobile .set-layout.m-detail .set-nav { display: none; }
+html.mobile .set-nav { padding: 0 var(--sp-2) var(--sp-4); background: var(--bg-0); }
+html.mobile .set-nav-head { padding: 0 var(--sp-2); }
+html.mobile .set-nav > button { height: var(--h-touch); padding: 0 var(--sp-2); justify-content: space-between; color: var(--fg-0); }
+html.mobile .set-nav > button > svg { width: var(--icon-md); height: var(--icon-md); color: var(--fg-2); flex: none; }
+html.mobile .set-content { padding: 0 var(--sp-4) var(--sp-6); }
+html.mobile .set-title { gap: var(--sp-2); margin-left: calc(-1 * var(--sp-2)); padding-right: calc(var(--h-md) + var(--sp-2)); }
+html.mobile .set-group > .field { grid-template-columns: 96px minmax(0, 1fr); padding: var(--sp-2) var(--sp-3); }
+html.mobile .theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+html.mobile .theme-preview { height: 56px; }

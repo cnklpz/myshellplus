@@ -317,3 +317,17 @@ body.mon-dragging, body.mon-dragging * { cursor: grabbing !important; user-selec
 .mon-w-120 { width: 120px; }
 .mon-w-160 { width: 160px; }
 .mon-w-240 { width: 240px; }
+
+/* Mobile: the type list becomes a scrolling row above the form; the full-screen dialog body scrolls. */
+html.mobile .mon-dlg.adding { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+html.mobile .mon-types {
+  flex-direction: row; gap: var(--sp-3); max-height: none; overflow-x: auto; overflow-y: hidden;
+  margin: 0 calc(-1 * var(--sp-4)); padding: 0 var(--sp-4) var(--sp-2); box-shadow: inset 0 -1px 0 var(--line); scrollbar-width: none;
+}
+html.mobile .mon-types::-webkit-scrollbar { display: none; }
+html.mobile .mon-type-group { flex-direction: row; align-items: center; flex: none; gap: var(--sp-1); }
+html.mobile .mon-type-head { padding: 0; }
+html.mobile .mon-type { width: auto; flex: none; white-space: nowrap; }
+html.mobile .mon-dlg-main { max-height: none; overflow: visible; }
+/* Touch hold lifts a card: no system callout / text selection meanwhile. */
+html.mobile .mon-card { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

@@ -181,5 +181,6 @@ export function useContextMenu() {
     setMenu({ x: e.clientX, y: e.clientY, items });
   }, []);
   const node = menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />;
-  return { open, node };
+  const close = useCallback(() => setMenu(null), []);
+  return { open, close, node, isOpen: menu !== null };
 }
