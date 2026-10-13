@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyShell+ — SSH 客户端</title>
+<meta name="description" content="安全、稳定、可被 Agent 操作的 SSH 客户端。Rust 核心持有连接，界面崩溃不断线；内置 MCP 服务，Claude Code 等 Agent 可直接操作服务器。">
+<meta property="og:title" content="MyShell+">
+<meta property="og:description" content="安全、稳定、可被 Agent 操作的 SSH 客户端">
+<meta property="og:image" content="https://cnklpz.github.io/myshellplus/images/terminal.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+:root {
+  --chrome: #0e1115;
+  --bg-0: #13171c;
+  --bg-1: #1a1f26;
+  --bg-2: #222831;
+  --line: #2b323c;
+  --fg: #e6e9ee;
+  --fg-2: #a3acb9;
+  --faint: #6b7584;
+  --accent: #3fb6a8;
+  --on-accent: #0b1513;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px; --sp-16: 64px; --sp-24: 96px;
+  --radius: 10px;
+  --max: 1120px;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--chrome);
+  color: var(--fg);
+  font: 15px/1.6 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: "Cascadia Code", Consolas, "JetBrains Mono", monospace; }
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--sp-6); }
+
+/* nav */
+.nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--chrome) 85%, transparent); backdrop-filter: blur(12px); }
+.nav .wrap { display: flex; align-items: center; gap: var(--sp-6); height: 56px; }
+.brand { display: flex; align-items: center; gap: var(--sp-2); font-weight: 600; }
+.brand img { width: 24px; height: 24px; }
+.nav nav { display: flex; gap: var(--sp-6); margin-left: auto; color: var(--fg-2); font-size: 14px; }
+.nav nav a:hover { color: var(--fg); }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: var(--sp-2); height: 40px; padding: 0 var(--sp-4); border-radius: 8px; font-size: 14px; font-weight: 500; background: var(--bg-2); color: var(--fg); transition: background .15s; }
+.btn:hover { background: color-mix(in srgb, var(--bg-2) 70%, var(--fg) 8%); }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
+.btn svg { width: 18px; height: 18px; }
+
+/* hero */
+.hero { padding: var(--sp-24) 0 var(--sp-12); text-align: center; }
+.hero h1 { margin: 0; font-size: 48px; line-height: 1.15; letter-spacing: -.02em; }
+.hero p { margin: var(--sp-4) auto 0; max-width: 560px; color: var(--fg-2); font-size: 17px; }
+.actions { display: flex; justify-content: center; gap: var(--sp-3); margin-top: var(--sp-8); flex-wrap: wrap; }
+.meta { margin-top: var(--sp-3); color: var(--faint); font-size: 13px; font-variant-numeric: tabular-nums; }
+.shot { margin-top: var(--sp-12); border-radius: var(--radius); overflow: hidden; box-shadow: inset 0 0 0 1px var(--line), 0 24px 80px rgba(0,0,0,.5); background: var(--bg-0); }
+.shot img { display: block; width: 100%; height: auto; }
+
+/* sections */
+section { padding: var(--sp-16) 0; }
+h2 { margin: 0 0 var(--sp-6); font-size: 28px; letter-spacing: -.01em; }
+.lead { margin: calc(-1 * var(--sp-4)) 0 var(--sp-8); color: var(--fg-2); max-width: 640px; }
+.lead.flush { margin-top: 0; }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-4); }
+.card { background: var(--bg-0); border-radius: var(--radius); padding: var(--sp-6); }
+.card h3 { margin: 0 0 var(--sp-2); font-size: 16px; }
+.card p { margin: 0; color: var(--fg-2); font-size: 14px; }
+.card kbd, .lead kbd, li kbd { font-family: inherit; font-size: 12px; padding: 0 var(--sp-1); border-radius: 4px; background: var(--bg-2); color: var(--fg); }
+
+/* gallery */
+.tabs { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+.tab { height: 32px; padding: 0 var(--sp-3); border-radius: 6px; border: 0; background: var(--bg-1); color: var(--fg-2); font: inherit; font-size: 13px; cursor: pointer; }
+.tab:hover { color: var(--fg); }
+.tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); }
+.gallery .shot { margin-top: 0; }
+
+/* two-column */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-6); }
+.list { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-3); }
+.list li { position: relative; padding-left: var(--sp-6); color: var(--fg-2); font-size: 14px; }
+.list li::before { content: ""; position: absolute; left: var(--sp-1); top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.list b { color: var(--fg); font-weight: 600; }
+
+pre { margin: 0; padding: var(--sp-4); background: var(--bg-0); border-radius: var(--radius); overflow-x: auto; font-size: 13px; color: var(--fg-2); box-shadow: inset 0 0 0 1px var(--line); }
+pre .c { color: var(--accent); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+td { padding: var(--sp-2) 0; vertical-align: top; }
+td:first-child { width: 45%; padding-right: var(--sp-4); }
+td code { color: var(--fg); font-size: 13px; }
+td + td { color: var(--fg-2); }
+tr + tr td { box-shadow: inset 0 1px 0 var(--line); }
+
+.diagram { background: var(--bg-0); border-radius: var(--radius); padding: var(--sp-6); }
+.diagram svg { display: block; width: 100%; height: auto; }
+
+.cta { text-align: center; padding: var(--sp-16) 0 var(--sp-24); }
+.cta h2 { margin-bottom: var(--sp-2); }
+.cta p { margin: 0; color: var(--fg-2); }
+
+footer { padding: var(--sp-8) 0; color: var(--faint); font-size: 13px; }
+footer .wrap { display: flex; gap: var(--sp-6); flex-wrap: wrap; }
+footer a:hover { color: var(--fg); }
+
+@media (max-width: 860px) {
+  .grid { grid-template-columns: 1fr 1fr; }
+  .split { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .wrap { padding: 0 var(--sp-4); }
+  .nav nav { display: none; }
+  .nav .btn { margin-left: auto; }
+  .hero { padding-top: var(--sp-16); }
+  .hero h1 { font-size: 34px; }
+  .grid { grid-template-columns: 1fr; }
+  td:first-child { width: auto; }
+}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="icon.svg" alt="">MyShell+</a>
+    <nav>
+      <a href="#features">功能</a>
+      <a href="#screens">截图</a>
+      <a href="#security">安全</a>
+      <a href="#agent">Agent</a>
+      <a href="https://github.com/cnklpz/myshellplus">GitHub</a>
+    </nav>
+    <a class="btn primary dl-link" href="https://github.com/cnklpz/myshellplus/releases/latest">下载</a>
+  </div>
+</header>
+
+<main>
+  <div class="hero wrap">
+    <h1>安全、稳定、<br>可被 Agent 操作的 SSH 客户端</h1>
+    <p>连接、密钥和隧道都在 Rust 核心里，界面重载不断线。内置 MCP 服务，Claude Code 可以直接操作你的服务器。</p>
+    <div class="actions">
+      <a class="btn primary dl-link" href="https://github.com/cnklpz/myshellplus/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+        下载 Windows 版
+      </a>
+      <a class="btn" href="https://github.com/cnklpz/myshellplus">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        源代码
+      </a>
+    </div>
+    <div class="meta" id="ver">Windows 10/11 · x64</div>
+    <div class="shot"><img src="images/terminal.png" width="1440" height="900" alt="终端与状态面板"></div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>功能</h2>
+      <div class="grid">
+        <div class="card"><h3>终端</h3><p>多标签、WebGL 渲染、搜索、语法高亮、断线重连。</p></div>
+        <div class="card"><h3>命令预测</h3><p>历史、收藏和常用命令实时补全，输入中文直接转命令。</p></div>
+        <div class="card"><h3>AI 命令</h3><p><kbd>Ctrl+K</kbd> 用自然语言生成命令，选中输出让 AI 解释。支持 Claude 与 OpenAI 兼容服务。</p></div>
+        <div class="card"><h3>状态面板</h3><p>CPU、内存、负载、网络、磁盘 IO、Top 进程，卡片可自定义。</p></div>
+        <div class="card"><h3>总览</h3><p>所有服务器一屏实时状态，按分组批量连接。</p></div>
+        <div class="card"><h3>SFTP 文件</h3><p>拖拽上传下载、在线编辑、修改权限。</p></div>
+        <div class="card"><h3>隧道</h3><p>本地 <code>-L</code>、远程 <code>-R</code>、动态 SOCKS5 <code>-D</code>，可开机自动启动。</p></div>
+        <div class="card"><h3>多机执行</h3><p>多台服务器并发执行，按主机查看输出，失败重试。</p></div>
+        <div class="card"><h3>全局搜索</h3><p><kbd>Ctrl+P</kbd> 搜索服务器、终端、命令、历史、隧道和设置。</p></div>
+        <div class="card"><h3>导入</h3><p>OpenSSH config、PuTTY、Xshell、MobaXterm、FinalShell、1Password、CSV。</p></div>
+        <div class="card"><h3>SSH Agent</h3><p>支持 1Password 与 Windows OpenSSH Agent，私钥不离开 Agent。</p></div>
+        <div class="card"><h3>全局热键</h3><p><kbd>Ctrl+Alt+M</kbd> 显示/隐藏窗口，按住 <kbd>Alt+`</kbd> 切换终端。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="screens">
+    <div class="wrap gallery">
+      <h2>截图</h2>
+      <div class="tabs" role="tablist"></div>
+      <div class="shot"><img id="gimg" src="images/home.png" width="1440" height="900" alt=""></div>
+    </div>
+  </section>
+
+  <section id="security">
+    <div class="wrap split">
+      <div>
+        <h2>安全</h2>
+        <ul class="list">
+          <li><b>全部加密存储</b>：密码、私钥、API Key 用主密码派生密钥加密（Argon2id + XChaCha20-Poly1305），磁盘上只有密文。</li>
+          <li><b>设备绑定</b>：可选“在此设备记住”，数据密钥由 Windows DPAPI 保护。</li>
+          <li><b>指纹校验</b>：首次连接确认主机指纹，指纹变化时告警。</li>
+          <li><b>Agent 权限</b>：按服务器设置禁止 / 只读 / 每次询问 / 自动，高风险命令仍需确认，全部操作写审计日志。</li>
+          <li><b>MCP 仅本机</b>：只监听 127.0.0.1，需要 Bearer Token，拒绝浏览器来源请求。</li>
+        </ul>
+      </div>
+      <div>
+        <h2>稳定</h2>
+        <ul class="list">
+          <li><b>界面与连接分离</b>：SSH、终端、隧道都运行在 Rust 进程里，界面只负责显示。</li>
+          <li><b>重载回放</b>：每个会话 512KB 环形缓冲，界面重载后自动接上并回放输出。</li>
+          <li><b>输出合并</b>：约 60fps 合并推送，大量输出不会压垮界面。</li>
+          <li><b>看门狗</b>：界面 90 秒无响应时自动重载，连接不受影响。</li>
+          <li><b>内存稳定</b>：图表保留 60 个采样点，终端回滚 5000 行，长时间运行不膨胀。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="diagram">
+        <svg viewBox="0 0 960 260" role="img" aria-label="架构：界面通过 IPC 连接 Rust 核心，核心持有 SSH 连接池、终端会话、隧道和 MCP 服务">
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="#6b7584"/></marker>
+          </defs>
+          <g font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="15" text-anchor="middle">
+            <rect x="20" y="90" width="200" height="80" rx="10" fill="#222831"/>
+            <text x="120" y="126" fill="#e6e9ee" font-weight="600">React + xterm.js</text>
+            <text x="120" y="148" fill="#a3acb9" font-size="13">只负责显示</text>
+
+            <line x1="224" y1="130" x2="356" y2="130" stroke="#6b7584" stroke-width="1.5" marker-end="url(#ah)" marker-start="url(#ah)"/>
+            <text x="290" y="118" fill="#a3acb9" font-size="13">IPC · ~60fps</text>
+
+            <rect x="360" y="70" width="200" height="120" rx="10" fill="none" stroke="#3fb6a8" stroke-width="1.5"/>
+            <text x="460" y="126" fill="#e6e9ee" font-weight="600">Rust 核心</text>
+            <text x="460" y="148" fill="#a3acb9" font-size="13">持有连接与密钥</text>
+
+            <g stroke="#6b7584" stroke-width="1.5" fill="none" marker-end="url(#ah)">
+              <path d="M560 100 C600 100 600 40 636 40"/>
+              <path d="M560 120 C600 120 600 100 636 100"/>
+              <path d="M560 140 C600 140 600 160 636 160"/>
+              <path d="M560 160 C600 160 600 220 636 220"/>
+            </g>
+            <g fill="#222831">
+              <rect x="640" y="20" width="160" height="40" rx="8"/>
+              <rect x="640" y="80" width="160" height="40" rx="8"/>
+              <rect x="640" y="140" width="160" height="40" rx="8"/>
+              <rect x="640" y="200" width="160" height="40" rx="8"/>
+            </g>
+            <g fill="#e6e9ee">
+              <text x="720" y="45">SSH 连接池</text>
+              <text x="720" y="105">终端 · 512KB 缓冲</text>
+              <text x="720" y="165">隧道</text>
+              <text x="720" y="225">MCP · 127.0.0.1</text>
+            </g>
+            <line x1="940" y1="220" x2="804" y2="220" stroke="#6b7584" stroke-width="1.5" marker-end="url(#ah)"/>
+            <text x="880" y="208" fill="#a3acb9" font-size="13">Agent</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <div class="wrap split">
+      <div>
+        <h2>接入 Agent</h2>
+        <p class="lead flush">在应用的 Agent 页开启 MCP 服务，复制命令到 Claude Code：</p>
+        <pre><span class="c">claude mcp add</span> --transport http myshellplus \
+  http://127.0.0.1:17890/mcp \
+  --header "Authorization: Bearer &lt;token&gt;"</pre>
+      </div>
+      <div>
+        <table>
+          <tr><td><code>list_hosts</code></td><td>列出服务器</td></tr>
+          <tr><td><code>run_command</code></td><td>执行命令</td></tr>
+          <tr><td><code>batch_run</code></td><td>多机执行</td></tr>
+          <tr><td><code>host_status</code></td><td>主机状态</td></tr>
+          <tr><td><code>list_dir</code> <code>read_file</code> <code>write_file</code></td><td>文件操作</td></tr>
+          <tr><td><code>list_terminals</code> <code>read_terminal</code> <code>send_terminal</code></td><td>操作已打开的终端</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <div class="cta wrap">
+    <h2>开始使用</h2>
+    <p>免费开源，支持应用内自动更新。</p>
+    <div class="actions">
+      <a class="btn primary dl-link" href="https://github.com/cnklpz/myshellplus/releases/latest">下载 Windows 版</a>
+      <a class="btn" href="https://github.com/cnklpz/myshellplus/releases">更新日志</a>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>MyShell+</span>
+    <a href="https://github.com/cnklpz/myshellplus">GitHub</a>
+    <a href="https://github.com/cnklpz/myshellplus/issues">反馈问题</a>
+  </div>
+</footer>
+
+<script>
+const shots = [
+  ["home", "服务器分组"], ["search", "全局搜索"], ["predict", "命令预测"], ["ai-command", "中文转命令"],
+  ["cpu-detail", "CPU 详情"], ["processes", "进程"], ["files", "SFTP 文件"], ["tunnels", "隧道"],
+  ["agent", "MCP 服务"], ["themes", "主题"],
+];
+const tabs = document.querySelector(".tabs");
+const img = document.getElementById("gimg");
+shots.forEach(([key, label], i) => {
+  const b = document.createElement("button");
+  b.className = "tab";
+  b.role = "tab";
+  b.textContent = label;
+  b.setAttribute("aria-selected", i === 0);
+  b.onclick = () => {
+    tabs.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", t === b));
+    img.src = `images/${key}.png`;
+    img.alt = label;
+  };
+  tabs.appendChild(b);
+  new Image().src = `images/${key}.png`;
+});
+img.alt = shots[0][1];
+
+// Point download buttons straight at the latest installer.
+fetch("https://api.github.com/repos/cnklpz/myshellplus/releases/latest")
+  .then(r => r.ok ? r.json() : Promise.reject())
+  .then(rel => {
+    const exe = rel.assets.find(a => a.name.endsWith("-setup.exe"));
+    if (exe) document.querySelectorAll(".dl-link").forEach(a => a.href = exe.browser_download_url);
+    const mb = exe ? ` · ${(exe.size / 1048576).toFixed(1)} MB` : "";
+    document.getElementById("ver").textContent = `${rel.tag_name} · Windows 10/11 · x64${mb}`;
+  })
+  .catch(() => {});
+</script>
+</body>
+</html>
