@@ -1,6 +1,7 @@
 // Command history of a terminal's host (or all hosts): search, insert, run, copy, delete.
 import { Copy, CornerDownLeft, Play, Search, Star, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Select } from "../../components/Select";
 import { Dialog, Empty, SearchBox, toast } from "../../components/ui";
 import { api, errMsg, type HistoryHit } from "../../lib/api";
 import { termBus } from "../../lib/termBus";
@@ -215,13 +216,15 @@ export function HistoryDialog(props: { tab: TermTab; onClose: () => void }) {
         </div>
       </div>
       {menu.node}
-      {fav !== null && <SaveSnippetDialog text={fav} onClose={() => setFav(null)} />}
+      {fav !== null && <SaveSnippetDialog text={fav} hostId={tab.hostId} onClose={() => setFav(null)} />}
     </Dialog>
   );
 }
 
 /** Save a piece of terminal text as a 命令 (snippet). */
-export function SaveSnippetDialog(props: { text: string; onClose: () => void }) {
+export function SaveSnippetDialog(props: { text: string; hostId: string; onClose: () => void }) {
+  const hostName = useApp((s) => s.hosts.find((h) => h.id === props.hostId)?.name ?? "当前服务器");
+  const [scopeHost, setScopeHost] = useState(props.hostId);
   const firstLine = props.text.trim().split(/\r?\n/)[0] ?? "";
   const [name, setName] = useState(() => firstLine.slice(0, 24).trim());
   const [command, setCommand] = useState(() => props.text.trim());
@@ -231,7 +234,7 @@ export function SaveSnippetDialog(props: { text: string; onClose: () => void }) 
     if (!name.trim() || !command.trim() || busy) return;
     setBusy(true);
     try {
-      await api.snippetSave({ name: name.trim(), command: command.trim(), tags: [] });
+      await api.snippetSave({ name: name.trim(), command: command.trim(), tags: [], hostId: scopeHost || null });
       toast("已加入命令", "success");
       props.onClose();
     } catch (e) {
@@ -287,6 +290,18 @@ export function SaveSnippetDialog(props: { text: string; onClose: () => void }) 
                 save();
               }
             }}
+          />
+        </div>
+        <div className="field">
+          <label>范围</label>
+          <Select
+            value={scopeHost}
+            options={[
+              { value: props.hostId, label: `仅「${hostName}」` },
+              { value: "", label: "所有服务器" },
+            ]}
+            width="100%"
+            onChange={setScopeHost}
           />
         </div>
       </div>

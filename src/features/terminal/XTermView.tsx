@@ -280,6 +280,25 @@ export function XTermView(props: {
         return false;
       }
       if (ev.ctrlKey && !ev.shiftKey && !ev.altKey) {
+        // Ctrl+C with a selection copies; the toast's button drops the selection so the next Ctrl+C interrupts.
+        if (k === "c" && term.hasSelection()) {
+          ev.preventDefault();
+          const unselect = () => {
+            term.clearSelection();
+            term.focus();
+          };
+          void copyText(term.getSelection(), "", { silent: true }).then(
+            (ok) => ok && toast("已复制，未发送 Ctrl+C", "success", { label: "取消选中", run: unselect }),
+          );
+          return false;
+        }
+        // Ctrl+V pastes at the live prompt; scrolled back or in full-screen apps (vim block select) it stays ^V.
+        const b = term.buffer.active;
+        if (k === "v" && b.type === "normal" && b.viewportY >= b.baseY) {
+          ev.preventDefault();
+          paste();
+          return false;
+        }
         if (k === "w") {
           ev.preventDefault();
           L.props.onClose();
@@ -600,6 +619,7 @@ export function XTermView(props: {
         {saveText !== null && (
           <SaveSnippetDialog
             text={saveText}
+            hostId={tab.hostId}
             onClose={() => {
               setSaveText(null);
               focusTerm();

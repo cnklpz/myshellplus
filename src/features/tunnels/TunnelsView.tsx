@@ -1,6 +1,6 @@
 // Tunnel (port forwarding) management page.
 import { Copy, CopyPlus, Network, Pencil, Play, Plus, Power, Square, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Select } from "../../components/Select";
 import { Confirm, Dialog, Empty, Field, Toggle, toast } from "../../components/ui";
 import { api, errMsg, type TunnelDef, type TunnelStatus } from "../../lib/api";
@@ -27,6 +27,10 @@ function mapping(t: TunnelDef, addr: (a: string) => string = (a) => a, st?: Tunn
 
 export function TunnelsView() {
   const hosts = useApp((s) => s.hosts);
+  const panelHostId = useApp((s) => s.panelHostId);
+  /** The host of the current SSH tab, if it still exists. */
+  const curHost = panelHostId && hosts.some((h) => h.id === panelHostId) ? panelHostId : null;
+  const [scope, setScope] = useState<"all" | "host">("host");
   const [list, setList] = useState<TunnelDef[] | null>(null);
   const [status, setStatus] = useState<Record<string, TunnelStatus>>({});
   const [editing, setEditing] = useState<Partial<TunnelDef> | null>(null);
@@ -105,24 +109,32 @@ export function TunnelsView() {
     ];
   };
 
+  const shown = useMemo(() => (list ?? []).filter((t) => scope === "all" || !curHost || t.hostId === curHost), [list, scope, curHost]);
+
   const newTunnel = () =>
-    setEditing({ name: "", hostId: hosts[0]?.id ?? "", kind: "local", bindAddr: "127.0.0.1", bindPort: 8080, targetHost: "127.0.0.1", targetPort: 80, autoStart: false });
+    setEditing({ name: "", hostId: curHost ?? hosts[0]?.id ?? "", kind: "local", bindAddr: "127.0.0.1", bindPort: 8080, targetHost: "127.0.0.1", targetPort: 80, autoStart: false });
 
   return (
     <div className="page">
       <div className="page-header">
         <h1>隧道</h1>
         <span className="spacer" />
+        {curHost && (
+          <div className="seg">
+            <button className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>全部</button>
+            <button className={scope === "host" ? "on" : ""} onClick={() => setScope("host")}>当前</button>
+          </div>
+        )}
         <button className="btn primary sm" onClick={newTunnel}>
           <Plus />
           新建
         </button>
       </div>
       <div className="page-body">
-        {list && list.length === 0 ? (
+        {list && shown.length === 0 ? (
           <Empty
             icon={<Network />}
-            text="还没有隧道"
+            text={list.length === 0 ? "还没有隧道" : "当前服务器没有隧道"}
             action={
               <button className="btn sm" onClick={newTunnel}>
                 <Plus />
@@ -142,7 +154,7 @@ export function TunnelsView() {
               <span>自启</span>
               <span />
             </div>
-            {(list ?? []).map((t) => {
+            {shown.map((t) => {
               const st = status[t.id];
               const running = !!st?.running;
               const dot = st?.error ? "err" : running ? "ok" : "";

@@ -35,7 +35,7 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
   const [list, setList] = useState<Snippet[] | null>(null);
   const [q, setQ] = useState("");
   const [tag, setTag] = useState<string | null>(null);
-  /** all = global + this host; host = only this host's */
+  /** all = global + this host (default); host = only this host's */
   const [scope, setScope] = useState<"all" | "host">("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [editing, setEditing] = useState<Partial<Snippet> | null>(null);
@@ -73,7 +73,7 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
   const shown = useMemo(() => {
     const k = q.trim().toLowerCase();
     return visible
-      .filter((s) => scope === "all" || s.hostId === hostId)
+      .filter((s) => scope === "all" || !hostId || s.hostId === hostId)
       .filter((s) => !tag || s.tags.includes(tag))
       .filter((s) => !k || s.name.toLowerCase().includes(k) || s.command.toLowerCase().includes(k) || s.tags.some((t) => t.toLowerCase().includes(k)))
       .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
@@ -109,6 +109,9 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
     term.focus();
   };
 
+  // New snippets are bound to the active host; the editor can widen the scope.
+  const newSnippet = () => setEditing({ name: "", command: "", tags: [], hostId });
+
   const use = (s: Snippet, mode: Mode) => {
     if (!termBus.active()) {
       toast("请先打开终端", "error");
@@ -129,7 +132,7 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
               <button className={scope === "host" ? "on" : ""} onClick={() => setScope("host")}>本机</button>
             </div>
           )}
-          <button className="icon-btn" title="新建命令" onClick={() => setEditing({ name: "", command: "", tags: [] })}>
+          <button className="icon-btn" title="新建命令" onClick={() => newSnippet()}>
             <Plus />
           </button>
         </div>
@@ -151,7 +154,7 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
         className="sn-body"
         onContextMenu={(e) =>
           menu.open(e, [
-            { label: "新建…", icon: <Plus />, onSelect: () => setEditing({ name: "", command: "", tags: [] }) },
+            { label: "新建…", icon: <Plus />, onSelect: () => newSnippet() },
             { label: "刷新", icon: <RefreshCw />, onSelect: () => void refresh() },
             { label: "显示全部", icon: <Tag />, disabled: tag === null, onSelect: () => setTag(null) },
             ...panelExtra(),
@@ -163,7 +166,7 @@ export function SnippetsPanel({ hostId }: { hostId: string | null }) {
             icon={<ScrollText />}
             text="还没有命令"
             action={
-              <button className="btn sm" onClick={() => setEditing({ name: "", command: "", tags: [] })}>
+              <button className="btn sm" onClick={() => newSnippet()}>
                 <Plus />
                 新建
               </button>
