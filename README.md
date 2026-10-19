@@ -124,11 +124,11 @@ claude mcp add --transport http myshellplus http://127.0.0.1:17890/mcp --header 
 ## 开发
 
 ```bash
-pnpm install
-pnpm tauri dev
+bun install
+bun tauri dev
 ```
 
-打包：`pnpm tauri build`
+打包：`bun tauri build`
 
 ```
 src-tauri/src/

@@ -1,5 +1,5 @@
 # Start an isolated MyShell+ test instance (CDP on :9333), record its PID.
-# Runs a private copy of the exe so `pnpm tauri dev` can still rebuild target\debug\myshellplus.exe.
+# Runs a private copy of the exe so `bun tauri dev` can still rebuild target\debug\myshellplus.exe.
 # MSP_E2E_SLOT=N runs a parallel instance (CDP :9333+N, own data dir / exe / pid file) so two sessions don't collide.
 $slot = if ($env:MSP_E2E_SLOT) { [int]$env:MSP_E2E_SLOT } else { 0 }
 $sfx = if ($slot) { "-$slot" } else { '' }

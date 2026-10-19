@@ -119,5 +119,5 @@ WebView 自带菜单（后退/刷新/检查）任何地方都不能出现。`Glo
 - **模块级状态可订阅**：组件依赖的模块级可变状态（如 sudo 密码缓存）用 `useSyncExternalStore` 暴露，不靠 bump 强制重渲染。
 - **对话框与事件冒泡**：`Dialog` 已 portal 到 body，但 React 事件仍冒泡到所有者。行/卡片上的 pointer、右键、双击处理先判断 `e.currentTarget.contains(e.target as Node)` 或 `e.defaultPrevented`；常驻但隐藏的容器包 `HideDialogs`。
 - **全局监听要清理**：挂到 `window`/`document`/`body` 的监听和类名，在卸载时也要清理（不能只在拖拽结束时清）。
-- 改动后 `npx tsc --noEmit -p .` 必须通过。
+- 改动后 `bunx tsc --noEmit -p .` 必须通过。
 - 仓库里 LF 与 CRLF 文件混存：编辑时保留每个文件原有换行符，不做整体转换。
