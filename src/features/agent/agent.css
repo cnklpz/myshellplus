@@ -18,6 +18,7 @@
 
 /* Code snippet: mono block + small copy button */
 .code-label { font-size: var(--fs-sm); color: var(--fg-1); }
+.code-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .code-box {
   display: flex; align-items: flex-start; gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);

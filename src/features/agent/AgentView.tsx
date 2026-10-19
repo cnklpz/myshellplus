@@ -120,6 +120,21 @@ function McpCard() {
   const json = (t: string) =>
     JSON.stringify({ mcpServers: { myshellplus: { type: "http", url, headers: { Authorization: `Bearer ${t}` } } } }, null, 2);
   const shown = reveal ? saved.token : mask(saved.token);
+  const toml = (t: string) => `[mcp_servers.myshellplus]
+url = "${url}"
+http_headers = { Authorization = "Bearer ${t}" }`;
+
+  const writeCodex = async () => {
+    setBusy(true);
+    try {
+      const path = await api.mcpWriteCodex();
+      toast(`已写入 ${path}，重启 Codex 生效${saved.enabled ? "" : "（MCP 服务未启用）"}`, "success");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const regen = async () => {
     try {
@@ -184,6 +199,13 @@ function McpCard() {
         <CodeBox display={cli(shown)} value={cli(saved.token)} />
         <div className="code-label">JSON 配置</div>
         <CodeBox display={json(shown)} value={json(saved.token)} />
+        <div className="code-head">
+          <span className="code-label">Codex</span>
+          <button className="btn sm" disabled={busy} onClick={writeCodex}>
+            写入配置
+          </button>
+        </div>
+        <CodeBox display={toml(shown)} value={toml(saved.token)} />
       </section>
     </>
   );

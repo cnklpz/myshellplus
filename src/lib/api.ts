@@ -236,6 +236,7 @@ export const api = {
   mcpSettingsGet: () => invoke<{ settings: McpSettings; runningPort: number | null; error?: string | null }>("mcp_settings_get"),
   mcpSettingsSave: (settings: McpSettings) => invoke<void>("mcp_settings_save", { settings }),
   mcpNewToken: () => invoke<string>("mcp_new_token"),
+  mcpWriteCodex: () => invoke<string>("mcp_write_codex"),
   promptList: () => invoke<PromptEvent[]>("prompt_list"),
   promptAnswer: (id: string, value: unknown) => invoke<void>("prompt_answer", { id, value }),
   auditList: (limit?: number) => invoke<AuditEntry[]>("audit_list", { limit }),

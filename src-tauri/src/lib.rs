@@ -1,3 +1,4 @@
+mod agent_config;
 mod ai;
 mod applog;
 mod batch;
@@ -638,6 +639,12 @@ async fn mcp_settings_save(ctx: S<'_>, server: State<'_, Arc<McpServer>>, settin
 }
 
 #[tauri::command]
+async fn mcp_write_codex(ctx: S<'_>) -> CmdResult<String> {
+    let settings = mcp::settings(ctx.inner())?;
+    Ok(agent_config::write_codex(&settings).await?.display().to_string())
+}
+
+#[tauri::command]
 fn mcp_new_token() -> String {
     mcp::new_token()
 }
@@ -927,7 +934,7 @@ pub fn run() {
             tunnel_list, tunnel_save, tunnel_delete, tunnel_start, tunnel_stop, tunnel_status,
             snippet_list, snippet_save, snippet_delete, batch_start,
             predict_local, predict_warm, predict_path, predict_ai, ai_nl2cmd, ai_explain, ai_chat, ai_settings_get, ai_settings_save,
-            mcp_settings_get, mcp_settings_save, mcp_new_token, prompt_list, prompt_answer, audit_list, known_host_list, known_host_delete,
+            mcp_settings_get, mcp_settings_save, mcp_new_token, mcp_write_codex, prompt_list, prompt_answer, audit_list, known_host_list, known_host_delete,
             import_default_path, import_preview, import_apply, export_backup,
             ui_heartbeat, local_read_text, local_write_text,
             log_write, log_events, log_dir, log_export, conn_log_export, conn_diagnose,
