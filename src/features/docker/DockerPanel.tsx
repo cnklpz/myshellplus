@@ -416,8 +416,8 @@ function Containers(p: TabProps) {
               onContextMenu={onMenu}
             >
               <span className={"dot " + (up ? "ok" : paused || c.state === "restarting" ? "warn" : "")} />
-              <span className="dk-name ellipsis">{c.name}</span>
-              <span className="dk-sub ellipsis grow">{c.image}</span>
+              <span className="dk-name ellipsis" title={c.name}>{c.name}</span>
+              <span className="dk-sub ellipsis grow" title={c.image}>{c.image}</span>
               {up && st && (
                 <span className="dk-nums" title="CPU / 内存">
                   <span>{st.cpu}</span>
@@ -431,8 +431,12 @@ function Containers(p: TabProps) {
               <div className="dk-detail">
                 {failed && <ExecOutput result={failed.result} error={failed.error} />}
                 <div className="kv">
+                  <span>名称</span>
+                  <span className="mono selectable">{c.name}</span>
+                  <span>镜像</span>
+                  <span className="mono selectable">{c.image}</span>
                   <span>状态</span>
-                  <span className="ellipsis">{c.status}</span>
+                  <span className="ellipsis" title={c.status}>{c.status}</span>
                   {c.ports && (
                     <>
                       <span>端口</span>
@@ -719,8 +723,8 @@ function Compose(p: TabProps) {
               onContextMenu={onMenu}
             >
               <span className={"dot " + (up ? "ok" : "")} />
-              <span className="dk-name ellipsis">{pr.name}</span>
-              <span className="dk-sub ellipsis grow">{pr.status}</span>
+              <span className="dk-name ellipsis" title={pr.name}>{pr.name}</span>
+              <span className="dk-sub ellipsis grow" title={pr.status}>{pr.status}</span>
               <QuickBtns items={quicks} busy={!!quick.busy[pr.name]} onRun={(q) => quick.run(pr.name, q)} />
               <ChevronRight className="dk-chev" />
             </div>
@@ -728,6 +732,8 @@ function Compose(p: TabProps) {
               <div className="dk-detail">
                 {failed && <ExecOutput result={failed.result} error={failed.error} />}
                 <div className="kv">
+                  <span>名称</span>
+                  <span className="mono selectable">{pr.name}</span>
                   <span>配置</span>
                   <span className="mono ellipsis" title={pr.files}>{pr.files}</span>
                 </div>

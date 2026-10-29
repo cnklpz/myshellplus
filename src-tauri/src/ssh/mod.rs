@@ -204,14 +204,22 @@ impl Conn {
     pub async fn sftp(&self) -> Result<Arc<SftpSession>> {
         let mut g = self.sftp.lock().await;
         if let Some(s) = g.as_ref() {
-            // Probe: a dead SFTP session errors out fast.
-            if s.canonicalize(".").await.is_ok() {
+            // Probe: a dead SFTP session errors out fast; a hung one must not stall every caller.
+            if matches!(tokio::time::timeout(Duration::from_secs(8), s.canonicalize(".")).await, Ok(Ok(_))) {
                 return Ok(s.clone());
             }
         }
         let ch = self.handle.channel_open_session().await?;
         ch.request_subsystem(true, "sftp").await?;
-        let s = Arc::new(SftpSession::new(ch.into_stream()).await.context("SFTP 初始化失败")?);
+        // Defaults (10 s per request, 32 KiB writes) time out downloads on slow links, where 16
+        // queued 256 KiB reads take longer than 10 s to drain, and cap uploads at 512 KiB in flight.
+        let cfg = russh_sftp::client::Config {
+            request_timeout_secs: 120,
+            max_write_packet_len: 64 * 1024,
+            max_concurrent_writes: 32,
+            ..Default::default()
+        };
+        let s = Arc::new(SftpSession::new_with_config(ch.into_stream(), cfg).await.context("SFTP 初始化失败")?);
         *g = Some(s.clone());
         Ok(s)
     }

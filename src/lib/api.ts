@@ -80,9 +80,12 @@ export interface MonitorSnapshot { hostId: string; info: SysInfo | null; history
 
 export interface FileEntry { name: string; path: string; isDir: boolean; isLink: boolean; size: number; mtime: number; perms: number; owner: string }
 export interface DirListing { path: string; entries: FileEntry[] }
+/** What to do when the target name exists: replace (merge folders), skip, or keep both with a numbered name. */
+export type Conflict = "overwrite" | "skip" | "rename";
 export interface TransferInfo {
-  id: string; hostId: string; direction: "upload" | "download"; local: string; remote: string;
-  total: number; done: number; speed: number; state: "running" | "done" | "error" | "cancelled"; error?: string | null;
+  id: string; hostId: string; direction: "upload" | "download"; local: string; remote: string; conflict: Conflict; isDir: boolean;
+  total: number; done: number; speed: number; filesDone: number; filesTotal: number;
+  state: "queued" | "running" | "done" | "skipped" | "error" | "cancelled"; error?: string | null;
 }
 export interface BatchHostResult {
   batchId: string; hostId: string; state: "running" | "done" | "error";
@@ -197,8 +200,14 @@ export const api = {
   sftpRename: (hostId: string, from: string, to: string) => invoke<void>("sftp_rename", { hostId, from, to }),
   sftpRemove: (hostId: string, paths: string[]) => invoke<void>("sftp_remove", { hostId, paths }),
   sftpChmod: (hostId: string, path: string, mode: number) => invoke<void>("sftp_chmod", { hostId, path, mode }),
-  transferStart: (hostId: string, direction: "upload" | "download", local: string, remote: string) =>
-    invoke<string>("transfer_start", { hostId, direction, local, remote }),
+  sftpPaste: (hostId: string, srcs: string[], dest: string, mov: boolean, conflict: Conflict) =>
+    invoke<void>("sftp_paste", { hostId, srcs, dest, mov, conflict }),
+  sftpExtract: (hostId: string, path: string, toFolder: boolean) => invoke<string>("sftp_extract", { hostId, path, toFolder }),
+  sftpCompress: (hostId: string, paths: string[]) => invoke<string>("sftp_compress", { hostId, paths }),
+  localExists: (paths: string[]) => invoke<boolean[]>("local_exists", { paths }),
+  transferStart: (hostId: string, direction: "upload" | "download", local: string, remote: string, conflict: Conflict = "rename") =>
+    invoke<string>("transfer_start", { hostId, direction, local, remote, conflict }),
+  transferRetry: (id: string) => invoke<void>("transfer_retry", { id }),
   transferList: () => invoke<TransferInfo[]>("transfer_list"),
   transferCancel: (id: string) => invoke<void>("transfer_cancel", { id }),
   transferClear: () => invoke<void>("transfer_clear"),

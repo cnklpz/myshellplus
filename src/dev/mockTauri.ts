@@ -104,7 +104,16 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
         error: null,
       };
     case "sftp_list": return { path: args.path || "/root", entries };
-    case "transfer_list": return [];
+    case "transfer_list": {
+      const base = { local: "C:/Users/me/Downloads/access.log", conflict: "rename", isDir: false, speed: 0, filesDone: 0, filesTotal: 1, error: null };
+      return ["h1", "h4"].flatMap((hostId) => [
+        { ...base, id: `${hostId}-t1`, hostId, direction: "upload", local: "D:/site/dist", remote: "/var/www/dist", isDir: true, total: 52428800, done: 19922944, speed: 4718592, filesDone: 128, filesTotal: 342, state: "running" },
+        { ...base, id: `${hostId}-t2`, hostId, direction: "download", remote: "/var/log/nginx/access.log", total: 209715200, done: 31457280, speed: 2097152, state: "running" },
+        { ...base, id: `${hostId}-t3`, hostId, direction: "upload", local: "D:/backup.tar.gz", remote: "/root/backup.tar.gz", total: 1073741824, done: 0, state: "queued" },
+        { ...base, id: `${hostId}-t4`, hostId, direction: "download", local: "C:/Users/me/Downloads/shadow", remote: "/etc/shadow", total: 0, done: 0, state: "error", error: "Permission denied" },
+        { ...base, id: `${hostId}-t5`, hostId, direction: "upload", local: "D:/app.conf", remote: "/root/app.conf", total: 4096, done: 4096, filesDone: 1, state: "done" },
+      ]);
+    }
     case "tunnel_list":
       return [
         { id: "tu1", name: "MySQL", hostId: "h4", kind: "local", bindAddr: "127.0.0.1", bindPort: 13306, targetHost: "10.0.2.5", targetPort: 3306, autoStart: true, updatedAt: now },

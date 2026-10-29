@@ -144,6 +144,7 @@ fn host_save(ctx: S, mut host: Host, password: Option<String>, proxy_password: O
 async fn host_delete(ctx: S<'_>, id: String) -> CmdResult<()> {
     tunnel::stop_host(ctx.inner(), &id).await;
     monitor::stop_host(ctx.inner(), &id);
+    ctx.transfers.cancel_host(&id);
     ctx.indexes.forget(&id);
     ctx.pool.disconnect(&id).await;
     if let Ok(h) = ctx.db.get_host(&id) {
@@ -283,6 +284,7 @@ async fn conn_disconnect(ctx: S<'_>, host_id: String) -> CmdResult<()> {
         term::close(ctx.inner(), &t.id).await?;
     }
     monitor::stop_host(ctx.inner(), &host_id);
+    ctx.transfers.cancel_host(&host_id);
     ctx.pool.disconnect(&host_id).await;
     Ok(())
 }
@@ -467,8 +469,47 @@ async fn sftp_chmod(ctx: S<'_>, host_id: String, path: String, mode: u32) -> Cmd
 }
 
 #[tauri::command]
-fn transfer_start(ctx: S, host_id: String, direction: String, local: String, remote: String) -> String {
-    transfer::start(ctx.inner().clone(), host_id, direction, local, remote)
+async fn sftp_paste(
+    ctx: S<'_>,
+    host_id: String,
+    srcs: Vec<String>,
+    dest: String,
+    mov: bool,
+    conflict: transfer::Conflict,
+) -> CmdResult<()> {
+    Ok(transfer::paste(ctx.inner().clone(), host_id, srcs, dest, mov, conflict).await?)
+}
+
+#[tauri::command]
+async fn sftp_extract(ctx: S<'_>, host_id: String, path: String, to_folder: bool) -> CmdResult<String> {
+    Ok(transfer::extract(ctx.inner().clone(), host_id, path, to_folder).await?)
+}
+
+#[tauri::command]
+async fn sftp_compress(ctx: S<'_>, host_id: String, paths: Vec<String>) -> CmdResult<String> {
+    Ok(transfer::compress(ctx.inner().clone(), host_id, paths).await?)
+}
+
+#[tauri::command]
+async fn local_exists(paths: Vec<String>) -> Vec<bool> {
+    transfer::local_exists(paths).await
+}
+
+#[tauri::command]
+fn transfer_start(
+    ctx: S,
+    host_id: String,
+    direction: String,
+    local: String,
+    remote: String,
+    conflict: Option<transfer::Conflict>,
+) -> String {
+    transfer::start(ctx.inner().clone(), host_id, direction, local, remote, conflict.unwrap_or_default())
+}
+
+#[tauri::command]
+fn transfer_retry(ctx: S, id: String) -> CmdResult<()> {
+    Ok(transfer::retry(ctx.inner().clone(), &id)?)
 }
 
 #[tauri::command]
@@ -930,7 +971,8 @@ pub fn run() {
             term_open, term_attach, term_write, term_resize, term_close, term_list, term_cwd, history_record, history_list, history_delete, exec_run,
             monitor_subscribe, monitor_unsubscribe,
             sftp_list, sftp_read, sftp_write, sftp_mkdir, sftp_rename, sftp_remove, sftp_chmod,
-            transfer_start, transfer_list, transfer_cancel, transfer_clear,
+            sftp_paste, sftp_extract, sftp_compress, local_exists,
+            transfer_start, transfer_retry, transfer_list, transfer_cancel, transfer_clear,
             tunnel_list, tunnel_save, tunnel_delete, tunnel_start, tunnel_stop, tunnel_status,
             snippet_list, snippet_save, snippet_delete, batch_start,
             predict_local, predict_warm, predict_path, predict_ai, ai_nl2cmd, ai_explain, ai_chat, ai_settings_get, ai_settings_save,

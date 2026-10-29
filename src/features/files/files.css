@@ -51,12 +51,41 @@
   color: var(--accent); font-weight: 600;
 }
 
-/* Transfers strip */
-.fp-tx { flex: none; background: var(--bg-0); padding: var(--sp-1) var(--sp-4) var(--sp-2); max-height: 216px; overflow: auto; }
+.fp-list .list-row.cut { opacity: 0.5; }
+
+.fp-conflict-list { display: flex; flex-direction: column; gap: var(--sp-half); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--bg-2); font-size: var(--fs-sm); }
+
+/* Bottom float: running remote operation + transfer card, over the list; the list reserves room. */
+.fp:has(.fp-float > *) .fp-list { padding-bottom: calc(var(--h-md) + var(--sp-8)); }
+.fp-float {
+  position: absolute; left: var(--sp-3); right: var(--sp-3); bottom: var(--sp-3); z-index: 4;
+  display: flex; flex-direction: column; gap: var(--sp-2); max-height: 60%; pointer-events: none;
+}
+.fp-float > * { pointer-events: auto; border-radius: var(--radius-lg); background: var(--bg-2); box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
+.fp-op { flex: none; display: flex; align-items: center; gap: var(--sp-2); height: var(--h-sm); padding: 0 var(--sp-3); font-size: var(--fs-sm); color: var(--fg-1); }
+.fp-op > svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; color: var(--fg-2); }
+
+/* Transfers card: collapsed head with overall progress; expanded list above it. */
+.fp-tx { display: flex; flex-direction: column; min-height: 0; }
+.fp-tx-head {
+  flex: none; position: relative; display: grid; grid-template-columns: var(--icon-sm) minmax(0, 1fr) auto var(--icon-sm);
+  align-items: center; column-gap: var(--sp-2); height: var(--h-md); padding: 0 var(--sp-3);
+  font-size: var(--fs-sm); color: var(--fg-0); cursor: pointer; outline: none; border-radius: var(--radius-lg);
+}
+.fp-tx-head:hover, .fp-tx-head:focus-visible { background: var(--bg-3); }
+.fp-tx.open .fp-tx-head { border-radius: 0 0 var(--radius-lg) var(--radius-lg); box-shadow: inset 0 1px 0 var(--line); }
+.fp-tx-head > svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--fg-2); }
+.fp-tx-head > svg.ok { color: var(--ok); }
+.fp-tx-head > svg.err { color: var(--err); }
+.fp-tx-head .meta { font-size: var(--fs-xs); color: var(--fg-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fp-tx-bar { position: absolute; left: var(--sp-3); right: var(--sp-3); bottom: var(--sp-half); }
+.fp-tx-bar .bar { width: 100%; }
+.fp-tx-bar .bar > i { background: var(--accent); }
+.fp-tx-list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-2) var(--sp-3); }
+
 .fp-tx-item { display: grid; grid-template-columns: var(--icon-sm) minmax(0, 1fr) auto var(--h-xs); align-items: center; column-gap: var(--sp-2); row-gap: var(--sp-half); min-height: var(--h-sm); font-size: var(--fs-sm); }
 .fp-tx-item > svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--fg-2); justify-self: center; }
 .fp-tx-item > svg.ok { color: var(--ok); }
-.fp-tx-item > svg.err { color: var(--err); }
 .fp-tx-item .meta { font-size: var(--fs-xs); color: var(--fg-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fp-tx-item .prog { grid-column: 2 / 4; display: grid; grid-template-columns: minmax(0, 1fr) 40px 88px; align-items: center; column-gap: var(--sp-2); padding-bottom: var(--sp-1); font-size: var(--fs-xs); color: var(--fg-2); font-variant-numeric: tabular-nums; }
 .fp-tx-item .prog.msg { grid-template-columns: minmax(0, 1fr); }

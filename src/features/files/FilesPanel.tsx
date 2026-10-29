@@ -7,11 +7,14 @@ import {
   ArrowRight,
   ArrowUp,
   ArrowUpFromLine,
+  ClipboardCopy,
+  ClipboardPaste,
   Copy,
   Download,
   Eye,
   EyeOff,
   File,
+  FileArchive,
   FileCode,
   FilePlus,
   FileSymlink,
@@ -20,11 +23,15 @@ import {
   FolderPlus,
   FolderSymlink,
   FolderSync,
+  FolderUp,
   Home,
   KeyRound,
   Link2,
+  Loader2,
+  PackageOpen,
   Pencil,
   RefreshCw,
+  Scissors,
   SquareTerminal,
   Trash2,
   Upload,
@@ -33,7 +40,7 @@ import { usePanelItems } from "../side/panelMenu";
 import { useContextMenu } from "../terminal/ContextMenu";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Confirm, Empty, SearchBox, toast } from "../../components/ui";
-import { api, errMsg, type FileEntry, type TransferInfo } from "../../lib/api";
+import { api, errMsg, type Conflict, type FileEntry, type TransferInfo } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 import { onTauriEvent } from "../../lib/events";
 import { baseName, fmtBytes, fmtPerms, fmtTime } from "../../lib/format";
@@ -41,7 +48,7 @@ import { shq } from "../../lib/remote";
 import { lsGet, lsSet } from "../../lib/storage";
 import { termBus } from "../../lib/termBus";
 import { useApp } from "../../store";
-import { ChmodDialog, EditorDialog, NamePrompt } from "./FileDialogs";
+import { ChmodDialog, ConflictDialog, EditorDialog, NamePrompt } from "./FileDialogs";
 import { Transfers } from "./Transfers";
 import "./files.css";
 
@@ -54,11 +61,29 @@ const parentOf = (p: string) => {
   const i = t.lastIndexOf("/");
   return i <= 0 ? "/" : t.slice(0, i);
 };
-/** A remote file name made safe as a local file name: no path separators, no drive colon, no "." / "..". */
+const WIN_RESERVED = /^(con|prn|aux|nul|conin\$|conout\$|com[1-9]|lpt[1-9])$/i;
+/** A remote file name made safe as a local file name (mirrors `local_name` in transfer.rs). */
 const localName = (name: string) => {
-  const n = name.replace(/[\\/:]/g, "_");
-  return /^\.*$/.test(n) ? "_" : n;
+  let n = name.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_");
+  // Windows drops trailing dots/spaces, and device names (nul, con.txt) open the device.
+  const kept = n.replace(/[. ]+$/, "");
+  if (kept.length < n.length) n = kept + "_";
+  return WIN_RESERVED.test(n.split(".")[0].trimEnd()) ? "_" + n : n;
 };
+const localParent = (p: string) => p.replace(/[\\/][^\\/]*$/, "") || p;
+const joinLocal = (dir: string, name: string) => {
+  const sep = dir.includes("\\") ? "\\" : "/";
+  return dir.replace(/[\\/]+$/, "") + sep + name;
+};
+
+/** Formats `sftp_extract` understands (compound suffixes first), mirrored from transfer.rs. */
+const ARCHIVE_EXT = [".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst", ".tar", ".zip", ".jar", ".war", ".7z", ".rar", ".gz", ".bz2", ".xz", ".zst"];
+const archiveStem = (name: string) => {
+  const l = name.toLowerCase();
+  const ext = ARCHIVE_EXT.find((x) => l.endsWith(x) && l.length > x.length);
+  return ext ? name.slice(0, -ext.length) : null;
+};
+const clip16 = (s: string) => (s.length > 16 ? s.slice(0, 15) + "…" : s);
 
 const BINARY_EXT = new Set(
   "png jpg jpeg gif bmp ico webp zip gz tgz bz2 xz 7z rar tar jar war iso img bin exe dll so o a class pdf mp3 mp4 mkv avi mov wav flac woff woff2 ttf otf db sqlite pyc deb rpm".split(" "),
@@ -90,6 +115,7 @@ type Modal =
 let consumedJump = 0;
 
 const FOLLOW_KEY = "files.followTerm";
+const DL_KEY = "files.downloadDir";
 const readFollow = () => lsGet(FOLLOW_KEY) === "1";
 
 export function FilesPanel({ hostId }: { hostId: string }) {
@@ -115,6 +141,12 @@ export function FilesPanel({ hostId }: { hostId: string }) {
   const listRef = useRef<HTMLDivElement>(null);
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const [clip, setClip] = useState<{ mov: boolean; dir: string; paths: string[] } | null>(null);
+  const [op, setOp] = useState<string | null>(null);
+  const [ask, setAsk] = useState<{ names: string[]; resolve: (c: Conflict | null) => void } | null>(null);
+  const askConflict = useCallback((names: string[]) => new Promise<Conflict | null>((resolve) => setAsk({ names, resolve })), []);
   const reqSeq = useRef(0);
 
   const load = useCallback(
@@ -289,13 +321,21 @@ export function FilesPanel({ hostId }: { hostId: string }) {
       list = [entry];
     }
     const one = list.length === 1 ? list[0] : undefined;
+    const stem = one && !one.isDir ? archiveStem(one.name) : null;
     menu.open(e, [
       { label: one?.isDir ? "打开" : "编辑…", icon: one?.isDir ? <FolderOpen /> : <FileCode />, hint: "Enter", disabled: !one, onSelect: () => one && openEntry(one) },
-      { label: "重命名", icon: <Pencil />, hint: "F2", disabled: !one, onSelect: () => one && setRenaming(one.path) },
-      "sep",
-      { label: "复制路径", icon: <Copy />, onSelect: () => copyPath(list) },
-      "sep",
       { label: "下载…", icon: <Download />, onSelect: () => download(list) },
+      "sep",
+      { label: "重命名", icon: <Pencil />, hint: "F2", disabled: !one, onSelect: () => one && setRenaming(one.path) },
+      { label: "剪切", icon: <Scissors />, hint: "Ctrl+X", onSelect: () => toClip(list, true) },
+      { label: "复制", icon: <Copy />, hint: "Ctrl+C", onSelect: () => toClip(list, false) },
+      { label: "粘贴", icon: <ClipboardPaste />, hint: "Ctrl+V", disabled: !clip, onSelect: paste },
+      "sep",
+      { label: "复制路径", icon: <ClipboardCopy />, onSelect: () => copyPath(list) },
+      "sep",
+      one && stem !== null && { label: "解压到此处", icon: <PackageOpen />, disabled: !!op, onSelect: () => extract(one, false) },
+      one && stem !== null && { label: "解压到文件夹", icon: <FolderOpen />, hint: clip16(stem) + "/", disabled: !!op, onSelect: () => extract(one, true) },
+      { label: "压缩", icon: <FileArchive />, hint: "tar.gz", disabled: !!op, onSelect: () => compress(list) },
       { label: "修改权限…", icon: <KeyRound />, onSelect: () => setModal({ kind: "chmod", entries: list }) },
       { label: "终端 cd", icon: <SquareTerminal />, disabled: !termTab || !one, onSelect: () => cdInTerminal(one) },
       "sep",
@@ -307,9 +347,12 @@ export function FilesPanel({ hostId }: { hostId: string }) {
     menu.open(e, [
       { label: "新建文件夹…", icon: <FolderPlus />, onSelect: () => setModal({ kind: "mkdir" }) },
       { label: "新建文件…", icon: <FilePlus />, onSelect: () => setModal({ kind: "touch" }) },
-      { label: "上传文件…", icon: <ArrowUpFromLine />, onSelect: pickUpload },
       "sep",
-      { label: "复制路径", icon: <Copy />, onSelect: () => copyPath([]) },
+      { label: "上传文件…", icon: <ArrowUpFromLine />, onSelect: pickUpload },
+      { label: "上传文件夹…", icon: <FolderUp />, onSelect: pickUploadDir },
+      { label: "粘贴", icon: <ClipboardPaste />, hint: "Ctrl+V", disabled: !clip, onSelect: paste },
+      "sep",
+      { label: "复制路径", icon: <ClipboardCopy />, onSelect: () => copyPath([]) },
       { label: "终端 cd", icon: <SquareTerminal />, disabled: !termTab || !cwd, onSelect: () => cdInTerminal(undefined) },
       { label: "刷新", icon: <RefreshCw />, hint: "F5", onSelect: refresh },
       ...panelExtra(),
@@ -317,21 +360,33 @@ export function FilesPanel({ hostId }: { hostId: string }) {
   };
 
   // ---------- actions ----------
+  /** Ask about the clashing names (if any). Returns the policy, or null when cancelled. */
+  const resolveClash = async (clash: string[]): Promise<Conflict | null> => (clash.length ? askConflict(clash) : "rename");
+
   const download = async (list: FileEntry[]) => {
-    const files = list.filter((e) => !e.isDir);
-    if (files.length < list.length) toast("不支持下载文件夹", "info");
-    if (!files.length) return;
+    if (!list.length) return;
     try {
-      if (files.length === 1) {
-        const local = await saveDialog({ defaultPath: localName(files[0].name) });
+      const last = lsGet(DL_KEY) ?? undefined;
+      if (list.length === 1 && !list[0].isDir) {
+        const name = localName(list[0].name);
+        const local = await saveDialog({ defaultPath: last ? joinLocal(last, name) : name });
         if (!local) return;
-        await api.transferStart(hostId, "download", local, files[0].path);
-      } else {
-        const dir = await openDialog({ directory: true, title: "保存到" });
-        if (!dir || Array.isArray(dir)) return;
-        const sep = dir.includes("\\") ? "\\" : "/";
-        // Remote names may hold "\", ":" or be ".." on a hostile server: never let them leave the chosen folder.
-        for (const f of files) await api.transferStart(hostId, "download", dir.replace(/[\\/]+$/, "") + sep + localName(f.name), f.path);
+        lsSet(DL_KEY, localParent(local));
+        // The save dialog already asked about overwriting.
+        await api.transferStart(hostId, "download", local, list[0].path, "overwrite");
+        return;
+      }
+      const dir = await openDialog({ directory: true, title: "保存到", defaultPath: last });
+      if (!dir || Array.isArray(dir)) return;
+      lsSet(DL_KEY, dir);
+      // Remote names may hold "\", ":" or be ".." on a hostile server: never let them leave the chosen folder.
+      const targets = list.map((f) => ({ f, local: joinLocal(dir, localName(f.name)) }));
+      const exists = await api.localExists(targets.map((t) => t.local));
+      const policy = await resolveClash(targets.filter((_, i) => exists[i]).map((t) => t.f.name));
+      if (!policy) return;
+      for (const [i, t] of targets.entries()) {
+        if (exists[i] && policy === "skip") continue;
+        await api.transferStart(hostId, "download", t.local, t.f.path, exists[i] ? policy : "rename");
       }
     } catch (e) {
       toast(errMsg(e), "error");
@@ -343,12 +398,21 @@ export function FilesPanel({ hostId }: { hostId: string }) {
       const dir = cwdRef.current;
       if (!dir || !paths.length) return;
       try {
-        for (const p of paths) await api.transferStart(hostId, "upload", p, joinPath(dir, baseName(p)));
+        const names = new Set(entriesRef.current.map((e) => e.name));
+        const clash = paths.filter((p) => names.has(baseName(p)));
+        const policy = clash.length ? await askConflict(clash.map(baseName)) : "rename";
+        if (!policy) return;
+        for (const p of paths) {
+          const hit = names.has(baseName(p));
+          if (hit && policy === "skip") continue;
+          // "rename" for names not seen in the listing: something created meanwhile is never clobbered.
+          await api.transferStart(hostId, "upload", p, joinPath(dir, baseName(p)), hit ? policy : "rename");
+        }
       } catch (e) {
         toast(errMsg(e), "error");
       }
     },
-    [hostId],
+    [hostId, askConflict],
   );
 
   const pickUpload = async () => {
@@ -360,6 +424,71 @@ export function FilesPanel({ hostId }: { hostId: string }) {
       toast(errMsg(e), "error");
     }
   };
+
+  const pickUploadDir = async () => {
+    try {
+      const r = await openDialog({ directory: true, multiple: true, title: "上传文件夹" });
+      if (!r) return;
+      uploadPaths(Array.isArray(r) ? r : [r]);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+
+  /** One remote shell operation at a time, shown under the list while it runs. */
+  const runOp = async (label: string, fn: () => Promise<void>) => {
+    if (op) return toast("有操作正在进行", "info");
+    setOp(label);
+    try {
+      await fn();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setOp(null);
+    }
+  };
+
+  const toClip = (list: FileEntry[], mov: boolean) => {
+    if (!list.length) return;
+    setClip({ mov, dir: cwd, paths: list.map((e) => e.path) });
+    toast(`已${mov ? "剪切" : "复制"} ${list.length} 项`, "info");
+  };
+
+  const paste = async () => {
+    const c = clip;
+    const dest = cwdRef.current;
+    if (!c || !dest) return;
+    if (c.mov && c.dir === dest) return;
+    const names = new Set(entriesRef.current.map((e) => e.name));
+    // Copies into the same folder always get numbered names (the backend handles that).
+    const clash = c.dir === dest ? [] : c.paths.filter((p) => names.has(baseName(p)));
+    const policy = await resolveClash(clash.map(baseName));
+    if (!policy) return;
+    const srcs = policy === "skip" ? c.paths.filter((p) => !clash.includes(p)) : c.paths;
+    if (!srcs.length) return;
+    await runOp(`${c.mov ? "移动" : "复制"} ${srcs.length} 项`, async () => {
+      await api.sftpPaste(hostId, srcs, dest, c.mov, policy);
+      if (c.mov) setClip(null);
+      toast(`已${c.mov ? "移动" : "复制"} ${srcs.length} 项`, "success");
+      await refresh();
+    });
+  };
+
+  const extract = (entry: FileEntry, toFolder: boolean) =>
+    runOp(`解压 ${entry.name}`, async () => {
+      const dest = await api.sftpExtract(hostId, entry.path, toFolder);
+      toast("已解压", "success");
+      await refresh();
+      if (toFolder) setSel(new Set([dest]));
+    });
+
+  const compress = (list: FileEntry[]) =>
+    runOp(`压缩 ${list.length === 1 ? list[0].name : `${list.length} 项`}`, async () => {
+      const archive = await api.sftpCompress(hostId, list.map((e) => e.path));
+      toast(`已压缩为 ${baseName(archive)}`, "success");
+      await refresh();
+      setSel(new Set([archive]));
+    });
 
   const copyPath = async (list: FileEntry[]) => {
     await copyText(list.length ? list.map((e) => e.path).join("\n") : cwd, "路径");
@@ -401,7 +530,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
   const onTransferDone = useCallback(
     (t: TransferInfo) => {
       if (t.direction === "upload" && parentOf(t.remote) === cwdRef.current) refresh();
-      if (t.direction === "download") toast(`已下载 ${baseName(t.local)}`, "success");
+      if (t.direction === "download") toast(`已下载 ${baseName(t.local)}${t.isDir ? `（${t.filesDone} 个文件）` : ""}`, "success");
     },
     [refresh],
   );
@@ -450,9 +579,18 @@ export function FilesPanel({ hostId }: { hostId: string }) {
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
       e.preventDefault();
       setSel(new Set(view.map((x) => x.path)));
+    } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "x") && selected.length) {
+      e.preventDefault();
+      toClip(selected, e.key.toLowerCase() === "x");
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && clip) {
+      e.preventDefault();
+      paste();
+    } else if (e.key === "Escape" && clip) {
+      setClip(null);
     } else return;
   };
 
+  const cutSet = useMemo(() => new Set(clip?.mov ? clip.paths : []), [clip]);
   const SortIcon = sort.desc ? ArrowDown : ArrowUp;
   const hiddenCount = showHidden ? 0 : entries.filter((e) => e.name.startsWith(".")).length;
 
@@ -513,7 +651,17 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           <button className="icon-btn" title="新建文件夹" disabled={!cwd} onClick={() => setModal({ kind: "mkdir" })}>
             <FolderPlus />
           </button>
-          <button className="icon-btn" title="上传" disabled={!cwd} onClick={pickUpload}>
+          <button
+            className="icon-btn"
+            title="上传"
+            disabled={!cwd}
+            onClick={(e) =>
+              menu.open(e, [
+                { label: "上传文件…", icon: <ArrowUpFromLine />, onSelect: pickUpload },
+                { label: "上传文件夹…", icon: <FolderUp />, onSelect: pickUploadDir },
+              ])
+            }
+          >
             <Upload />
           </button>
         </div>
@@ -559,7 +707,7 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           view.map((e) => (
             <div
               key={e.path}
-              className={"list-row fp-cols" + (sel.has(e.path) ? " selected" : "")}
+              className={"list-row fp-cols" + (sel.has(e.path) ? " selected" : "") + (cutSet.has(e.path) ? " cut" : "")}
               onClick={(ev) => onRowClick(ev, e)}
               onDoubleClick={() => openEntry(e)}
               onContextMenu={(ev) => onRowMenu(ev, e)}
@@ -578,7 +726,15 @@ export function FilesPanel({ hostId }: { hostId: string }) {
         )}
       </div>
 
-      <Transfers hostId={hostId} onFinished={onTransferDone} />
+      <div className="fp-float">
+        {op && (
+          <div className="fp-op">
+            <Loader2 className="spin" />
+            <span className="ellipsis">{op}…</span>
+          </div>
+        )}
+        <Transfers hostId={hostId} onFinished={onTransferDone} />
+      </div>
 
       {dragOver && <div className="fp-drop">上传到 {baseName(cwd) || "/"}</div>}
 
@@ -605,6 +761,15 @@ export function FilesPanel({ hostId }: { hostId: string }) {
           }
           onCancel={() => setModal(null)}
           onConfirm={() => doDelete(modal.entries)}
+        />
+      )}
+      {ask && (
+        <ConflictDialog
+          names={ask.names}
+          onChoose={(c) => {
+            ask.resolve(c);
+            setAsk(null);
+          }}
         />
       )}
       {(modal?.kind === "mkdir" || modal?.kind === "touch") && (

@@ -205,6 +205,7 @@ pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     if let Some(t) = ctx.transfers.list().into_iter().find(|t| t.id == id)
                         && t.state != "running"
+                        && t.state != "queued"
                     {
                         return Ok::<_, anyhow::Error>(t);
                     }
@@ -212,12 +213,12 @@ pub async fn run(ctx: Arc<Ctx>, server: Arc<McpServer>, spec: String) -> bool {
                 bail!("transfer timeout")
             }
         };
-        let up = wait(transfer::start(ctx.clone(), host_id.clone(), "upload".into(), src.to_string_lossy().into(), remote.clone())).await?;
+        let up = wait(transfer::start(ctx.clone(), host_id.clone(), "upload".into(), src.to_string_lossy().into(), remote.clone(), transfer::Conflict::Overwrite)).await?;
         if up.state != "done" {
             bail!("upload {:?}", up.error);
         }
         let dst = dir.join("down.bin");
-        let down = wait(transfer::start(ctx.clone(), host_id.clone(), "download".into(), dst.to_string_lossy().into(), remote.clone())).await?;
+        let down = wait(transfer::start(ctx.clone(), host_id.clone(), "download".into(), dst.to_string_lossy().into(), remote.clone(), transfer::Conflict::Overwrite)).await?;
         transfer::remove(ctx.clone(), host_id.clone(), vec![remote]).await?;
         if down.state != "done" || std::fs::read(&dst)? != data {
             bail!("download mismatch {:?}", down.error);

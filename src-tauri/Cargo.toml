@@ -1,6 +1,6 @@
 [package]
 name = "myshellplus"
-version = "0.2.1"
+version = "0.2.2"
 description = "MyShell+ SSH client"
 authors = ["myshellplus"]
 edition = "2024"

@@ -1,7 +1,7 @@
-// Dialogs used by the files panel: text editor, chmod, single-name prompt.
+// Dialogs used by the files panel: text editor, chmod, single-name prompt, name conflicts.
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Confirm, Dialog, Field, toast } from "../../components/ui";
-import { api, errMsg, type FileEntry } from "../../lib/api";
+import { api, errMsg, type Conflict, type FileEntry } from "../../lib/api";
 import { fmtBytes, fmtPerms } from "../../lib/format";
 
 export function EditorDialog(props: { hostId: string; path: string; name: string; onClose: () => void; onSaved?: () => void }) {
@@ -230,6 +230,40 @@ export function NamePrompt(props: {
       <Field label={props.label}>
         <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
       </Field>
+    </Dialog>
+  );
+}
+
+const CONFLICT_SHOWN = 6;
+
+/** Asks once what to do with every item whose name already exists at the target. */
+export function ConflictDialog(props: { names: string[]; onChoose: (c: Conflict | null) => void }) {
+  const { names } = props;
+  const rest = names.length - CONFLICT_SHOWN;
+  return (
+    <Dialog
+      title={names.length === 1 ? "已存在同名项" : `${names.length} 项已存在`}
+      width={460}
+      onClose={() => props.onChoose(null)}
+      footer={
+        <>
+          <button className="btn ghost" onClick={() => props.onChoose(null)}>取消</button>
+          <button className="btn" onClick={() => props.onChoose("skip")}>跳过</button>
+          {/* Enter keeps both: the destructive choice must be clicked. */}
+          <button className="btn" autoFocus onClick={() => props.onChoose("rename")}>保留两者</button>
+          <button className="btn primary" onClick={() => props.onChoose("overwrite")}>覆盖</button>
+        </>
+      }
+    >
+      <div className="stack gap-3">
+        <div className="fp-conflict-list mono selectable">
+          {names.slice(0, CONFLICT_SHOWN).map((n) => (
+            <div key={n} className="ellipsis" title={n}>{n}</div>
+          ))}
+          {rest > 0 && <div className="faint">另 {rest} 项</div>}
+        </div>
+        <div className="field-hint">覆盖文件夹会合并内容</div>
+      </div>
     </Dialog>
   );
 }
